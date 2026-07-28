@@ -1,0 +1,34 @@
+# The upstream repositories are flattened into this workspace repository.
+
+# Large datasets, generated views, models, and training artifacts.
+/dataset_views/
+/datasets/
+/data/
+**/outputs/
+**/checkpoints/
+**/eval_logs/
+**/baseline-checkpoints/
+**/omnigibson-data/
+*.ckpt
+*.safetensors
+*.pt
+*.pth
+
+# Local environments and caches.
+/.workspace-git/
+.venv/
+**/.venv
+venv/
+__pycache__/
+*.py[cod]
+.cache/
+.downloads/
+.hfd/
+.hf-shards/
+
+# Runtime logs and temporary files.
+*.log
+*.lock
+wandb/
+.DS_Store
+**/.git.backup/
