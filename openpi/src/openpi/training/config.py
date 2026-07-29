@@ -108,6 +108,8 @@ class DataConfig:
     dataset_root: str | None = None
     # Extra kwargs to pass into the dataset constructor, if using a custom dataset class that requires additional arguments.
     dataset_kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
+    # Optional subset of episode indices to load.
+    episodes_index: List[int] | None = None
 
 
 class GroupFactory(Protocol):
@@ -377,6 +379,8 @@ class LeRobotB1KDataConfig(DataConfigFactory):
     robot_config_name: str = tyro.MISSING
     extra_delta_transform: bool = True
     action_sequence_keys: Sequence[str] = ("action",)
+    dataset_root: str | None = None
+    episodes_index: List[int] | None = None
 
     def _build_delta_mappings(self, robot_config) -> list[tuple[list[int], list[int]]]:
         state_slices = []
@@ -446,13 +450,16 @@ class LeRobotB1KDataConfig(DataConfigFactory):
         model_transforms = ModelTransformFactory()(model_config)
 
         # We return all data transforms for training and inference. No need to change anything here.
+        base_config = self.create_base_config(assets_dirs, model_config)
         return dataclasses.replace(
-            self.create_base_config(assets_dirs, model_config),
+            base_config,
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
             action_sequence_keys=(robot_config.action_key,),
             use_quantile_norm=False,
+            dataset_root=self.dataset_root or base_config.dataset_root,
+            episodes_index=self.episodes_index,
         )
 
 

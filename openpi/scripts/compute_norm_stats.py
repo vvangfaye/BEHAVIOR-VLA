@@ -140,12 +140,14 @@ def main(
     repo_id: str | None = None,
     batch_size: int | None = None,
     num_workers: int | None = None,
+    episodes_index: list[int] | None = None,
 ):
     config = _config.get_config(config_name)
     if dataset_root is not None or repo_id is not None:
         base_config = dataclasses.replace(
             config.data.base_config,
             dataset_root=dataset_root or config.data.base_config.dataset_root,
+            episodes_index=episodes_index or config.data.base_config.episodes_index,
         )
         data_config_factory = dataclasses.replace(
             config.data,
@@ -153,6 +155,9 @@ def main(
             base_config=base_config,
         )
         config = dataclasses.replace(config, data=data_config_factory)
+    elif episodes_index is not None:
+        base_config = dataclasses.replace(config.data.base_config, episodes_index=episodes_index)
+        config = dataclasses.replace(config, data=dataclasses.replace(config.data, base_config=base_config))
     if batch_size is not None:
         config = dataclasses.replace(config, batch_size=batch_size)
     if num_workers is not None:

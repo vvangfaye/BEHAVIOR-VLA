@@ -139,6 +139,8 @@ def create_b1k_dataset(data_config: _config.DataConfig, action_horizon: int) -> 
             repo_id=data_config.repo_id, root=data_config.dataset_root
         )
         dataset_kwargs = {"repo_id": data_config.repo_id, **data_config.dataset_kwargs}
+    if data_config.episodes_index is not None:
+        dataset_kwargs["episodes"] = data_config.episodes_index
     dataset = data_config.data_cls(
         root=data_config.dataset_root,
         delta_timestamps={

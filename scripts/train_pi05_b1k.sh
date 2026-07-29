@@ -22,6 +22,7 @@ fi
 case "$MODE" in
     smoke)
         REPO_ID="${REPO_ID:-behavior-1k/2026-challenge-demos-smoke}"
+        EPISODES_INDEX=(0 1)
         TRAIN_STEPS="${TRAIN_STEPS:-2}"
         BATCH_SIZE="${BATCH_SIZE:-$NUM_GPUS}"
         SAVE_INTERVAL="${SAVE_INTERVAL:-$TRAIN_STEPS}"
@@ -29,6 +30,7 @@ case "$MODE" in
         ;;
     full)
         REPO_ID="${REPO_ID:-behavior-1k/2026-challenge-demos}"
+        EPISODES_INDEX=()
         TRAIN_STEPS="${TRAIN_STEPS:-50000}"
         BATCH_SIZE="${BATCH_SIZE:-64}"
         SAVE_INTERVAL="${SAVE_INTERVAL:-5000}"
@@ -65,12 +67,20 @@ if [[ ! -f "$NORM_FILE" ]]; then
     if [[ -n "$NORM_MAX_FRAMES" ]]; then
         NORM_ARGS+=(--max-frames "$NORM_MAX_FRAMES")
     fi
+    if (( ${#EPISODES_INDEX[@]} )); then
+        NORM_ARGS+=(--episodes-index "${EPISODES_INDEX[@]}")
+    fi
     uv run scripts/compute_norm_stats.py "${NORM_ARGS[@]}"
 fi
 
 echo "Starting π0.5 $MODE run: $EXP_NAME"
 export CUDA_VISIBLE_DEVICES="$CUDA_DEVICES"
 export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.9}"
+TRAIN_DATA_ARGS=()
+if (( ${#EPISODES_INDEX[@]} )); then
+    TRAIN_DATA_ARGS+=(--data.episodes-index "${EPISODES_INDEX[@]}")
+fi
+
 uv run scripts/b1k/train_b1k.py pi05_b1k \
     --exp-name "$EXP_NAME" \
     --overwrite \
@@ -78,8 +88,9 @@ uv run scripts/b1k/train_b1k.py pi05_b1k \
     --num-workers "$NUM_WORKERS" \
     --num-train-steps "$TRAIN_STEPS" \
     --save-interval "$SAVE_INTERVAL" \
-    --wandb-enabled false \
+    --no-wandb-enabled \
     --data.repo-id "$REPO_ID" \
-    --data.base-config.dataset-root "$DATASET_ROOT"
+    --data.dataset-root "$DATASET_ROOT" \
+    "${TRAIN_DATA_ARGS[@]}"
 
 echo "Checkpoint root: $OPENPI_DIR/outputs/checkpoints/pi05_b1k/$EXP_NAME"

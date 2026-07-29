@@ -10,13 +10,16 @@ BASE_MODEL="${BASE_MODEL:-nvidia/GR00T-N1.7-3B}"
 OUTPUT_DIR="${OUTPUT_DIR:-$GROOT_DIR/outputs}"
 EXP_NAME="${EXP_NAME:-gr00t_b1k_${MODE}_$(date +%Y%m%d_%H%M%S)}"
 NUM_WORKERS="${NUM_WORKERS:-8}"
+PERSISTENT_CACHE_ROOT="${PRETRAINED_CACHE_ROOT:-/mnt/afs/visitor34/devhome/cache}"
+HF_HOME="${HF_HOME:-$PERSISTENT_CACHE_ROOT/huggingface}"
+HF_HUB_CACHE="${HF_HUB_CACHE:-$HF_HOME/hub}"
 
 if [[ ! -x "$GROOT_DIR/.venv/bin/python" ]]; then
     echo "GR00T environment not found: $GROOT_DIR/.venv" >&2
     exit 1
 fi
 
-DATASET_PATH="${DATASET_PATH:-$("$CODE_ROOT/scripts/prepare_gr00t_b1k_view.sh")}"
+DATASET_PATH="${DATASET_PATH:-$("$CODE_ROOT/scripts/prepare_gr00t_b1k_view.sh" "$MODE")}"
 
 case "$MODE" in
     smoke)
@@ -53,6 +56,8 @@ source .venv/bin/activate
 export CUDA_VISIBLE_DEVICES="$CUDA_DEVICES"
 export WANDB_MODE="${WANDB_MODE:-disabled}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
+export HF_HOME
+export HF_HUB_CACHE
 
 echo "Starting GR00T $MODE run: $EXP_NAME"
 torchrun --nproc_per_node="$NUM_GPUS" --master_port="${MASTER_PORT:-29500}" \
