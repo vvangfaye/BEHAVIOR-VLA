@@ -213,6 +213,16 @@ The download scripts are idempotent and reuse completed files:
 ./scripts/download/download_groot_n17.sh
 ```
 
+The GR00T download script persists both required Hugging Face repositories:
+`nvidia/GR00T-N1.7-3B` and `nvidia/Cosmos-Reason2-2B`. It and the GR00T
+training script use `http://127.0.0.1:7890` by default. Override or disable it
+with `PROXY_URL`, for example:
+
+```bash
+PROXY_URL=http://127.0.0.1:7890 ./scripts/download/download_groot_n17.sh
+PROXY_URL= ./scripts/train_gr00t_b1k.sh smoke
+```
+
 `train_gr00t_b1k.sh` exports the persistent `HF_HOME` and `HF_HUB_CACHE`
 automatically. `train_pi05_b1k.sh` uses OpenPI's persistent cache under
 `/mnt/afs/visitor34/devhome/cache/openpi`.
@@ -268,6 +278,11 @@ Run full training on a sufficiently large GPU:
 NUM_GPUS=1 CUDA_DEVICES=0 ./scripts/train_pi05_b1k.sh full
 ```
 
+When full normalization statistics do not yet exist, this command samples at
+most 500,000 random frames by default instead of traversing all 211 million
+frames. Override the limit with `NORM_MAX_FRAMES`, for example
+`NORM_MAX_FRAMES=100000`.
+
 ### GR00T N1.7
 
 Environment:
@@ -321,6 +336,43 @@ NUM_GPUS=1 CUDA_DEVICES=0 ./scripts/train_gr00t_b1k.sh full
 
 The released LeRobot v3 dataset is supported directly. Do not run the optional
 in-place v2.1 conversion unless another tool specifically requires it.
+
+### GR00T convergence validation
+
+Use the bounded single-GPU experiment to verify that the VLA training loss
+decreases before committing resources to a full run:
+
+```bash
+cd /mnt/afs/visitor34/code
+MAX_STEPS=1000 NUM_WORKERS=0 ./scripts/run_groot_convergence.sh
+```
+
+This uses batch size 1, one cached shard from the `chunk-000` smoke view,
+BF16, a `1e-4` learning rate, and saves model weights without optimizer state.
+It tests whether the training pipeline can learn from a small data slice; it
+does not measure closed-loop simulator success.
+
+Verified on the current H100 MIG 3g.40GB instance:
+
+```text
+steps:                 1000/1000
+train runtime:         298.0 seconds
+first loss mean:       1.133160
+last loss mean:        1.031260
+relative improvement: 8.99%
+minimum loss:          0.979700
+result:                PASS (threshold: 5%)
+```
+
+The reproducible artifacts are stored in:
+
+```text
+experiments/groot_convergence/gr00t_b1k_convergence_20260730_044942/
+```
+
+They include `config.txt`, `train.log`, `loss.csv`, and `summary.txt`. The
+corresponding model checkpoint is under
+`Isaac-GR00T/outputs/gr00t_b1k_convergence_20260730_044942/`.
 
 ## Proxy
 

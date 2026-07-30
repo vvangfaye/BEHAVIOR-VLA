@@ -1,0 +1,8 @@
+trainer_state=Isaac-GR00T/outputs/gr00t_b1k_convergence_20260730_044942/checkpoint-1000/trainer_state.json
+loss_records=100
+first_window_mean=1.133160
+last_window_mean=1.031260
+relative_improvement=8.99%
+minimum_loss=0.979700
+pass_threshold=5.00%
+convergence_check=PASS

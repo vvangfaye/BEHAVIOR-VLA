@@ -34,7 +34,7 @@ case "$MODE" in
         TRAIN_STEPS="${TRAIN_STEPS:-50000}"
         BATCH_SIZE="${BATCH_SIZE:-64}"
         SAVE_INTERVAL="${SAVE_INTERVAL:-5000}"
-        NORM_MAX_FRAMES="${NORM_MAX_FRAMES:-}"
+        NORM_MAX_FRAMES="${NORM_MAX_FRAMES:-500000}"
         ;;
     *)
         echo "Usage: $0 [smoke|full]" >&2

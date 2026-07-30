@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODEL_ID="${MODEL_ID:-nvidia/GR00T-N1.7-3B}"
 PROXY_URL="${PROXY_URL:-http://127.0.0.1:7890}"
 PERSISTENT_CACHE_ROOT="${PRETRAINED_CACHE_ROOT:-/mnt/afs/visitor34/devhome/cache}"
 HF_HOME="${HF_HOME:-${PERSISTENT_CACHE_ROOT}/huggingface}"
 HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
+MODEL_IDS=(
+    "${GROOT_MODEL_ID:-nvidia/GR00T-N1.7-3B}"
+    "${COSMOS_MODEL_ID:-nvidia/Cosmos-Reason2-2B}"
+)
 
 export http_proxy="${PROXY_URL}"
 export https_proxy="${PROXY_URL}"
@@ -28,15 +31,20 @@ fi
 
 mkdir -p "${HF_HUB_CACHE}"
 
-echo "Model: ${MODEL_ID}"
 echo "Cache: ${HF_HUB_CACHE}"
 echo "Proxy: ${PROXY_URL}"
-echo "Existing cache size:"
-du -sh "${HF_HUB_CACHE}/models--nvidia--GR00T-N1.7-3B" 2>/dev/null || echo "  0 B"
 
-"${HF_CLI}" download \
-    "${MODEL_ID}" \
-    --cache-dir "${HF_HUB_CACHE}"
+for model_id in "${MODEL_IDS[@]}"; do
+    cache_name="models--${model_id//\//--}"
+    echo
+    echo "Model: ${model_id}"
+    echo "Existing cache size:"
+    du -sh "${HF_HUB_CACHE}/${cache_name}" 2>/dev/null || echo "  0 B"
 
-echo "Download completed:"
-du -sh "${HF_HUB_CACHE}/models--nvidia--GR00T-N1.7-3B"
+    "${HF_CLI}" download \
+        "${model_id}" \
+        --cache-dir "${HF_HUB_CACHE}"
+
+    echo "Persistent cache ready:"
+    du -sh "${HF_HUB_CACHE}/${cache_name}"
+done
