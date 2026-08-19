@@ -15,9 +15,9 @@ and [baseline guide](https://behavior.stanford.edu/challenge/baselines.html).
 | Component | Path | Status |
 | --- | --- | --- |
 | OpenPI source | `openpi/` | Installed, `behavior` branch (`0cc8e355`) |
-| π0.5 environment | `/mnt/afs/visitor34/venvs/openpi-behavior` | Ready; linked as `openpi/.venv` |
+| π0.5 environment | `/dev/shm/wangfaye/conda_envs/b1k-pi05` | Ready; linked as `openpi/.venv` |
 | Isaac-GR00T source | `Isaac-GR00T/` | Installed (`ace36d93`) |
-| GR00T environment | `/mnt/afs/visitor34/venvs/isaac-groot` | Ready; linked as `Isaac-GR00T/.venv` |
+| GR00T environment | `/dev/shm/wangfaye/conda_envs/b1k-groot` | Ready; linked as `Isaac-GR00T/.venv` |
 | BEHAVIOR-1K source | `BEHAVIOR-1K/` | v3.9.0 |
 | OmniGibson evaluator | Miniforge `behavior` environment | Installed |
 | Isaac Sim | Evaluator environment | 5.1, installed |
@@ -28,9 +28,13 @@ and [baseline guide](https://behavior.stanford.edu/challenge/baselines.html).
 | π0.5 provided checkpoint | `BEHAVIOR-1K/baseline-checkpoints/extracted/pi05_turn_on_the_radio` | Ready |
 | GR00T provided checkpoint | `BEHAVIOR-1K/baseline-checkpoints/extracted/turning_on_radio_GR00T-checkpoint-150000` | Ready |
 
-The environments have already passed CUDA/import checks from a host context with
-access to the H100 MIG GPU. A sandbox without GPU device passthrough may report
-CUDA error 304 even though the host environment is valid.
+Both training environments were verified on the current host (2x NVIDIA H20,
+driver 580.82.07): `jax 0.5.3` reports a CUDA device, `torch 2.7.1+cu128`
+detects the H20, and the `flash-attn 2.7.4.post1` kernel runs.
+
+The environments live in tmpfs and do not survive a Pod restart. Rebuild them
+with `./scripts/setup_envs.sh`, or restore from the packed tarballs produced by
+`./scripts/pack_envs.sh`.
 
 ## Repository layout
 
@@ -64,17 +68,51 @@ the provided checkpoints. For training a single task, download only that task's
 
 ## Environments
 
+Both training environments are prefix-based conda environments outside the
+repository, symlinked in as `.venv` so the training scripts find them:
+
+| Model | Environment | Python |
+| --- | --- | --- |
+| π0.5 | `/dev/shm/wangfaye/conda_envs/b1k-pi05` | 3.11.13 |
+| GR00T N1.7 | `/dev/shm/wangfaye/conda_envs/b1k-groot` | 3.10.13 |
+
+Build or rebuild them:
+
+```bash
+cd /mnt/workspace/wangfaye/code/BEHAVIOR-Challenge
+./scripts/setup_envs.sh              # both, or pass pi05 / groot
+```
+
+Pack them into relocatable tarballs (`conda-pack`, needs
+`uv tool install conda-pack`):
+
+```bash
+./scripts/pack_envs.sh
+```
+
+Restore a tarball on another host:
+
+```bash
+mkdir -p /dev/shm/wangfaye/conda_envs/b1k-groot
+tar xzf b1k-groot.tar.gz -C /dev/shm/wangfaye/conda_envs/b1k-groot
+source /dev/shm/wangfaye/conda_envs/b1k-groot/bin/activate
+conda-unpack
+```
+
+`openpi` and `gr00t` are installed in editable mode, so a restored environment
+still imports their source from this repository path.
+
 ### π0.5
 
 ```bash
-cd /mnt/afs/visitor34/code/openpi
+cd /mnt/workspace/wangfaye/code/BEHAVIOR-Challenge/openpi
 source .venv/bin/activate
 ```
 
 ### GR00T N1.7
 
 ```bash
-cd /mnt/afs/visitor34/code/Isaac-GR00T
+cd /mnt/workspace/wangfaye/code/BEHAVIOR-Challenge/Isaac-GR00T
 source .venv/bin/activate
 ```
 

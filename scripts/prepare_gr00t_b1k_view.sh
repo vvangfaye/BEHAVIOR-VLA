@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CODE_ROOT="${CODE_ROOT:-/mnt/afs/visitor34/code}"
+CODE_ROOT="${CODE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 GROOT_DIR="${GROOT_DIR:-$CODE_ROOT/Isaac-GR00T}"
-SOURCE_DATASET="${SOURCE_DATASET:-/data/2026-challenge-demos}"
+SOURCE_DATASET="${SOURCE_DATASET:-/var/tmp/behavior-1k/2026-challenge-demos}"
 MODE="${1:-full}"
 
 case "$MODE" in

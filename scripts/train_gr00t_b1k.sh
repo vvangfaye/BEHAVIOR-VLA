@@ -2,7 +2,7 @@
 set -euo pipefail
 
 MODE="${1:-smoke}"
-CODE_ROOT="${CODE_ROOT:-/mnt/afs/visitor34/code}"
+CODE_ROOT="${CODE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 GROOT_DIR="${GROOT_DIR:-$CODE_ROOT/Isaac-GR00T}"
 NUM_GPUS="${NUM_GPUS:-1}"
 CUDA_DEVICES="${CUDA_DEVICES:-0}"
@@ -13,10 +13,11 @@ NUM_WORKERS="${NUM_WORKERS:-8}"
 LEARNING_RATE="${LEARNING_RATE:-1e-4}"
 GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-1}"
 SAVE_ONLY_MODEL="${SAVE_ONLY_MODEL:-false}"
-PERSISTENT_CACHE_ROOT="${PRETRAINED_CACHE_ROOT:-/mnt/afs/visitor34/devhome/cache}"
+SAVE_TOTAL_LIMIT="${SAVE_TOTAL_LIMIT:-2}"
+PERSISTENT_CACHE_ROOT="${PRETRAINED_CACHE_ROOT:-/mnt/workspace/wangfaye/cache}"
 HF_HOME="${HF_HOME:-$PERSISTENT_CACHE_ROOT/huggingface}"
 HF_HUB_CACHE="${HF_HUB_CACHE:-$HF_HOME/hub}"
-PROXY_URL="${PROXY_URL:-http://127.0.0.1:7890}"
+PROXY_URL="${PROXY_URL:-}"
 
 if [[ ! -x "$GROOT_DIR/.venv/bin/python" ]]; then
     echo "GR00T environment not found: $GROOT_DIR/.venv" >&2
@@ -63,6 +64,11 @@ EXTRA_TRAIN_ARGS=()
 if [[ "$SAVE_ONLY_MODEL" == "true" ]]; then
     EXTRA_TRAIN_ARGS+=(--save-only-model)
 fi
+# RESUME=1 continues from the newest complete checkpoint under
+# $OUTPUT_DIR/$EXP_NAME, so EXP_NAME must match the interrupted run.
+if [[ -n "${RESUME:-}" ]]; then
+    EXTRA_TRAIN_ARGS+=(--resume-from-checkpoint)
+fi
 
 cd "$GROOT_DIR"
 source .venv/bin/activate
@@ -71,6 +77,23 @@ export WANDB_MODE="${WANDB_MODE:-disabled}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
 export HF_HOME
 export HF_HUB_CACHE
+# transformers resolves the Cosmos-Reason2-2B tokenizer through
+# _patch_mistral_regex -> is_base_mistral -> HfApi.model_info, a plain requests
+# call that ignores HF_HUB_OFFLINE. huggingface.co is unreachable here, so point
+# it at the mirror; otherwise every rank dies on a connect timeout.
+export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
+# The Cosmos-Reason2-2B backbone repo is gated and unreachable from this node, and
+# setup.py rebuilds the processor from config.model.model_name rather than the value
+# stored in the checkpoint. Point it at the local merged copy when present: being a
+# local directory also stops transformers from probing the hub for the tokenizer.
+GROOT_BACKBONE_PATH="${GROOT_BACKBONE_PATH:-/mnt/workspace/wangfaye/cache/local_models/nvidia/Cosmos-Reason2-2B}"
+if [[ -d "$GROOT_BACKBONE_PATH" ]]; then
+    export GROOT_BACKBONE_PATH
+    echo "Using local VLM backbone: $GROOT_BACKBONE_PATH"
+else
+    echo "Local VLM backbone not found, falling back to $BASE_MODEL default backbone" >&2
+    unset GROOT_BACKBONE_PATH
+fi
 if [[ -n "$PROXY_URL" ]]; then
     export http_proxy="$PROXY_URL"
     export https_proxy="$PROXY_URL"
@@ -93,7 +116,7 @@ torchrun --nproc_per_node="$NUM_GPUS" --master_port="${MASTER_PORT:-29500}" \
     --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS" \
     --output-dir "$OUTPUT_DIR" \
     --save-steps "$SAVE_STEPS" \
-    --save-total-limit 2 \
+    --save-total-limit "$SAVE_TOTAL_LIMIT" \
     --max-steps "$MAX_STEPS" \
     --dataloader-num-workers "$NUM_WORKERS" \
     --episode-sampling-rate "$EPISODE_SAMPLING_RATE" \

@@ -155,6 +155,24 @@ class B1KPolicyWrapper:
         }
         return processed_input, batch_size
 
+    def _select_batch_elements(self, input_batch, indices):
+        """Select batch elements from the nested batch process_input builds.
+
+        Values are per-modality dicts, so selection descends one level: video
+        and state entries are arrays batched on axis 0, while language is a
+        list whose inner list holds one prompt per batch element.
+        """
+        selected = {}
+        for modality, entries in input_batch.items():
+            picked = {}
+            for key, value in entries.items():
+                if isinstance(value, np.ndarray):
+                    picked[key] = value[indices]
+                else:
+                    picked[key] = [[row[i] for i in indices] for row in value]
+            selected[modality] = picked
+        return selected
+
     def act_receeding_horizon(self, input_obs):
         """
         Receeding horizon: execute actions from current plan until exhausted, then replan.
@@ -169,7 +187,7 @@ class B1KPolicyWrapper:
         if needs_inference.any():
             indices_needing_inference = np.where(needs_inference)[0]
             # Create sub-batch for elements that need inference
-            sub_batch = {k: v[indices_needing_inference] for k, v in input_batch.items()}
+            sub_batch = self._select_batch_elements(input_batch, indices_needing_inference)
             target_action, _ = self.policy.get_action(sub_batch)    # (sub_batch_size, T, action_dim)
             target_action = np.concatenate([target_action[key] for key in self.robot["action"].modality_keys], axis=-1)
 

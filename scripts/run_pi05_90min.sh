@@ -4,7 +4,7 @@ set -euo pipefail
 # Bounded π0.5 validation run for one full 80 GB H100.
 # The current 40 GB MIG is too small: π0.5 needs about 50 GiB at batch size 1.
 
-CODE_ROOT="${CODE_ROOT:-/mnt/afs/visitor34/code}"
+CODE_ROOT="${CODE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 OPENPI_DIR="${OPENPI_DIR:-$CODE_ROOT/openpi}"
 NORM_FILE="$OPENPI_DIR/outputs/assets/pi05_b1k/behavior-1k/2026-challenge-demos/norm_stats.json"
 

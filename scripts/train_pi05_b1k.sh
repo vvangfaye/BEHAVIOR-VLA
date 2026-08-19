@@ -2,7 +2,7 @@
 set -euo pipefail
 
 MODE="${1:-smoke}"
-CODE_ROOT="${CODE_ROOT:-/mnt/afs/visitor34/code}"
+CODE_ROOT="${CODE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 OPENPI_DIR="${OPENPI_DIR:-$CODE_ROOT/openpi}"
 DATASET_ROOT="${DATASET_ROOT:-/data/2026-challenge-demos}"
 NUM_GPUS="${NUM_GPUS:-1}"
@@ -54,6 +54,10 @@ fi
 cd "$OPENPI_DIR"
 source .venv/bin/activate
 
+# openpi shards every batch across all devices jax can see, so the device set
+# must be restricted before the norm-stats step too, not just for training.
+export CUDA_VISIBLE_DEVICES="$CUDA_DEVICES"
+
 NORM_FILE="$OPENPI_DIR/outputs/assets/pi05_b1k/$REPO_ID/norm_stats.json"
 if [[ ! -f "$NORM_FILE" ]]; then
     echo "Computing normalization statistics..."
@@ -70,20 +74,29 @@ if [[ ! -f "$NORM_FILE" ]]; then
     if (( ${#EPISODES_INDEX[@]} )); then
         NORM_ARGS+=(--episodes-index "${EPISODES_INDEX[@]}")
     fi
-    uv run scripts/compute_norm_stats.py "${NORM_ARGS[@]}"
+    python scripts/compute_norm_stats.py "${NORM_ARGS[@]}"
 fi
 
 echo "Starting π0.5 $MODE run: $EXP_NAME"
-export CUDA_VISIBLE_DEVICES="$CUDA_DEVICES"
 export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.9}"
 TRAIN_DATA_ARGS=()
 if (( ${#EPISODES_INDEX[@]} )); then
     TRAIN_DATA_ARGS+=(--data.episodes-index "${EPISODES_INDEX[@]}")
 fi
+if [[ -n "${FSDP_DEVICES:-}" ]]; then
+    TRAIN_DATA_ARGS+=(--fsdp-devices "$FSDP_DEVICES")
+fi
 
-uv run scripts/b1k/train_b1k.py pi05_b1k \
+# openpi refuses --resume together with --overwrite. RESUME=1 continues an
+# interrupted run from the last checkpoint in the same EXP_NAME directory.
+if [[ -n "${RESUME:-}" ]]; then
+    TRAIN_DATA_ARGS+=(--resume)
+else
+    TRAIN_DATA_ARGS+=(--overwrite)
+fi
+
+python scripts/b1k/train_b1k.py pi05_b1k \
     --exp-name "$EXP_NAME" \
-    --overwrite \
     --batch-size "$BATCH_SIZE" \
     --num-workers "$NUM_WORKERS" \
     --num-train-steps "$TRAIN_STEPS" \

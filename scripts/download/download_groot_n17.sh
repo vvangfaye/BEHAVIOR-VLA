@@ -1,20 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROXY_URL="${PROXY_URL:-http://127.0.0.1:7890}"
-PERSISTENT_CACHE_ROOT="${PRETRAINED_CACHE_ROOT:-/mnt/afs/visitor34/devhome/cache}"
+PROXY_URL="${PROXY_URL:-}"
+PERSISTENT_CACHE_ROOT="${PRETRAINED_CACHE_ROOT:-/mnt/workspace/wangfaye/cache}"
 HF_HOME="${HF_HOME:-${PERSISTENT_CACHE_ROOT}/huggingface}"
 HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
+# huggingface.co is unreachable from this network; the mirror serves both repos.
+HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 MODEL_IDS=(
     "${GROOT_MODEL_ID:-nvidia/GR00T-N1.7-3B}"
     "${COSMOS_MODEL_ID:-nvidia/Cosmos-Reason2-2B}"
 )
 
-export http_proxy="${PROXY_URL}"
-export https_proxy="${PROXY_URL}"
-export HTTP_PROXY="${PROXY_URL}"
-export HTTPS_PROXY="${PROXY_URL}"
-export NO_PROXY="${NO_PROXY:-127.0.0.1,localhost}"
+# Cosmos-Reason2-2B is gated; the token must belong to an account that accepted
+# the gate at https://huggingface.co/nvidia/Cosmos-Reason2-2B
+if [[ -z "${HF_TOKEN:-}" ]]; then
+    echo "ERROR: HF_TOKEN is required (nvidia/Cosmos-Reason2-2B is gated)." >&2
+    exit 1
+fi
+
+if [[ -n "${PROXY_URL}" ]]; then
+    export http_proxy="${PROXY_URL}"
+    export https_proxy="${PROXY_URL}"
+    export HTTP_PROXY="${PROXY_URL}"
+    export HTTPS_PROXY="${PROXY_URL}"
+    export NO_PROXY="${NO_PROXY:-127.0.0.1,localhost}"
+fi
+export HF_ENDPOINT
+export HF_TOKEN
 export HF_HOME
 export HF_HUB_CACHE
 export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-0}"

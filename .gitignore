@@ -4,6 +4,7 @@
 /dataset_views/
 /datasets/
 /data/
+/eval_results/
 **/outputs/
 **/checkpoints/
 **/eval_logs/

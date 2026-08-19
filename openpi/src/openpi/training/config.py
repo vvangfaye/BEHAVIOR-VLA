@@ -459,7 +459,7 @@ class LeRobotB1KDataConfig(DataConfigFactory):
             action_sequence_keys=(robot_config.action_key,),
             use_quantile_norm=False,
             dataset_root=self.dataset_root or base_config.dataset_root,
-            episodes_index=self.episodes_index,
+            episodes_index=self.episodes_index or base_config.episodes_index,
         )
 
 
@@ -769,7 +769,15 @@ _CONFIGS = [
                 data_cls=_lerobot_compat.LeRobotDataset,
                 dataset_root="/viscam/u/shiyuc/openpi/2026-challenge-demos/b1k/turning_on_radio",
                 prompt_from_task=True,
-                dataset_kwargs={"tolerance_s": 5e-4},
+                # 30 fps videos have 33.3 ms between frames, but torchcodec
+                # occasionally returns a frame whose PTS drifts ~1 ms beyond
+                # the queried timestamp. The previous 5e-4 (0.5 ms) was tight
+                # enough to crash the loader on the first occurrence
+                # (chunk-023/file-004.mp4 at t=8642.1338 vs query 8642.1328,
+                # backtrace: video_utils.FrameTimestampError). 5 ms is still
+                # ~15% of a frame interval, so the loaded frame is always the
+                # intended one, while skipping sync noise in a few episodes.
+                dataset_kwargs={"tolerance_s": 5e-3},
             ),
             robot_config_name="b1k/R1Pro",
         ),

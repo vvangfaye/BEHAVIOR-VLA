@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CODE_ROOT="${CODE_ROOT:-/mnt/afs/visitor34/code}"
+CODE_ROOT="${CODE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 RUN_ID="${RUN_ID:-$(date +%Y%m%d_%H%M%S)}"
 EXP_NAME="${EXP_NAME:-gr00t_b1k_convergence_${RUN_ID}}"
 RESULT_ROOT="${RESULT_ROOT:-$CODE_ROOT/experiments/groot_convergence/$EXP_NAME}"

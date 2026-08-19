@@ -53,6 +53,14 @@ if __name__ == "__main__":
     config.model.backbone_trainable_params_fp32 = True
     config.model.use_relative_action = True
 
+    # setup.py rebuilds the processor with config.model.model_name, overriding whatever
+    # the checkpoint stored. The default is the gated hub id nvidia/Cosmos-Reason2-2B,
+    # unreachable here; a local directory also makes transformers treat the tokenizer as
+    # local and skip its network is_base_mistral() probe.
+    backbone_path = os.environ.get("GROOT_BACKBONE_PATH")
+    if backbone_path:
+        config.model.model_name = backbone_path
+
     config.training.start_from_checkpoint = ft_config.base_model_path
     config.training.optim = "adamw_torch"
     config.training.global_batch_size = ft_config.global_batch_size
