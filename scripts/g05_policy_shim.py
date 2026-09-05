@@ -111,17 +111,40 @@ def extract_images(om: dict, *, head_substr: str, left_substr: str, right_substr
 
 def extract_state(om: dict, *, arm_left_substr="arm_left_pos", arm_right_substr="arm_right_pos",
                   grip_left_substr="gripper_left", grip_right_substr="gripper_right") -> dict:
-    """Map OmniGibson proprioceptive obs to G0.5 grouped state.
+    """Map OmniGibson proprioceptive obs to the b1k state keys G0.5 expects.
 
-    OmniGibson R1 Pro exposes 7-D arm joint positions and 2-D gripper widths.
-    G0.5 expects grouped keys `left_arm(7)`, `right_arm(7)`, `left_gripper(2)`,
-    `right_gripper(2)`, plus `lower_body(7)` (trunk_qpos 4 + base_qvel 3). The
-    OmniGibson evaluator does not publish base velocity or trunk pose, so we
-    zero-pad `lower_body` for zero-shot eval. After fine-tuning on BEHAVIOR-1K
-    data the per-embodiment processor still only uses the arm/gripper fields,
-    so the padding is harmless.
+    OmniGibson publishes the whole 61-D proprio vector under `<robot>::proprio`
+    (the GR00T eval wrapper reads the same array), so slice it with the indices
+    the training data uses. These match both `meta/modality.json` and
+    `GalaxeaVLA/configs/data/b1k.yaml`, which is what keeps eval-time state
+    layout identical to training:
+
+        base_qvel [0:3]  left_arm [3:10]   left_gripper  [24:26]
+        trunk_qpos[53:57] right_arm[28:35]  right_gripper [49:51]
+
+    Widths must equal `raw_shape` (grippers stay 2-D here; the processor's
+    BehaviorPerKeyTransform collapses them to 1-D).
     """
+    # dataset state layout: key -> (start, width)
+    PROPRIO_SLICES = {
+        "base_qvel": (0, 3),
+        "left_arm": (3, 7),
+        "left_gripper": (24, 2),
+        "right_arm": (28, 7),
+        "right_gripper": (49, 2),
+        "trunk_qpos": (53, 4),
+    }
+
+    prop_k = _match_key(om, "proprio")
+    prop = np.asarray(om[prop_k], dtype=np.float32).reshape(-1) if prop_k is not None else None
+
     state = {}
+    if prop is not None and prop.size >= 57:
+        for key, (start, width) in PROPRIO_SLICES.items():
+            state[key] = prop[start : start + width].astype(np.float32)
+        return state
+
+    # Fallback: no flat proprio vector, recover what we can from per-joint keys.
     for out_key, fragment in [
         ("left_arm", arm_left_substr),
         ("right_arm", arm_right_substr),
@@ -130,13 +153,9 @@ def extract_state(om: dict, *, arm_left_substr="arm_left_pos", arm_right_substr=
     ]:
         k = _match_key(om, fragment)
         if k is not None and isinstance(om[k], np.ndarray):
-            state[out_key] = np.asarray(om[k], dtype=np.float32)
-    # Pad missing keys with zeros so the G0.5 processor's shape_meta checks pass.
-    state.setdefault("left_arm", np.zeros(7, dtype=np.float32))
-    state.setdefault("right_arm", np.zeros(7, dtype=np.float32))
-    state.setdefault("left_gripper", np.zeros(2, dtype=np.float32))
-    state.setdefault("right_gripper", np.zeros(2, dtype=np.float32))
-    state.setdefault("lower_body", np.zeros(7, dtype=np.float32))
+            state[out_key] = np.asarray(om[k], dtype=np.float32).reshape(-1)
+    for key, (_, width) in PROPRIO_SLICES.items():
+        state.setdefault(key, np.zeros(width, dtype=np.float32))
     return state
 
 
@@ -158,26 +177,71 @@ def translate_obs_to_g05(om: dict, task_description: str, embodiment: str,
     return out
 
 
-def translate_action_to_omnigibson(g05_action: dict) -> np.ndarray:
-    """Convert G0.5's per-part action dict into a flat ndarray.
+def translate_action_to_omnigibson(g05_action: dict, prev: np.ndarray | None = None,
+                                   state: dict | None = None,
+                                   gripper_max_width: float = 0.1) -> np.ndarray:
+    """Convert G0.5's per-part action dict into the flat 23-D BEHAVIOR-1K action.
 
-    G0.5 returns `{"action": {left_arm: (7,), right_arm: (7,), lower_body: (7,),
-    left_gripper: (1,), right_gripper: (1,)}}` (or a subset when the AR head
-    drops absent parts). We concatenate in the canonical BEHAVIOR-1K order:
-    `left_arm + left_gripper + right_arm + right_gripper + lower_body` = 23D
-    which matches the BEHAVIOR-1K R1 Pro `action_dim=23`. Missing keys are
-    zero-padded so the shape is stable across fine-tuned vs zero-shot models.
+    Raw layout (meta/modality.json, configs/data/b1k.yaml):
+        [base(3) | torso(4) | left_arm(7) | left_gripper(1) | right_arm(7) | right_gripper(1)]
+
+    G0.5 returns `{left_arm(7), left_gripper(1), right_arm(7), right_gripper(1),
+    lower_body(7)}`, where `BehaviorPerKeyTransform.backward` has already
+    reordered `lower_body` to `[base_qvel(3), trunk_qpos(4)]`.
+
+    Absent parts are *held*, not zeroed. The tokenizer drops a part whose value
+    does not change within the chunk, and on this dataset both grippers are
+    constant in 95.3% of 32-step chunks. The gripper command is strictly binary
+    -1/+1 and never 0, so a zero fill would be out-of-distribution and would
+    break grasping; zeroing arm/torso joints would command the zero pose.
+    Precedence per absent part: previous command, else measured state. Only base
+    velocity falls back to zero, where zero legitimately means "stop".
     """
-    canonical_order = ["left_arm", "left_gripper", "right_arm", "right_gripper", "lower_body"]
-    expected_dims = {"left_arm": 7, "left_gripper": 1, "right_arm": 7, "right_gripper": 1, "lower_body": 7}
-    pieces = []
-    for k in canonical_order:
-        if k in g05_action and isinstance(g05_action[k], np.ndarray):
-            arr = np.asarray(g05_action[k], dtype=np.float32).flatten()[: expected_dims[k]]
-            pieces.append(arr)
-        else:
-            pieces.append(np.zeros(expected_dims[k], dtype=np.float32))
-    return np.concatenate(pieces, axis=0)
+    out = np.zeros(23, dtype=np.float32)
+    # destination slice -> (part key, offset within that part)
+    placements = [
+        (slice(0, 3), "lower_body", 0),    # base_qvel
+        (slice(3, 7), "lower_body", 3),    # trunk_qpos
+        (slice(7, 14), "left_arm", 0),
+        (slice(14, 15), "left_gripper", 0),
+        (slice(15, 22), "right_arm", 0),
+        (slice(22, 23), "right_gripper", 0),
+    ]
+    # measured-state fallback, keyed by destination slice start
+    def _from_state(start: int) -> np.ndarray | None:
+        if not state:
+            return None
+        if start == 3:
+            v = state.get("trunk_qpos")
+            return np.asarray(v, dtype=np.float32).reshape(-1)[:4] if v is not None else None
+        if start in (7, 15):
+            v = state.get("left_arm" if start == 7 else "right_arm")
+            return np.asarray(v, dtype=np.float32).reshape(-1)[:7] if v is not None else None
+        if start in (14, 22):
+            v = state.get("left_gripper" if start == 14 else "right_gripper")
+            if v is None:
+                return None
+            width = float(np.asarray(v, dtype=np.float32).sum())
+            # match BehaviorPerKeyTransform: 2*(width/max)-1, then binarize to +-1
+            return np.array([1.0 if 2.0 * (width / gripper_max_width) - 1.0 >= 0.0 else -1.0],
+                            dtype=np.float32)
+        return None
+
+    for dst, key, src_off in placements:
+        width = dst.stop - dst.start
+        part = g05_action.get(key)
+        if part is not None:
+            arr = np.asarray(part, dtype=np.float32).reshape(-1)
+            chunk = arr[src_off : src_off + width]
+            out[dst.start : dst.start + len(chunk)] = chunk
+            continue
+        if prev is not None:
+            out[dst] = np.asarray(prev, dtype=np.float32).reshape(-1)[dst]
+            continue
+        held = _from_state(dst.start)
+        if held is not None:
+            out[dst.start : dst.start + len(held)] = held
+    return out
 
 
 # ──────────── upstream (G0.5) connection manager ────────────
@@ -244,6 +308,9 @@ async def downstream_handler(ws: web.WebSocketResponse, *, upstream: UpstreamCon
         # dict on connect).
         await ws.send_bytes(packb(upstream.metadata))
 
+        # Last 23-D command, used to hold parts the AR head omits this step.
+        prev_action: np.ndarray | None = None
+
         async for msg in ws:
             if msg.type == web.WSMsgType.BINARY:
                 payload = unpackb(msg.data)
@@ -258,6 +325,7 @@ async def downstream_handler(ws: web.WebSocketResponse, *, upstream: UpstreamCon
             # Reset translation: OmniGibson `{"reset": True}` ↔ G0.5 `{"__reset__": True}`
             if isinstance(payload, dict) and payload.get("reset"):
                 await upstream.roundtrip({"__reset__": True})
+                prev_action = None
                 continue
 
             # Translate obs to G0.5 shape.
@@ -285,7 +353,10 @@ async def downstream_handler(ws: web.WebSocketResponse, *, upstream: UpstreamCon
 
             # Translate action back to OmniGibson.
             g05_action = g05_response.get("action", {})
-            action_flat = translate_action_to_omnigibson(g05_action)
+            action_flat = translate_action_to_omnigibson(
+                g05_action, prev=prev_action, state=g05_obs.get("state")
+            )
+            prev_action = action_flat
             await ws.send_bytes(packb({"action": action_flat}))
 
     except websockets.exceptions.ConnectionClosed:

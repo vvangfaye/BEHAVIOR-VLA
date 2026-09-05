@@ -371,6 +371,81 @@ class PromptFromLeRobotTask(DataTransformFn):
 
 
 @dataclasses.dataclass(frozen=True)
+class PromptFromSubtask(DataTransformFn):
+    """Conditions each frame on the CURRENT sub-task instead of the whole-episode task.
+
+    ``segments`` maps episode_index -> (starts, texts): ``starts`` is a sorted array
+    of run start frames and ``texts`` the parallel sub-task strings, built from the
+    compact segment table (scripts/gen_subtask_prompts.py). A frame lookup is an
+    interval search, so the whole mapping is a few hundred thousand entries (not
+    per-frame) and every dataloader worker can hold it. Frames with no matching run
+    fall back to the whole-episode task string in ``tasks`` (keyed by task_index).
+    """
+
+    segments: dict[int, tuple]
+    tasks: dict[int, str]
+    # Fraction of frames that keep the whole-episode task string instead of the
+    # sub-task one. Closed-loop serving binds a single whole-task prompt for the
+    # whole rollout, so training purely on sub-task text would make that prompt
+    # out-of-distribution.
+    whole_task_prob: float = 0.0
+
+    @classmethod
+    def from_parquet(cls, path: str, tasks: dict[int, str], whole_task_prob: float = 0.0) -> "PromptFromSubtask":
+        import collections
+
+        import pyarrow.parquet as pq
+
+        t = pq.read_table(path, columns=["episode_index", "start", "subtask"])
+        ep = t["episode_index"].to_numpy()
+        st = t["start"].to_numpy()
+        tx = t["subtask"].to_pylist()
+        grouped = collections.defaultdict(list)
+        for i in range(len(tx)):
+            grouped[int(ep[i])].append((int(st[i]), tx[i]))
+        segments = {}
+        for e, runs in grouped.items():
+            runs.sort(key=lambda r: r[0])
+            segments[e] = (np.asarray([r[0] for r in runs], dtype=np.int64), [r[1] for r in runs])
+        return cls(segments=segments, tasks=tasks, whole_task_prob=whole_task_prob)
+
+    def _fallback(self, data: DataDict):
+        if "task_index" not in data:
+            return None
+        return self.tasks.get(int(np.asarray(data["task_index"]).reshape(-1)[0]))
+
+    def _use_whole_task(self, ep: int, fr: int) -> bool:
+        # Keyed on the frame rather than an RNG: dataloader workers inherit one
+        # numpy global RNG state, which would correlate the choice across workers.
+        h = (ep * 1000003 + fr) & 0xFFFFFFFF
+        h ^= h >> 16
+        h = (h * 0x45D9F3B) & 0xFFFFFFFF
+        h ^= h >> 16
+        return (h % 1_000_000) < int(self.whole_task_prob * 1_000_000)
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if "episode_index" not in data or "frame_index" not in data:
+            raise ValueError('PromptFromSubtask needs "episode_index" and "frame_index"')
+        ep = int(np.asarray(data["episode_index"]).reshape(-1)[0])
+        fr = int(np.asarray(data["frame_index"]).reshape(-1)[0])
+        prompt = None
+        if self.whole_task_prob > 0.0 and self._use_whole_task(ep, fr):
+            prompt = self._fallback(data)
+        if prompt is None:
+            entry = self.segments.get(ep)
+            if entry is not None:
+                starts, texts = entry
+                j = int(np.searchsorted(starts, fr, side="right")) - 1
+                if 0 <= j < len(texts):
+                    prompt = texts[j]
+        if prompt is None or prompt == "":
+            prompt = self._fallback(data)
+        if prompt is None:
+            raise ValueError(f"No sub-task or fallback prompt for episode={ep} frame={fr}")
+        return {**data, "prompt": prompt}
+
+
+@dataclasses.dataclass(frozen=True)
 class PadStatesAndActions(DataTransformFn):
     """Zero-pads states and actions to the model action dimension."""
 

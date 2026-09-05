@@ -658,6 +658,17 @@ class BehaviorPerKeyTransform(BaseActionStateTransform):
             action["lower_body"] = torch.cat([action["trunk_qpos"], action["base_qvel"]], dim=-1)
             del action["trunk_qpos"]
             del action["base_qvel"]
+            # action_op_mask is built by the action filter on the pre-merge key names,
+            # so it has to follow the rename. Otherwise GroupedPaddingMerger finds no
+            # "lower_body" entry and substitutes zeros — an all-inactive mask — and
+            # dropout_noop_parts then strips <lower_body_i> from every training target.
+            op_mask = batch.get("action_op_mask")
+            if isinstance(op_mask, dict) and "trunk_qpos" in op_mask and "base_qvel" in op_mask:
+                op_mask["lower_body"] = torch.cat(
+                    [op_mask["trunk_qpos"], op_mask["base_qvel"]], dim=-1
+                )
+                del op_mask["trunk_qpos"]
+                del op_mask["base_qvel"]
 
         # 3. Relative: left_arm, right_arm (action -= state_last)
         for k in ("left_arm", "right_arm"):

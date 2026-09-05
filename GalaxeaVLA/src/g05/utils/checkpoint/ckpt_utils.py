@@ -94,12 +94,38 @@ def _apply_action_tokenizer_sidecar(cfg: DictConfig, run_dir: Path) -> bool:
     if not local_at.exists():
         return False
 
+    # model.tokenizer is often the interpolation ${tokenizer}. Updating a key
+    # under it, e.g. model.tokenizer.vq_config.ckpt_dir, makes OmegaConf replace
+    # that interpolation with a fresh dict holding only the updated key, which
+    # drops _target_ and breaks ${model.tokenizer._target_} elsewhere. Expand it
+    # into a full copy of the top-level tokenizer subtree first.
+    if "model" in cfg and "tokenizer" in cfg:
+        raw_model = OmegaConf.to_container(cfg.model, resolve=False)
+        if isinstance(raw_model, dict) and raw_model.get("tokenizer") == "${tokenizer}":
+            cfg.model.tokenizer = OmegaConf.create(
+                OmegaConf.to_container(cfg.tokenizer, resolve=False)
+            )
+
     patched = False
     for key in (
         "tokenizer.vq_config.ckpt_dir",
         "model.tokenizer.vq_config.ckpt_dir",
         "model.model_arch.AT_CONFIG.ckpt_dir",
     ):
+        # model_arch.AT_CONFIG is usually the interpolation
+        # ${model.tokenizer.vq_config}. Once the tokenizer copy above has its
+        # ckpt_dir set, AT_CONFIG follows through the interpolation with the full
+        # vq_config. Updating AT_CONFIG.ckpt_dir directly would instead replace
+        # that interpolation with a dict holding only ckpt_dir — dropping
+        # vqvae_type and breaking tokenizer init. Only touch it when it is a real
+        # dict (legacy exported checkpoints), not an interpolation.
+        if key == "model.model_arch.AT_CONFIG.ckpt_dir":
+            raw_arch = OmegaConf.to_container(
+                OmegaConf.select(cfg, "model.model_arch"), resolve=False
+            )
+            at = raw_arch.get("AT_CONFIG") if isinstance(raw_arch, dict) else None
+            if not isinstance(at, dict):
+                continue
         if OmegaConf.select(cfg, key) is not None:
             OmegaConf.update(cfg, key, str(local_at), merge=False)
             patched = True
@@ -191,6 +217,23 @@ def load_config_from_run_dir(run_dir: Path, ckpt_path: str, overrides: list[str]
     # register_default_resolvers already handles oc.load, eval, split, etc.
     # We only need to add Hydra built-ins (now, oc.env) that aren't in register_default_resolvers.
     _register_hydra_builtin_resolvers()
+
+    # The saved config has `model.tokenizer: ${tokenizer}` while
+    # `model.model_arch.action_tokenizer` is `${model.tokenizer._target_}`.
+    # OmegaConf's interpolation grammar cannot step through a node interpolation
+    # and then take an attribute, so the eager resolve below raises
+    # InterpolationKeyError on `model.tokenizer._target_` — even though selecting
+    # `model.tokenizer` on its own succeeds. Training never tripped over it
+    # because it resolves lazily and never reads that key. Copy the top-level
+    # tokenizer subtree in unresolved, which is exactly what the interpolation
+    # meant, so the path exists as a real subtree.
+    if "tokenizer" in cfg and "model" in cfg:
+        raw_model = OmegaConf.to_container(cfg.model, resolve=False)
+        if isinstance(raw_model, dict) and raw_model.get("tokenizer") == "${tokenizer}":
+            cfg.model.tokenizer = OmegaConf.create(
+                OmegaConf.to_container(cfg.tokenizer, resolve=False)
+            )
+
     cfg = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
     OmegaConf.set_struct(cfg, False)
 

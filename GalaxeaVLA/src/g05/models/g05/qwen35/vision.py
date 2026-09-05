@@ -27,13 +27,17 @@ try:
 
     _flash_attn_varlen = _fa4_varlen
     _flash_attn_backend = "fa4"
-except ImportError:
+except Exception:
+    # Not just ImportError: the flash-attn-4 cute backend pulls in quack, which
+    # references torch.float4_e2m1fn_x2 at import time. That dtype is absent from
+    # torch 2.7.1, so the import raises AttributeError. Fall through to fa2, and
+    # failing that to the SDPA path below, rather than crashing model load.
     try:
         from flash_attn import flash_attn_varlen_func as _fa2_varlen
 
         _flash_attn_varlen = _fa2_varlen
         _flash_attn_backend = "fa2"
-    except ImportError:
+    except Exception:
         pass
 
 _VISION_FLASH_ATTN_WARNED = False

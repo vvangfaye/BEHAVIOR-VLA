@@ -23,6 +23,12 @@ class ServerConfig:
     modality_config_path: str
     """Path to the modality configuration python file"""
 
+    task: str
+    """BEHAVIOR task name, e.g. turning_on_radio"""
+
+    tasks_jsonl: str = "/var/tmp/behavior-1k/2026-challenge-demos/meta/tasks.jsonl"
+    """Dataset meta/tasks.jsonl, the source of the training-time instruction"""
+
     embodiment_tag: EmbodimentTag = EmbodimentTag.NEW_EMBODIMENT
     """Embodiment tag"""
 
@@ -42,8 +48,27 @@ class ServerConfig:
     strict: bool = True
     """Whether to enforce strict input and output validation"""
 
+
+def task_prompt(task_name: str, tasks_jsonl: str) -> str:
+    """The instruction training conditioned on, looked up by task name.
+
+    ``meta/tasks.parquet`` only stores the bare task name, so the loader and this
+    server both read the instruction from the jsonl to stay in sync.
+    """
+    if not os.path.exists(tasks_jsonl):
+        raise FileNotFoundError(f"tasks.jsonl not found: {tasks_jsonl}")
+    with open(tasks_jsonl, "r") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            if record.get("task_name") == task_name:
+                return record["task"]
+    raise KeyError(f"task '{task_name}' not present in {tasks_jsonl}")
+
         
 def main(config: ServerConfig):
+    prompt = task_prompt(config.task, config.tasks_jsonl)
     print("Starting GR00T inference server...")
     print(f"  Embodiment tag: {config.embodiment_tag}")
     print(f"  Model path: {config.model_path}")
@@ -51,6 +76,8 @@ def main(config: ServerConfig):
     print(f"  Device: {config.device}")
     print(f"  Host: {config.host}")
     print(f"  Port: {config.port}")
+    print(f"  Task: {config.task}")
+    print(f"  Prompt: {prompt}")
 
     # check if the model path exists
     if config.model_path.startswith("/") and not os.path.exists(config.model_path):
@@ -79,6 +106,7 @@ def main(config: ServerConfig):
         policy=policy,
         embodiment_tag=config.embodiment_tag,
         modality_config=modality_config,
+        text_prompt=prompt,
         control_mode=config.control_mode,
     )
 

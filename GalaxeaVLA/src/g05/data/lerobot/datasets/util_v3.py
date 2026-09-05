@@ -457,13 +457,43 @@ def write_tasks(tasks: pandas.DataFrame, local_dir: Path) -> None:
 
 def load_tasks(local_dir: Path) -> pandas.DataFrame:
     tasks = pd.read_parquet(local_dir / DEFAULT_TASKS_PATH)
+    # Callers condition on the index label. BEHAVIOR-1K's parquet only stores the
+    # bare task name there, while serving conditions on the instruction from the
+    # legacy jsonl, so prefer that text to keep the served prompt in-distribution.
+    prompts = _natural_language_tasks(local_dir)
+    if prompts:
+        tasks = tasks.rename(index={
+            name: prompts[int(row["task_index"])]
+            for name, row in tasks.iterrows()
+            if int(row["task_index"]) in prompts
+        })
     return tasks
+
+
+def _natural_language_tasks(local_dir: Path) -> dict[int, str]:
+    """task_index -> instruction, only where the jsonl adds text the parquet lacks."""
+    path = local_dir / LEGACY_TASKS_PATH
+    if not path.exists():
+        return {}
+    prompts: dict[int, str] = {}
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        text, name = record.get("task"), record.get("task_name")
+        if "task_index" not in record or not text or name is None or text == name:
+            continue
+        prompts[int(record["task_index"])] = str(text)
+    return prompts
 
 
 def load_annotations(local_dir: Path) -> dict[str, dict[int, str]]:
     annotations = {}
     for key, path in ANNOTATION_PATHS.items():
-        anno = load_jsonlines(local_dir / path)
+        annotation_path = local_dir / path
+        if not annotation_path.exists():
+            continue
+        anno = load_jsonlines(annotation_path)
         anno = {
             item[f"{key}_index"]: item[key]
             for item in sorted(anno, key=lambda x: x[f"{key}_index"])

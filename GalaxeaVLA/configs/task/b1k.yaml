@@ -45,8 +45,11 @@ model:
     ar:
       ce_weight: 1.0
   processor:
-    num_output_cameras: 2
-    num_input_cameras: 2
+    # Must equal the 3 cameras declared in configs/data/b1k.yaml. base_processor
+    # re-splits frames as n_out // len(keys); with 2 outputs over 3 keys that is 0,
+    # which silently produced empty [B, 0, 3, 256, 256] pixel tensors.
+    num_output_cameras: 3
+    num_input_cameras: 3
     camera_size_config:
       exterior:
       - 256
@@ -81,7 +84,9 @@ tokenizer:
     use_group_markers: true
     group_order_shuffle: false
     absent_key_fill_value: -100.0
-    dropout_noop_parts: true
+    # A constant gripper command over a 32-frame chunk is still an actionable
+    # hold-open/hold-closed target, so keep its marker in every B1K label.
+    dropout_noop_parts: false
     # Keep the complete five-group vocabulary used by g05-base so group
     # marker IDs are stable across embodiments.
     parts_meta:

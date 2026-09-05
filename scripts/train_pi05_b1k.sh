@@ -9,6 +9,11 @@ NUM_GPUS="${NUM_GPUS:-1}"
 CUDA_DEVICES="${CUDA_DEVICES:-0}"
 EXP_NAME="${EXP_NAME:-pi05_b1k_${MODE}_$(date +%Y%m%d_%H%M%S)}"
 NUM_WORKERS="${NUM_WORKERS:-8}"
+# Optional (default off = unchanged behavior):
+#   SUBTASK_PROMPTS=<segment parquet>  -> condition on the current sub-task
+#   FRAME_STRIDE=<int>                 -> subsample training frames by this stride
+SUBTASK_PROMPTS="${SUBTASK_PROMPTS:-}"
+FRAME_STRIDE="${FRAME_STRIDE:-1}"
 
 if [[ ! -f "$DATASET_ROOT/meta/info.json" ]]; then
     echo "Dataset not found or incomplete: $DATASET_ROOT/meta/info.json" >&2
@@ -79,12 +84,35 @@ fi
 
 echo "Starting π0.5 $MODE run: $EXP_NAME"
 export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.9}"
+# per-step loss goes through tqdm's pbar.write -> stdout, which block-buffers
+# when redirected to a log file and would hide loss for ~12k steps at a time.
+export PYTHONUNBUFFERED=1
 TRAIN_DATA_ARGS=()
 if (( ${#EPISODES_INDEX[@]} )); then
     TRAIN_DATA_ARGS+=(--data.episodes-index "${EPISODES_INDEX[@]}")
 fi
 if [[ -n "${FSDP_DEVICES:-}" ]]; then
     TRAIN_DATA_ARGS+=(--fsdp-devices "$FSDP_DEVICES")
+fi
+if [[ -n "$SUBTASK_PROMPTS" ]]; then
+    TRAIN_DATA_ARGS+=(--data.subtask-prompts-path "$SUBTASK_PROMPTS")
+    TRAIN_DATA_ARGS+=(--data.subtask-whole-task-prob "${WHOLE_TASK_PROB:-0.15}")
+fi
+if (( FRAME_STRIDE > 1 )); then
+    TRAIN_DATA_ARGS+=(--data.frame-stride "$FRAME_STRIDE")
+fi
+
+# CosineDecaySchedule defaults to decay_steps=30_000 regardless of
+# --num-train-steps, so a longer run silently spends everything past 30k at the
+# 2.5e-6 floor. Set LR_DECAY_STEPS to the real run length to stretch the cosine.
+if [[ -n "${LR_DECAY_STEPS:-}" ]]; then
+    TRAIN_DATA_ARGS+=(--lr-schedule.decay-steps "$LR_DECAY_STEPS")
+fi
+if [[ -n "${LR_PEAK:-}" ]]; then
+    TRAIN_DATA_ARGS+=(--lr-schedule.peak-lr "$LR_PEAK")
+fi
+if [[ -n "${LR_FLOOR:-}" ]]; then
+    TRAIN_DATA_ARGS+=(--lr-schedule.decay-lr "$LR_FLOOR")
 fi
 
 # openpi refuses --resume together with --overwrite. RESUME=1 continues an

@@ -38,7 +38,9 @@ OMNIGIBSON_DATA_PATH="${OMNIGIBSON_DATA_PATH:-$REPO_ROOT/BEHAVIOR-1K/omnigibson-
 SERVER_GPU="${SERVER_GPU:-0}"
 EVAL_GPU="${EVAL_GPU:-1}"
 ACTION_STEPS="${ACTION_STEPS:-16}"
-EMBODIMENT="${EMBODIMENT:-galaxea_r1pro}"
+# b1k-finetuned checkpoints register their processor and norm stats under the
+# behavior_1k embodiment; use galaxea_r1pro only for zero-shot base-checkpoint runs.
+EMBODIMENT="${EMBODIMENT:-behavior_1k}"
 
 TASKS=("$@")
 if [[ ${#TASKS[@]} -eq 0 ]]; then
@@ -116,7 +118,7 @@ start_shim() {
     python scripts/g05_policy_shim.py \
         --listen-host 127.0.0.1 --listen-port "$PORT" \
         --upstream-host 127.0.0.1 --upstream-port "$UPSTREAM_PORT" \
-        --task "$TASKS[0]" \
+        --task "${TASKS[0]}" \
         --embodiment "$EMBODIMENT" \
         >> "$SHIM_LOG" 2>&1 &
     SHIM_PID=$!

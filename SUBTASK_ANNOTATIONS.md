@@ -102,3 +102,73 @@
 
 > 动机：当前把 ~5 分钟、约 10 个子步骤的长程任务当成"整任务→扁平动作"，模型分不清当前处于哪一步，
 > 与评估中观察到的"乱走 + 手臂几乎不动"相互印证（见 `EVAL_FINDINGS.md` / `EVAL_SUMMARY.md`）。
+
+---
+
+## 已实现的管线（2026-08-20）
+
+### 对齐规则（已用真实数据验证）
+
+标注文件与数据集 episode **没有显式 id 关联**，需按"任务内排序配对"建立：
+
+- 同一任务下，标注文件按文件名数字升序（编号是原始采样 id，如 10..3000），
+  数据集 episode 按 `episode_index` 升序，**按序一一对应**。
+- 证据：`corr(task_duration, length) = 0.98`（随机配对仅 0.09），多任务复核 corr 0.98–1.00。
+- 数据集 episode 与标注**同起点**（frame 0 == frame 0），且只会更长：
+  `length - task_duration >= 0` 在 20000 集中成立 19999 例，多出的是尾部 settle 帧。
+- 因此标注的 `frame_duration [start,end)` 可**直接当作数据集局部帧区间**；
+  `task_duration` 之后的尾帧继承最后一个技能。
+
+### 生成脚本与产物
+
+```bash
+/dev/shm/wangfaye/conda_envs/b1k-groot/bin/python scripts/gen_subtask_prompts.py \
+    --dataset /var/tmp/behavior-1k/2026-challenge-demos
+```
+
+产物 `meta/subtask_segments.parquet`，**行程编码（RLE）的段表**：
+`episode_index | start | end(不含) | subtask`
+
+| 指标 | 值 |
+| --- | --- |
+| 覆盖 | **20000/20000 episode**，100/100 任务 |
+| 段数 | 388,409（平均 19.4 段/episode） |
+| 文件大小 | **1.95 MB** |
+| 不同子任务串 | 1615 |
+| 尾部填充帧占比 | 1.1%（2,413,661 / 210,916,774） |
+
+**为什么不用逐帧表**：逐帧版是 2.1 亿行、**402 MB**，`from_parquet` 建表要 **355 秒**且吃数十 GB
+内存——多 dataloader worker 会各建一份直接 OOM。段表版 **1.95 MB / 1.04 秒**（约 340 倍提速），
+每个 worker 都能轻松持有。
+
+### openpi 侧接入
+
+- 新增 `openpi/src/openpi/transforms.py::PromptFromSubtask`：持有
+  `episode_index -> (starts 数组, texts 列表)`，用 `np.searchsorted` 做区间查找；
+  未命中时**回退整任务 prompt**，训练不会因个别未标注帧崩掉。
+- `create_b1k_dataset` 在 `subtask_prompts_path` 有值时用它替换 `PromptFromLeRobotTask`。
+- 配置与 CLI 开关（已验证存在）：
+  ```
+  --data.subtask-prompts-path {None}|STR     # 段表路径，默认 None = 保持原整任务 prompt
+  --data.frame-stride INT                    # 帧步长采样，默认 1
+  ```
+
+### 边界验证（episode 0，对应标注 `task-0000/episode_00000010.json`）
+
+| 帧 | 查表结果 |
+| --- | --- |
+| 0, 264 | `move to radio` |
+| 265, 1161 | `pick up from radio to coffee table koagbh` |
+| 1162 | `press radio` |
+| 1434, 1955 | `place on radio to coffee table koagbh` |
+
+与标注段 `[0,265) [265,1162) [1162,1434) [1434,1776)` 逐帧吻合；1776→1955 为尾部继承。
+未知 episode 正确回退到整任务 prompt。
+
+### 待办
+
+1. **GR00T 侧注入**：把段表接到 `annotation.human.task_description`（逐帧改为当前子任务）。
+2. **闭环推理仍缺高层**：`openpi` 中搜不到任何 sub-task/high-level 机制，所以闭环时没有东西
+   产出"当前该做哪个子任务"。需要二选一：训练一个高层子任务预测头，或先用规则/脚本化子任务序列。
+3. 建议先做**开环验证**：用 GT 子任务喂入，量 `left_arm/right_arm` 的开环 L1 能否跑赢 `hold`，
+   再决定是否投入高层头的训练。

@@ -52,6 +52,10 @@ LOG_FILE="${LOG_FILE:-/dev/shm/wangfaye/logs/g05_finetune.log}"
 # shellcheck disable=SC1091
 source "$GALAXEA_VENV/bin/activate"
 
+# torchrun gets a relative entry point and Hydra resolves configs/ relative to
+# it, so both only work from inside the GalaxeaVLA repo.
+cd "$GALAXEA_REPO"
+
 # Avoid TF / CUDA noise.
 export TRANSFORMERS_NO_ADVISORY_WARNINGS=1
 export TOKENIZERS_PARALLELISM=false
@@ -65,8 +69,9 @@ echo "  num_gpus=$NUM_GPUS batch_size=$BATCH_SIZE max_steps=$MAX_STEPS save_inte
 echo "  output_dir=$G05_OUTPUT_DIR"
 echo "  log_file=$LOG_FILE"
 
-# Override the b1k config defaults for our full run: 50k steps, 8-GPU FSDP-friendly
-# batch, 2k-step save interval (50 saves × ~6 GB ≈ 300 GB disk, fits in budget).
+# Override the b1k config defaults for our full run. finetune.py uses plain DDP
+# (no FSDP path exists), so effective batch = batch_size x grad_accum x world_size.
+# Checkpoint cadence is the top-level `checkpointing_steps`, not trainer.save_interval.
 exec torchrun \
     --standalone --nnodes=1 --nproc_per_node="$NUM_GPUS" \
     scripts/finetune.py \
@@ -74,10 +79,7 @@ exec torchrun \
     "model.max_steps=$MAX_STEPS" \
     "model.batch_size=$BATCH_SIZE" \
     "model.num_workers=$NUM_WORKERS" \
-    "+trainer.save_interval=$SAVE_INTERVAL" \
+    "checkpointing_steps=$SAVE_INTERVAL" \
     "logger.mode=offline" \
     "logger.workspace=g05_b1k" \
-    "+use_fsdp=true" \
-    "+fsdp_sharding_strategy=full_shard" \
-    "+fsdp_reshard_after_forward=true" \
     >> "$LOG_FILE" 2>&1

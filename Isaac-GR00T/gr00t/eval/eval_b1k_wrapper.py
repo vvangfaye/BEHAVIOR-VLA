@@ -67,7 +67,7 @@ class B1KPolicyWrapper:
         policy: BasePolicy,
         embodiment_tag: EmbodimentTag,
         modality_config: dict,
-        text_prompt: str = "pick up the object and place it on the table",
+        text_prompt: str,
         control_mode: str = "temporal_ensemble",
         obs_size: tuple[int, int] = (224, 224),
         action_horizon: int = 10,

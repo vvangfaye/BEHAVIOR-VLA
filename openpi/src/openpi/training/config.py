@@ -110,6 +110,14 @@ class DataConfig:
     dataset_kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
     # Optional subset of episode indices to load.
     episodes_index: List[int] | None = None
+    # Subsample training frames by this global stride (B1K). 1 = use every frame.
+    frame_stride: int = 1
+    # Optional path to a sub-task segment parquet (episode_index, start, end, subtask),
+    # run-length-encoded. When set, B1K conditions on the current sub-task instead of task.
+    subtask_prompts_path: str | None = None
+    # Fraction of frames that keep the whole-episode task prompt when sub-task
+    # conditioning is on, so the closed-loop server's fixed prompt stays in-distribution.
+    subtask_whole_task_prob: float = 0.0
 
 
 class GroupFactory(Protocol):
@@ -381,6 +389,9 @@ class LeRobotB1KDataConfig(DataConfigFactory):
     action_sequence_keys: Sequence[str] = ("action",)
     dataset_root: str | None = None
     episodes_index: List[int] | None = None
+    frame_stride: int = 1
+    subtask_prompts_path: str | None = None
+    subtask_whole_task_prob: float = 0.0
 
     def _build_delta_mappings(self, robot_config) -> list[tuple[list[int], list[int]]]:
         state_slices = []
@@ -460,6 +471,9 @@ class LeRobotB1KDataConfig(DataConfigFactory):
             use_quantile_norm=False,
             dataset_root=self.dataset_root or base_config.dataset_root,
             episodes_index=self.episodes_index or base_config.episodes_index,
+            frame_stride=self.frame_stride,
+            subtask_prompts_path=self.subtask_prompts_path,
+            subtask_whole_task_prob=self.subtask_whole_task_prob,
         )
 
 

@@ -62,6 +62,32 @@ class TransformedDataset(Dataset[T_co]):
         return len(self._dataset)
 
 
+class StridedDataset(Dataset[T_co]):
+    """Exposes every ``stride``-th frame of an indexable dataset.
+
+    B1K is 30 fps video with a multi-step action chunk, so adjacent frames carry
+    near-identical inputs and heavily overlapping action targets. Subsampling by
+    a fixed global stride lets a training budget cover ~``stride`` times more
+    distinct frames per pass. The stride is global over the concatenated
+    episodes (unbiased); episode-tail action padding is already handled upstream
+    by ``delta_timestamps``.
+    """
+
+    def __init__(self, dataset: Dataset, stride: int, offset: int = 0):
+        if stride < 1:
+            raise ValueError(f"stride must be >= 1, got {stride}")
+        self._dataset = dataset
+        self._stride = int(stride)
+        self._offset = int(offset)
+        self._len = max(0, (len(dataset) - self._offset + self._stride - 1) // self._stride)
+
+    def __getitem__(self, index: SupportsIndex) -> T_co:
+        return self._dataset[self._offset + int(index) * self._stride]
+
+    def __len__(self) -> int:
+        return self._len
+
+
 class IterableTransformedDataset(IterableDataset[T_co]):
     def __init__(
         self,
@@ -150,9 +176,26 @@ def create_b1k_dataset(data_config: _config.DataConfig, action_horizon: int) -> 
     )
 
     if data_config.prompt_from_task:
-        dataset = TransformedDataset(
-            dataset, [_transforms.PromptFromLeRobotTask(_lerobot_compat.tasks_from_metadata(dataset_meta))]
+        meta_root = (
+            os.path.join(data_config.dataset_root, data_config.repo_id[0])
+            if isinstance(data_config.repo_id, list)
+            else data_config.dataset_root
         )
+        tasks = _lerobot_compat.b1k_task_prompts(
+            meta_root, _lerobot_compat.tasks_from_metadata(dataset_meta)
+        )
+        if data_config.subtask_prompts_path:
+            prompt_tf = _transforms.PromptFromSubtask.from_parquet(
+                data_config.subtask_prompts_path, tasks, data_config.subtask_whole_task_prob
+            )
+        else:
+            prompt_tf = _transforms.PromptFromLeRobotTask(tasks)
+        dataset = TransformedDataset(dataset, [prompt_tf])
+
+    if data_config.frame_stride < 1:
+        raise ValueError(f"frame_stride must be >= 1, got {data_config.frame_stride}")
+    if data_config.frame_stride > 1:
+        dataset = StridedDataset(dataset, data_config.frame_stride)
 
     return dataset
 

@@ -283,7 +283,32 @@ class LeRobotEpisodeLoader:
         tasks_df = pq.read_table(meta_dir / LEROBOT_V30_TASKS_FILENAME).to_pandas()
         if tasks_df.index.name == "task":
             tasks_df = tasks_df.reset_index()
-        return {int(row["task_index"]): str(row["task"]) for _, row in tasks_df.iterrows()}
+        tasks_map = {int(row["task_index"]): str(row["task"]) for _, row in tasks_df.iterrows()}
+        return {**tasks_map, **self._natural_language_tasks(meta_dir)}
+
+    def _natural_language_tasks(self, meta_dir: Path) -> dict[int, str]:
+        """Task instructions from the legacy jsonl, when it carries richer text.
+
+        BEHAVIOR-1K's parquet holds a bare identifier (``turning_on_radio``) while
+        its jsonl holds both that identifier (``task_name``) and the instruction the
+        policy is served with (``task``); training on the identifier would leave the
+        served prompt out-of-distribution.
+        """
+        tasks_path = meta_dir / LEROBOT_TASKS_FILENAME
+        if not tasks_path.exists():
+            return {}
+        prompts: dict[int, str] = {}
+        with open(tasks_path, "r") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                text = record.get("task")
+                name = record.get("task_name")
+                if "task_index" not in record or not text or name is None or text == name:
+                    continue
+                prompts[int(record["task_index"])] = str(text)
+        return prompts
 
     def _init_v30_caches(self, data_cache_size: int | None, video_cache_size: int | None) -> None:
         """Set up the v3.0 per-file parquet table cache and video decoder pool.

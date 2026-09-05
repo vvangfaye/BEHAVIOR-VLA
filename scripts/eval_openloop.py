@@ -122,6 +122,11 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument("--pi05-ckpt", default="/mnt/workspace/wangfaye/code/BEHAVIOR-Challenge/openpi/"
                                            "outputs/checkpoints/pi05_b1k/pi05_b1k_full_20260803_162620/49999")
+    ap.add_argument("--subtask-prompts", default="",
+                    help="sub-task segment parquet. Feeds the ground-truth sub-task of the scored "
+                         "frame, i.e. teacher forcing, so numbers come out optimistic. Leave unset "
+                         "to measure deployment, where serving binds one whole-episode instruction "
+                         "and no sub-task planner exists.")
     ap.add_argument("--groot-ckpt", default="")
     ap.add_argument("--limit", type=int, default=0, help="stop after N samples (smoke test)")
     ap.add_argument("--horizon", type=int, default=EVAL_HORIZON,
@@ -254,7 +259,12 @@ def build_pi05(args):
     cfg = _config.get_config("pi05_b1k")
     base = dataclasses.replace(cfg.data.base_config, dataset_root=DATASET)
     cfg = dataclasses.replace(
-        cfg, data=dataclasses.replace(cfg.data, repo_id="behavior-1k/2026-challenge-demos", base_config=base)
+        cfg,
+        data=dataclasses.replace(
+            cfg.data, repo_id="behavior-1k/2026-challenge-demos", base_config=base, frame_stride=1,
+            subtask_prompts_path=(args.subtask_prompts or None),
+            subtask_whole_task_prob=0.0,
+        ),
     )
     dc = cfg.data.create(cfg.assets_dirs, cfg.model)
     ds = _dl.create_b1k_dataset(dc, cfg.model.action_horizon)

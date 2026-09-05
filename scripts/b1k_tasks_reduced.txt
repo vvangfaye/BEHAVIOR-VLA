@@ -1,0 +1,129 @@
+# BEHAVIOR-1K reduced closed-loop eval set.
+#
+# Columns: task <TAB> instances <TAB> est_steps
+#
+# Budget: 160 rollouts instead of 500. Derived from three full 500-rollout
+# sweeps (pi05 50k, pi05 270k, GROOT N1.7 ~1450 rollouts total):
+#   - Only 20 of the 100 tasks ever produced a nonzero q_score. Those get 4
+#     instances each, which is where nearly all the discriminative power sits.
+#   - The other 80 tasks were at the floor on every model and instance. They
+#     get 1 instance each, as a canary for newly unlocked capability.
+#   - instance_id carried no signal (nonzero rate 2.1-4.1%, within noise), so
+#     which instances are used does not matter, only how many.
+#
+# est_steps = instances * max_steps(task), used by eval_sweep.sh to balance
+# workers. max_steps is task-determined (1.5x mean human demo length) and was
+# read back from the pi05 270k sweep.
+#
+# Validation: replaying the three full sweeps through this subset preserves the
+# ranking and most of the signal at a third of the cost.
+#
+#              full set                  this set
+#              n    mean    nonzero      n    mean    nonzero
+#   pi05 50k   475  0.0045  14           159  0.0119  12
+#   pi05 270k  488  0.0145  31           159  0.0333  23
+#   GROOT      491  0.0008   3           159  0.0025   3
+#
+# Mean q_score is inflated about 2.3x here because the dropped rollouts were all
+# at the floor. Compare reduced-set numbers only against other reduced-set
+# numbers; the full-set means above are not interchangeable with them.
+assembling_gift_baskets	1	39091
+attach_a_camera_to_a_tripod	1	5868
+boxing_books_up_for_storage	1	36342
+boxing_food_after_dinner	1	10047
+bringing_in_wood	1	20304
+bringing_paper_to_recycling	1	16822
+bringing_water	1	14158
+can_meat	1	17771
+canning_food	1	34464
+carrying_in_groceries	1	21413
+carrying_out_garden_furniture	1	16589
+chop_an_onion	1	9600
+chopping_wood	1	16128
+clean_a_keyboard	1	5815
+clean_a_patio	1	18107
+clean_a_trumpet	1	7961
+clean_boxing_gloves	1	12354
+clean_up_broken_glass	1	13038
+clean_up_your_desk	4	128508
+clean_your_rusty_garden_tools	1	22737
+cleaning_up_branches_and_twigs	1	18791
+cleaning_up_plates_and_food	1	20545
+clearing_food_from_table_into_fridge	1	19603
+collecting_aluminum_cans	4	61220
+collecting_childrens_toys	4	115120
+composting_waste	1	5458
+cook_a_brisket	1	11003
+cook_a_frozen_pie	1	13002
+cook_bacon	1	11520
+cook_broccolini	1	6927
+cook_brussels_sprouts	1	23493
+cook_cabbage	1	21218
+cook_hot_dogs	1	13718
+dispose_of_batteries	1	21643
+dispose_of_glass	1	13793
+freeze_fruit	1	18929
+freeze_pies	1	18683
+getting_organized_for_work	4	94028
+halve_an_egg	1	9566
+hanging_pictures	1	3582
+hiding_Easter_eggs	1	11430
+installing_a_fax_machine	1	6116
+installing_a_modem	1	3620
+installing_a_scanner	4	25552
+installing_smoke_detectors	1	3854
+laying_tile_floors	4	86108
+loading_the_car	1	28840
+make_cabinet_doors	1	5164
+make_gift_bags_for_baby_showers	4	57908
+make_microwave_popcorn	1	4857
+make_pizza	1	28781
+make_rose_centerpieces	4	27196
+moving_boxes_to_storage	1	21895
+organizing_art_supplies	4	37168
+organizing_school_stuff	1	21888
+outfit_a_basic_toolbox	1	15957
+packing_meal_for_delivery	1	13290
+picking_up_toys	4	113344
+picking_up_trash	1	7902
+polishing_shoes	4	64428
+preparing_lunch_box	1	12368
+put_together_a_basic_pruning_kit	1	16897
+putting_away_Halloween_decorations	4	82732
+putting_away_toys	4	67784
+putting_dirty_dishes_in_sink	1	18223
+putting_dishes_away_after_cleaning	1	16431
+putting_shoes_on_rack	4	46360
+putting_up_Christmas_decorations_inside	1	20579
+re_shelving_library_books	1	14293
+rearrange_your_room	1	19283
+rearranging_kitchen_furniture	1	13415
+scrubbing_bathroom_floor	1	4731
+set_up_a_coffee_station_in_your_kitchen	1	9400
+setting_mousetraps	4	61180
+setting_the_fire	4	54712
+setting_the_table	1	26713
+setup_a_bar_for_a_cocktail_party	4	80516
+slicing_vegetables	1	22268
+sorting_books_on_shelf	1	11610
+sorting_bottles_cans_and_paper	1	15396
+sorting_household_items	4	94848
+sorting_vegetables	1	17856
+spraying_for_bugs	1	9720
+spraying_fruit_trees	1	12519
+stacking_wood	1	23910
+store_batteries	1	11557
+store_honey	1	10151
+store_produce	1	14284
+storing_food	1	15305
+sweeping_garage	1	6710
+thawing_frozen_food	4	49380
+tidying_bathroom	1	19505
+tidying_bedroom	4	66228
+tidying_living_room	1	18849
+turning_on_radio	1	3225
+turning_out_all_lights_before_sleep	1	15010
+unloading_the_car	1	16986
+vacuuming_floors	1	3618
+wash_a_baseball_cap	1	12525
+wash_dog_toys	1	16835

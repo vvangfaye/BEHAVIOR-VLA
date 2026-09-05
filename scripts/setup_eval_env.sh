@@ -120,13 +120,20 @@ write_gpu_manifests() {
     # The Vulkan ICD must point at libEGL_nvidia, not libGLX_nvidia: both export
     # the vk_icd* entrypoints, but libGLX_nvidia's
     # vk_icdNegotiateLoaderICDInterfaceVersion returns VK_ERROR_INITIALIZATION_FAILED
-    # and every proc lookup yields NULL, while libEGL_nvidia negotiates cleanly and
-    # enumerates all 8 L20s.
-    local prefix="$1" driver_lib
-    driver_lib="$(ls /usr/local/nvidia/lib64/libEGL_nvidia.so.*.* 2>/dev/null | head -1)"
-    [[ -n "$driver_lib" ]] || driver_lib="$(ls /lib64/libEGL_nvidia.so.*.* 2>/dev/null | head -1)"
+    # and every proc lookup yields NULL, while libEGL_nvidia negotiates cleanly.
+    local prefix="$1" driver_lib="" driver_version path
+    driver_version="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1 | tr -d ' ')"
+    for path in \
+        "/usr/local/nvidia/lib64/libEGL_nvidia.so.$driver_version" \
+        "/usr/lib64/libEGL_nvidia.so.$driver_version" \
+        "/lib64/libEGL_nvidia.so.$driver_version"; do
+        if [[ -f "$path" ]]; then
+            driver_lib="$path"
+            break
+        fi
+    done
     if [[ -z "$driver_lib" ]]; then
-        echo "libEGL_nvidia not found; this host cannot run Isaac Sim" >&2
+        echo "libEGL_nvidia for active driver $driver_version not found" >&2
         exit 1
     fi
 
@@ -140,15 +147,15 @@ write_gpu_manifests() {
     }
 }
 EOF
-    cat > "$prefix/share/glvnd/egl_vendor.d/10_nvidia.json" <<'EOF'
+    cat > "$prefix/share/glvnd/egl_vendor.d/10_nvidia.json" <<EOF
 {
     "file_format_version": "1.0.0",
     "ICD": {
-        "library_path": "libEGL_nvidia.so.0"
+        "library_path": "$driver_lib"
     }
 }
 EOF
-    log "wrote Vulkan/EGL manifests for $driver_lib"
+    log "wrote Vulkan/EGL manifests for active driver $driver_version: $driver_lib"
 
     VK_ICD_FILENAMES="$prefix/share/vulkan/icd.d/nvidia_icd.json" \
         "$PY" - <<'PY'
@@ -301,15 +308,54 @@ fi
 
 add_activation_support "$EVAL_ENV"
 
-# The container ships no Vulkan loader (no libvulkan.so.1 on the system), which
-# Isaac Sim needs to reach the NVIDIA ICD. The activation hook already prepends
-# $CONDA_PREFIX/lib, so installing the loader here makes it resolvable.
-if [[ ! -e "$EVAL_ENV/lib/libvulkan.so.1" ]]; then
-    log "installing the Vulkan loader"
-    "$CONDA" install --prefix "$EVAL_ENV" -c conda-forge vulkan-tools -y --freeze-installed
+# The container ships neither a Vulkan loader (no libvulkan.so.1) nor libGLU.
+# Isaac Sim needs the loader to reach the NVIDIA ICD, and omni.iray.libs'
+# libneuray.so links against libGLU.so.1: without it neuray and the MDL-SDK fail
+# to load, carb.scenerenderer-rtx cannot create its neuray database scope, every
+# rtx/raytracing shader file then fails to load, and the process segfaults while
+# loading a scene. The activation hook already prepends $CONDA_PREFIX/lib, so
+# installing both here makes them resolvable.
+if [[ ! -e "$EVAL_ENV/lib/libvulkan.so.1" || ! -e "$EVAL_ENV/lib/libGLU.so.1" ]]; then
+    log "installing the Vulkan loader and libGLU"
+    "$CONDA" install --prefix "$EVAL_ENV" -c conda-forge vulkan-tools libglu -y --freeze-installed
 fi
 
 write_gpu_manifests "$EVAL_ENV"
+
+warn_on_driver_change() {
+    # The isaacsim shadercache wheels ship ~300 MB of precompiled raytracing
+    # pipelines valid only for the driver they were built against. When this host
+    # went from 580.105.08 to 535.161.08, Kit loaded a stale collection, reported
+    # "No Collection/Library can be nullptr with eCollection as compileType" and
+    # "Failed to create the raytracing pipeline", then deadlocked before the scene
+    # finished loading. Vulkan still enumerated all GPUs, so the probe below does
+    # not catch it.
+    #
+    # Do NOT clear the cache to work around this. Kit does not rebuild it: without
+    # the cache, carb.scenerenderer-rtx fails with "Shader caches are missing from
+    # the application, which are required for RTX renderer" and then segfaults,
+    # which is worse. The only real fix is a driver matching the cache.
+    local prefix="$1" driver stamp cache
+    driver="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1)"
+    [[ -n "$driver" ]] || return 0
+
+    for cache in "$prefix"/lib/python*/site-packages/isaacsim/extscache/*shadercache*/cache; do
+        [[ -d "$cache" ]] || continue
+        stamp="$cache/.driver_version"
+        if [[ ! -f "$stamp" ]]; then
+            echo "$driver" > "$stamp"
+            continue
+        fi
+        if [[ "$(cat "$stamp")" != "$driver" ]]; then
+            echo "WARNING: GPU driver is now $driver but $(basename "$(dirname "$cache")")" >&2
+            echo "         was cached under $(cat "$stamp"). Isaac Sim will most likely hang" >&2
+            echo "         while loading a scene, after 'Failed to create the raytracing pipeline'." >&2
+            echo "         Restore driver $(cat "$stamp") or evaluate on a host that has it." >&2
+        fi
+    done
+}
+
+warn_on_driver_change "$EVAL_ENV"
 
 log "verifying"
 VK_ICD_FILENAMES="$EVAL_ENV/share/vulkan/icd.d/nvidia_icd.json" \

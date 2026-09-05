@@ -7,11 +7,13 @@
 #
 # Usage:
 #   MODEL=pi05  ./scripts/eval_b1k.sh turning_on_radio [more tasks...]
-#   MODEL=groot ./scripts/eval_b1k.sh turning_on_radio
+#   MODEL=groot GROOT_CKPT=/path/checkpoint-N ./scripts/eval_b1k.sh turning_on_radio
+#   MODEL=g05   G05_CKPT=/path/step_N.pt ./scripts/eval_b1k.sh turning_on_radio
 #   MODEL=pi05 NUM_ROLLOUTS=3 ./scripts/eval_b1k.sh <task>
 #
-# π0.5 and GR00T report different training losses (flow matching vs diffusion,
-# different action normalisation), so only closed-loop success rate compares them.
+# π0.5, GR00T and G0.5 report different training losses (flow matching vs
+# diffusion vs autoregressive, different action normalisation), so only
+# closed-loop success rate compares them.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,6 +30,8 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO_ROOT/eval_results}"
 OMNIGIBSON_DATA_PATH="${OMNIGIBSON_DATA_PATH:-$REPO_ROOT/BEHAVIOR-1K/omnigibson-data}"
 SERVER_GPU="${SERVER_GPU:-0}"
 EVAL_GPU="${EVAL_GPU:-1}"
+PI05_MEM_FRACTION="${PI05_MEM_FRACTION:-0.85}"
+EVAL_RUNTIME_ROOT="${EVAL_RUNTIME_ROOT:-/dev/shm/wangfaye/omnigibson-runtime/$PORT}"
 
 TASKS=("$@")
 if [[ ${#TASKS[@]} -eq 0 ]]; then
@@ -48,8 +52,22 @@ case "$MODEL" in
     groot)
         GROOT_CKPT="${GROOT_CKPT:?set GROOT_CKPT to the checkpoint-N directory}"
         [[ -d "$GROOT_CKPT" ]] || { echo "checkpoint not found: $GROOT_CKPT" >&2; exit 1; }
+        # Training reads the instruction from tasks.jsonl (tasks.parquet only holds
+        # the bare task name), so serving must resolve it from the same file.
+        GROOT_TASKS_JSONL="${GROOT_TASKS_JSONL:-$REPO_ROOT/dataset_views/pi05/2026-challenge-demos/meta/tasks.jsonl}"
+        [[ -f "$GROOT_TASKS_JSONL" ]] || { echo "tasks.jsonl not found: $GROOT_TASKS_JSONL" >&2; exit 1; }
         ;;
-    *) echo "MODEL must be pi05 or groot" >&2; exit 2 ;;
+    g05)
+        # A step_N.pt checkpoint FILE (not a directory); the run dir beside it
+        # supplies dataset_stats.json and action_tokenizer.pt.
+        G05_CKPT="${G05_CKPT:?set G05_CKPT to a step_N.pt checkpoint file}"
+        [[ -f "$G05_CKPT" ]] || { echo "checkpoint not found: $G05_CKPT" >&2; exit 1; }
+        # The server reads the task instruction from the dataset's tasks.jsonl so
+        # the prompt matches training; config points at /var/tmp, absent here.
+        G05_TASKS_JSONL="${G05_TASKS_JSONL:-$REPO_ROOT/dataset_views/pi05/2026-challenge-demos/meta/tasks.jsonl}"
+        [[ -f "$G05_TASKS_JSONL" ]] || { echo "tasks.jsonl not found: $G05_TASKS_JSONL" >&2; exit 1; }
+        ;;
+    *) echo "MODEL must be pi05, groot or g05" >&2; exit 2 ;;
 esac
 
 mkdir -p "$OUTPUT_ROOT/$MODEL"
@@ -74,7 +92,7 @@ start_server() {
             activate_env .venv/bin/activate
             # The prompt is bound at startup from TASK_REGISTRY, and --repo-id must
             # match the assets dir written during training.
-            CUDA_VISIBLE_DEVICES="$SERVER_GPU" XLA_PYTHON_CLIENT_MEM_FRACTION=0.85 \
+            CUDA_VISIBLE_DEVICES="$SERVER_GPU" XLA_PYTHON_CLIENT_MEM_FRACTION="$PI05_MEM_FRACTION" \
             HF_HUB_OFFLINE=1 \
             python scripts/b1k/serve_b1k.py \
                 --robot b1k/R1Pro \
@@ -96,8 +114,25 @@ start_server() {
             python scripts/b1k/serve_b1k.py \
                 --model-path "$GROOT_CKPT" \
                 --modality-config-path examples/b1k/r1pro.py \
+                --task "$task" \
+                --tasks-jsonl "$GROOT_TASKS_JSONL" \
                 --embodiment-tag NEW_EMBODIMENT \
                 --control_mode receeding_horizon \
+                --host 127.0.0.1 \
+                --port "$PORT" >> "$SERVER_LOG" 2>&1 &
+            ;;
+        g05)
+            cd "$REPO_ROOT/GalaxeaVLA"
+            activate_env .venv/bin/activate
+            CUDA_VISIBLE_DEVICES="$SERVER_GPU" \
+            HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}" \
+            HF_HOME=/mnt/workspace/wangfaye/cache/huggingface \
+            HF_HUB_OFFLINE=1 \
+            python scripts/b1k/serve_b1k.py \
+                --ckpt_path "$G05_CKPT" \
+                --task "$task" \
+                --tasks-jsonl "$G05_TASKS_JSONL" \
+                --action_steps 16 \
                 --host 127.0.0.1 \
                 --port "$PORT" >> "$SERVER_LOG" 2>&1 &
             ;;
@@ -158,8 +193,13 @@ for task in "${TASKS[@]}"; do
     # (prepended, since start_server already sourced the policy env into this
     # shell), the ICD manifests written by setup_eval_env.sh, and the EULA flag
     # that Kit re-checks on every launch.
+    mkdir -p "$EVAL_RUNTIME_ROOT"/{appdata,cache,config,warp}
     env OMNIGIBSON_DATA_PATH="$OMNIGIBSON_DATA_PATH" \
-        CUDA_VISIBLE_DEVICES="$EVAL_GPU" \
+        OMNIGIBSON_APPDATA_PATH="$EVAL_RUNTIME_ROOT/appdata" \
+        OMNIGIBSON_GPU_ID="$EVAL_GPU" \
+        XDG_CACHE_HOME="$EVAL_RUNTIME_ROOT/cache" \
+        XDG_CONFIG_HOME="$EVAL_RUNTIME_ROOT/config" \
+        WARP_CACHE_PATH="$EVAL_RUNTIME_ROOT/warp" \
         HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}" \
         PYTHONNOUSERSITE=1 \
         OMNI_KIT_ACCEPT_EULA=YES \
