@@ -1,3 +1,0 @@
-[submodule "experiments/droid/droid-franka-client"]
-	path = experiments/droid/droid-franka-client
-	url = git@github.com:OpenGalaxea/droid-franka-client.git

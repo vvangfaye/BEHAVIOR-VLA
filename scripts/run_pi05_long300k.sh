@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Resume π0.5 training from an existing checkpoint and continue up to
-# 300,000 steps, matching the GR00T long300k run for an apples-to-apples
-# comparison. Mirrors scripts/run_pi05_90min.sh but in resume/long mode.
+# 300,000 steps. Mirrors scripts/run_pi05_90min.sh in resume/long mode.
 #
 # The first launch started 2026-08-14 21:48 and ran for ~11.5 h before a
 # single bad video frame in chunk-023/file-004.mp4 tripped

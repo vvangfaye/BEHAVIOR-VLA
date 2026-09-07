@@ -7,17 +7,13 @@
 #
 # Usage:
 #   MODEL=pi05  ./scripts/eval_b1k.sh turning_on_radio [more tasks...]
-#   MODEL=groot GROOT_CKPT=/path/checkpoint-N ./scripts/eval_b1k.sh turning_on_radio
-#   MODEL=g05   G05_CKPT=/path/step_N.pt ./scripts/eval_b1k.sh turning_on_radio
 #   MODEL=pi05 NUM_ROLLOUTS=3 ./scripts/eval_b1k.sh <task>
 #
-# π0.5, GR00T and G0.5 report different training losses (flow matching vs
-# diffusion vs autoregressive, different action normalisation), so only
-# closed-loop success rate compares them.
+# Closed-loop success measures task completion.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODEL="${MODEL:?set MODEL=pi05 or MODEL=groot}"
+MODEL="${MODEL:-pi05}"
 ENV_ROOT="${ENV_ROOT:-/dev/shm/wangfaye/conda_envs}"
 EVAL_ENV="${EVAL_ENV:-$ENV_ROOT/b1k-eval}"
 PORT="${PORT:-8000}"
@@ -35,7 +31,7 @@ EVAL_RUNTIME_ROOT="${EVAL_RUNTIME_ROOT:-/dev/shm/wangfaye/omnigibson-runtime/$PO
 
 TASKS=("$@")
 if [[ ${#TASKS[@]} -eq 0 ]]; then
-    echo "Usage: MODEL=pi05|groot $0 <task-name> [task-name...]" >&2
+    echo "Usage: MODEL=pi05 $0 <task-name> [task-name...]" >&2
     exit 2
 fi
 
@@ -49,25 +45,7 @@ case "$MODEL" in
         [[ -d "$PI05_CKPT/assets/$PI05_REPO_ID" ]] || {
             echo "norm stats not found: $PI05_CKPT/assets/$PI05_REPO_ID" >&2; exit 1; }
         ;;
-    groot)
-        GROOT_CKPT="${GROOT_CKPT:?set GROOT_CKPT to the checkpoint-N directory}"
-        [[ -d "$GROOT_CKPT" ]] || { echo "checkpoint not found: $GROOT_CKPT" >&2; exit 1; }
-        # Training reads the instruction from tasks.jsonl (tasks.parquet only holds
-        # the bare task name), so serving must resolve it from the same file.
-        GROOT_TASKS_JSONL="${GROOT_TASKS_JSONL:-$REPO_ROOT/dataset_views/pi05/2026-challenge-demos/meta/tasks.jsonl}"
-        [[ -f "$GROOT_TASKS_JSONL" ]] || { echo "tasks.jsonl not found: $GROOT_TASKS_JSONL" >&2; exit 1; }
-        ;;
-    g05)
-        # A step_N.pt checkpoint FILE (not a directory); the run dir beside it
-        # supplies dataset_stats.json and action_tokenizer.pt.
-        G05_CKPT="${G05_CKPT:?set G05_CKPT to a step_N.pt checkpoint file}"
-        [[ -f "$G05_CKPT" ]] || { echo "checkpoint not found: $G05_CKPT" >&2; exit 1; }
-        # The server reads the task instruction from the dataset's tasks.jsonl so
-        # the prompt matches training; config points at /var/tmp, absent here.
-        G05_TASKS_JSONL="${G05_TASKS_JSONL:-$REPO_ROOT/dataset_views/pi05/2026-challenge-demos/meta/tasks.jsonl}"
-        [[ -f "$G05_TASKS_JSONL" ]] || { echo "tasks.jsonl not found: $G05_TASKS_JSONL" >&2; exit 1; }
-        ;;
-    *) echo "MODEL must be pi05, groot or g05" >&2; exit 2 ;;
+    *) echo "MODEL must be pi05" >&2; exit 2 ;;
 esac
 
 mkdir -p "$OUTPUT_ROOT/$MODEL"
@@ -104,38 +82,6 @@ start_server() {
                 --action_horizon 16 \
                 --port "$PORT" >> "$SERVER_LOG" 2>&1 &
             ;;
-        groot)
-            cd "$REPO_ROOT/Isaac-GR00T"
-            activate_env .venv/bin/activate
-            CUDA_VISIBLE_DEVICES="$SERVER_GPU" \
-            HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}" \
-            HF_HOME=/mnt/workspace/wangfaye/cache/huggingface \
-            HF_HUB_OFFLINE=1 \
-            python scripts/b1k/serve_b1k.py \
-                --model-path "$GROOT_CKPT" \
-                --modality-config-path examples/b1k/r1pro.py \
-                --task "$task" \
-                --tasks-jsonl "$GROOT_TASKS_JSONL" \
-                --embodiment-tag NEW_EMBODIMENT \
-                --control_mode receeding_horizon \
-                --host 127.0.0.1 \
-                --port "$PORT" >> "$SERVER_LOG" 2>&1 &
-            ;;
-        g05)
-            cd "$REPO_ROOT/GalaxeaVLA"
-            activate_env .venv/bin/activate
-            CUDA_VISIBLE_DEVICES="$SERVER_GPU" \
-            HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}" \
-            HF_HOME=/mnt/workspace/wangfaye/cache/huggingface \
-            HF_HUB_OFFLINE=1 \
-            python scripts/b1k/serve_b1k.py \
-                --ckpt_path "$G05_CKPT" \
-                --task "$task" \
-                --tasks-jsonl "$G05_TASKS_JSONL" \
-                --action_steps 16 \
-                --host 127.0.0.1 \
-                --port "$PORT" >> "$SERVER_LOG" 2>&1 &
-            ;;
     esac
     SERVER_PID=$!
     echo "policy server pid=$SERVER_PID task=$task log=$SERVER_LOG"
@@ -153,7 +99,7 @@ trap stop_server EXIT
 wait_for_server() {
     echo "waiting for policy server on port $PORT"
     for i in $(seq 1 900); do
-        # Both servers speak websocket, so probe the listening socket rather than HTTP.
+        # The policy server speaks websocket, so probe the listening socket rather than HTTP.
         if "$EVAL_ENV/bin/python" - "$PORT" <<'PY' >/dev/null 2>&1
 import socket, sys
 s = socket.socket()

@@ -6,7 +6,6 @@
 #   MODEL=pi05 ./scripts/eval_sweep.sh                      # all of scripts/b1k_tasks.txt
 #   MODEL=pi05 WORKERS=2 ./scripts/eval_sweep.sh
 #   MODEL=pi05 TASK_FILE=scripts/b1k_tasks_reduced.txt ./scripts/eval_sweep.sh
-#   MODEL=groot GROOT_CKPT=/path/checkpoint-50000 ./scripts/eval_sweep.sh
 #
 # Each worker owns two GPUs (policy server + simulator) and its own port, and
 # takes a disjoint slice of the task list, so workers never contend for a port,
@@ -19,7 +18,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODEL="${MODEL:?set MODEL=pi05 or MODEL=groot}"
+MODEL="${MODEL:-pi05}"
+[[ "$MODEL" == pi05 ]] || { echo "MODEL must be pi05" >&2; exit 2; }
 TASK_FILE="${TASK_FILE:-$REPO_ROOT/scripts/b1k_tasks.txt}"
 WORKERS="${WORKERS:-4}"
 BASE_PORT="${BASE_PORT:-8000}"
