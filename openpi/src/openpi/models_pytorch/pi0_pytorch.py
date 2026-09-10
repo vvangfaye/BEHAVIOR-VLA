@@ -86,6 +86,8 @@ class PI0Pytorch(nn.Module):
         super().__init__()
         self.config = config
         self.pi05 = config.pi05
+        if config.train_subtask_prediction:
+            raise NotImplementedError("Subtask prediction training currently requires the JAX trainer.")
 
         paligemma_config = _gemma.get_config(config.paligemma_variant)
         action_expert_config = _gemma.get_config(config.action_expert_variant)

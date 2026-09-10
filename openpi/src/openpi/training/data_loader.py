@@ -14,6 +14,7 @@ import openpi.models.model as _model
 import openpi.training.config as _config
 from openpi.training.droid_rlds_dataset import DroidRldsDataset
 import openpi.training.lerobot_compat as _lerobot_compat
+from openpi.training.subtask_data import SubtaskFromSegments
 import openpi.transforms as _transforms
 
 T_co = TypeVar("T_co", covariant=True)
@@ -155,6 +156,15 @@ class FakeDataset(Dataset):
 
 def create_b1k_dataset(data_config: _config.DataConfig, action_horizon: int) -> Dataset:
     """Create a behavior dataset for training."""
+    subtask_transform = None
+    if data_config.subtask_prediction:
+        if isinstance(data_config.repo_id, list):
+            raise ValueError("Subtask supervision requires one dataset root with globally unique episode indices.")
+        if not data_config.prompt_from_task or not data_config.subtask_prompts_path:
+            raise ValueError("Subtask supervision requires task prompts and a subtask segment table.")
+        if data_config.subtask_whole_task_prob != 0:
+            raise ValueError("subtask_whole_task_prob must be 0 when training subtask prediction.")
+        subtask_transform = SubtaskFromSegments.from_parquet(data_config.subtask_prompts_path)
     if isinstance(data_config.repo_id, list):
         dataset_meta = _lerobot_compat.LeRobotDatasetMetadata(
             repo_id=data_config.repo_id[0], root=os.path.join(data_config.dataset_root, data_config.repo_id[0])
@@ -184,13 +194,15 @@ def create_b1k_dataset(data_config: _config.DataConfig, action_horizon: int) -> 
         tasks = _lerobot_compat.b1k_task_prompts(
             meta_root, _lerobot_compat.tasks_from_metadata(dataset_meta)
         )
-        if data_config.subtask_prompts_path:
+        if subtask_transform is not None:
+            dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(tasks), subtask_transform])
+        elif data_config.subtask_prompts_path:
             prompt_tf = _transforms.PromptFromSubtask.from_parquet(
                 data_config.subtask_prompts_path, tasks, data_config.subtask_whole_task_prob
             )
+            dataset = TransformedDataset(dataset, [prompt_tf])
         else:
-            prompt_tf = _transforms.PromptFromLeRobotTask(tasks)
-        dataset = TransformedDataset(dataset, [prompt_tf])
+            dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(tasks)])
 
     if data_config.frame_stride < 1:
         raise ValueError(f"frame_stride must be >= 1, got {data_config.frame_stride}")

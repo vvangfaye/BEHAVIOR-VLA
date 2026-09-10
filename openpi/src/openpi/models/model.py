@@ -99,11 +99,11 @@ class Observation(Generic[ArrayT]):
     # Tokenized prompt mask.
     tokenized_prompt_mask: at.Bool[ArrayT, "*b l"] | None = None
 
-    # pi0-fast model specific fields.
+    # Autoregressive language fields used by FAST and pi0.5 subtask supervision.
 
-    # Token auto-regressive mask (for FAST autoregressive model).
+    # Token auto-regressive mask.
     token_ar_mask: at.Int[ArrayT, "*b l"] | None = None
-    # Token loss mask (for FAST autoregressive model).
+    # Token loss mask.
     token_loss_mask: at.Bool[ArrayT, "*b l"] | None = None
 
     @classmethod

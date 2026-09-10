@@ -47,6 +47,57 @@ class PaligemmaTokenizer:
 
         return np.asarray(tokens), np.asarray(mask)
 
+    def _subtask_token_blocks(self, prompt: str, subtask: str, state: np.ndarray | None):
+        prompt = prompt.replace("_", " ").replace("\n", " ").strip()
+        subtask = subtask.replace("_", " ").replace("\n", " ").strip()
+        if not prompt or not subtask:
+            raise ValueError("Subtask supervision requires non-empty task and subtask text.")
+        prefix = f"Task: {prompt}"
+        if state is not None:
+            state = np.asarray(state)
+            if state.ndim != 1 or not np.isfinite(state).all():
+                raise ValueError("Subtask tokenizer requires a finite, one-dimensional state.")
+            discretized = np.digitize(state, bins=np.linspace(-1, 1, 257)[:-1]) - 1
+            prefix += f", State: {' '.join(map(str, discretized))}"
+        prefix += ";\nSubtask: "
+        return (
+            self._tokenizer.encode(prefix, add_bos=True),
+            self._tokenizer.encode(subtask, add_eos=True),
+            self._tokenizer.encode("\nAction: "),
+        )
+
+    def subtask_token_lengths(self, prompt: str, subtask: str, state: np.ndarray | None = None) -> tuple[int, int, int]:
+        """Untruncated lengths for dataset preflight (prefix, label including EOS, action cue)."""
+        return tuple(map(len, self._subtask_token_blocks(prompt, subtask, state)))
+
+    def tokenize_subtask_training(
+        self, prompt: str, subtask: str, state: np.ndarray | None = None, *, max_subtask_len: int = 64
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Teacher forcing for subtask language plus flow-matching actions.
+
+        Reject overflow rather than cutting the label, EOS, state, or action cue.
+        `max_subtask_len` includes EOS and bounds the model's CE projection work.
+        """
+        prefix, label, suffix = self._subtask_token_blocks(prompt, subtask, state)
+        if len(label) > max_subtask_len:
+            raise ValueError(
+                f"Subtask needs {len(label)} tokens including EOS, exceeds max_subtask_len={max_subtask_len}."
+            )
+        size = len(prefix) + len(label) + len(suffix)
+        if size > self._max_len:
+            raise ValueError(
+                f"Subtask training sequence needs {size} tokens (prefix={len(prefix)}, "
+                f"subtask={len(label)}, action_cue={len(suffix)}), exceeds max_token_len={self._max_len}. "
+                "Increase max_token_len; no supervision has been truncated."
+            )
+        padding = self._max_len - size
+        return (
+            np.asarray(prefix + label + suffix + [0] * padding, dtype=np.int32),
+            np.asarray([True] * size + [False] * padding, dtype=np.bool_),
+            np.asarray([0] * len(prefix) + [1] * (len(label) + len(suffix)) + [0] * padding, dtype=np.int32),
+            np.asarray([False] * len(prefix) + [True] * len(label) + [False] * (len(suffix) + padding), dtype=np.bool_),
+        )
+
 
 class FASTTokenizer:
     def __init__(self, max_len: int = 256, fast_tokenizer_path: str = "physical-intelligence/fast"):

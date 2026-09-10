@@ -313,6 +313,43 @@ class TokenizePrompt(DataTransformFn):
 
 
 @dataclasses.dataclass(frozen=True)
+class TokenizeSubtaskPrompt(DataTransformFn):
+    """Keep the high-level task as context and supervise a separate subtask label.
+
+    This transform is for training and GT-subtask action evaluation. A bare task
+    prompt cannot silently fall back to the old action-only format.
+    """
+
+    tokenizer: _tokenizer.PaligemmaTokenizer
+    max_subtask_len: int = 64
+    discrete_state_input: bool = True
+
+    def __call__(self, data: DataDict) -> DataDict:
+        data = dict(data)
+        values = []
+        for key in ("prompt", "subtask"):
+            value = data.pop(key, None)
+            if value is None:
+                raise ValueError(f"{key} is required for subtask-supervised training / GT-subtask evaluation.")
+            if not isinstance(value, str):
+                value = np.asarray(value).item()
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{key} must be a non-empty text string.")
+            values.append(value)
+        state = data["state"] if self.discrete_state_input else None
+        tokens, mask, ar_mask, loss_mask = self.tokenizer.tokenize_subtask_training(
+            *values, state, max_subtask_len=self.max_subtask_len
+        )
+        return {
+            **data,
+            "tokenized_prompt": tokens,
+            "tokenized_prompt_mask": mask,
+            "token_ar_mask": ar_mask,
+            "token_loss_mask": loss_mask,
+        }
+
+
+@dataclasses.dataclass(frozen=True)
 class TokenizeFASTInputs(DataTransformFn):
     tokenizer: _tokenizer.FASTTokenizer
 

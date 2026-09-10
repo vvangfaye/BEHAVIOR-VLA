@@ -16,6 +16,20 @@ NUM_WORKERS="${NUM_WORKERS:-8}"
 SUBTASK_PROMPTS="${SUBTASK_PROMPTS:-}"
 FRAME_STRIDE="${FRAME_STRIDE:-1}"
 EPISODES_FILE="${EPISODES_FILE:-}"
+SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-0}"
+if [[ "$SUBTASK_PREDICTION" != 0 && "$SUBTASK_PREDICTION" != 1 ]]; then
+    echo "SUBTASK_PREDICTION must be 0 or 1" >&2
+    exit 2
+fi
+if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
+    SUBTASK_PROMPTS="${SUBTASK_PROMPTS:-$DATASET_ROOT/meta/subtask_segments.parquet}"
+    MAX_TOKEN_LEN="${MAX_TOKEN_LEN:-512}"
+    MAX_SUBTASK_LEN="${MAX_SUBTASK_LEN:-64}"
+    if [[ "${WHOLE_TASK_PROB:-0}" != 0 && "${WHOLE_TASK_PROB:-0}" != 0.0 ]]; then
+        echo "Subtask prediction preserves the whole task; WHOLE_TASK_PROB must be 0." >&2
+        exit 2
+    fi
+fi
 
 if [[ ! -f "$DATASET_ROOT/meta/info.json" ]]; then
     echo "Dataset not found or incomplete: $DATASET_ROOT/meta/info.json" >&2
@@ -54,7 +68,10 @@ if [[ -n "$EPISODES_FILE" ]]; then
         echo "Episode index file not found: $EPISODES_FILE" >&2
         exit 1
     fi
-    mapfile -t EPISODES_INDEX < "$EPISODES_FILE"
+    EPISODES_INDEX=()
+    while IFS= read -r EPISODE_INDEX || [[ -n "$EPISODE_INDEX" ]]; do
+        EPISODES_INDEX+=("$EPISODE_INDEX")
+    done < "$EPISODES_FILE"
     if (( ${#EPISODES_INDEX[@]} == 0 )); then
         echo "Episode index file is empty: $EPISODES_FILE" >&2
         exit 1
@@ -83,6 +100,23 @@ source .venv/bin/activate
 # must be restricted before the norm-stats step too, not just for training.
 export CUDA_VISIBLE_DEVICES="$CUDA_DEVICES"
 
+if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
+    PREFLIGHT_ARGS=(
+        --dataset-root "$DATASET_ROOT"
+        --segments-path "$SUBTASK_PROMPTS"
+        --max-token-len "$MAX_TOKEN_LEN"
+        --max-subtask-len "$MAX_SUBTASK_LEN"
+        --report-file "outputs/subtask_preflight/$EXP_NAME.json"
+    )
+    if (( ${#EPISODES_INDEX[@]} )); then
+        PREFLIGHT_ARGS+=(--episodes-index "${EPISODES_INDEX[@]}")
+    fi
+    python scripts/b1k/check_subtask_data.py "${PREFLIGHT_ARGS[@]}"
+    if [[ "${PREFLIGHT_ONLY:-0}" == 1 ]]; then
+        exit 0
+    fi
+fi
+
 NORM_FILE="$OPENPI_DIR/outputs/assets/pi05_b1k/$REPO_ID/norm_stats.json"
 if [[ ! -f "$NORM_FILE" ]]; then
     echo "Computing normalization statistics..."
@@ -108,6 +142,9 @@ export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.9}"
 # when redirected to a log file and would hide loss for ~12k steps at a time.
 export PYTHONUNBUFFERED=1
 TRAIN_DATA_ARGS=()
+if [[ -n "${INIT_PARAMS:-}" ]]; then
+    TRAIN_DATA_ARGS+=(--weight-loader.params-path "$INIT_PARAMS")
+fi
 if (( ${#EPISODES_INDEX[@]} )); then
     TRAIN_DATA_ARGS+=(--data.episodes-index "${EPISODES_INDEX[@]}")
 fi
@@ -116,7 +153,18 @@ if [[ -n "${FSDP_DEVICES:-}" ]]; then
 fi
 if [[ -n "$SUBTASK_PROMPTS" ]]; then
     TRAIN_DATA_ARGS+=(--data.subtask-prompts-path "$SUBTASK_PROMPTS")
-    TRAIN_DATA_ARGS+=(--data.subtask-whole-task-prob "${WHOLE_TASK_PROB:-0.15}")
+    if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
+        TRAIN_DATA_ARGS+=(
+            --data.subtask-whole-task-prob 0
+            --model.train-subtask-prediction
+            --model.max-token-len "$MAX_TOKEN_LEN"
+            --model.max-subtask-len "$MAX_SUBTASK_LEN"
+            --model.subtask-loss-weight "${SUBTASK_LOSS_WEIGHT:-1.0}"
+            --model.subtask-loss-chunk-size "${SUBTASK_LOSS_CHUNK_SIZE:-8}"
+        )
+    else
+        TRAIN_DATA_ARGS+=(--data.subtask-whole-task-prob "${WHOLE_TASK_PROB:-0.15}")
+    fi
 fi
 if (( FRAME_STRIDE > 1 )); then
     TRAIN_DATA_ARGS+=(--data.frame-stride "$FRAME_STRIDE")
@@ -137,9 +185,13 @@ fi
 
 # openpi refuses --resume together with --overwrite. RESUME=1 continues an
 # interrupted run from the last checkpoint in the same EXP_NAME directory.
-if [[ -n "${RESUME:-}" ]]; then
+if [[ "${RESUME:-0}" == 1 && "${OVERWRITE:-0}" == 1 ]]; then
+    echo "RESUME=1 and OVERWRITE=1 cannot be used together." >&2
+    exit 2
+fi
+if [[ "${RESUME:-0}" == 1 ]]; then
     TRAIN_DATA_ARGS+=(--resume)
-else
+elif [[ "$SUBTASK_PREDICTION" == 0 || "${OVERWRITE:-0}" == 1 ]]; then
     TRAIN_DATA_ARGS+=(--overwrite)
 fi
 

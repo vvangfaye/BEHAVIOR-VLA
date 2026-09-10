@@ -67,6 +67,10 @@ class Pi0(_model.BaseModel):
     def __init__(self, config: pi0_config.Pi0Config, rngs: nnx.Rngs):
         super().__init__(config.action_dim, config.action_horizon, config.max_token_len)
         self.pi05 = config.pi05
+        self.train_subtask_prediction = config.train_subtask_prediction
+        self.subtask_loss_weight = config.subtask_loss_weight
+        self.max_subtask_len = config.max_subtask_len
+        self.subtask_loss_chunk_size = config.subtask_loss_chunk_size
         paligemma_config = _gemma.get_config(config.paligemma_variant)
         action_expert_config = _gemma.get_config(config.action_expert_variant)
         # TODO: rewrite gemma in NNX. For now, use bridge.
@@ -105,7 +109,7 @@ class Pi0(_model.BaseModel):
     @at.typecheck
     def embed_prefix(
         self, obs: _model.Observation
-    ) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"], at.Bool[at.Array, " s"]]:
+    ) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"], at.Bool[at.Array, "b s"]]:
         input_mask = []
         ar_mask = []
         tokens = []
@@ -122,18 +126,21 @@ class Pi0(_model.BaseModel):
                 )
             )
             # image tokens attend to each other
-            ar_mask += [False] * image_tokens.shape[1]
+            ar_mask.append(jnp.zeros(image_tokens.shape[:2], dtype=jnp.bool_))
 
         # add language (aka tokenized inputs)
         if obs.tokenized_prompt is not None:
             tokenized_inputs = self.PaliGemma.llm(obs.tokenized_prompt, method="embed")
             tokens.append(tokenized_inputs)
             input_mask.append(obs.tokenized_prompt_mask)
-            # full attention between image and language inputs
-            ar_mask += [False] * tokenized_inputs.shape[1]
+            # Tasks/images are bidirectional; supervised subtask tokens are causal.
+            ar_mask.append(
+                jnp.zeros_like(obs.tokenized_prompt_mask)
+                if obs.token_ar_mask is None else obs.token_ar_mask.astype(jnp.bool_)
+            )
         tokens = jnp.concatenate(tokens, axis=1)
         input_mask = jnp.concatenate(input_mask, axis=1)
-        ar_mask = jnp.array(ar_mask)
+        ar_mask = jnp.concatenate(ar_mask, axis=1)
         return tokens, input_mask, ar_mask
 
     @at.typecheck
@@ -189,6 +196,16 @@ class Pi0(_model.BaseModel):
     def compute_loss(
         self, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions, *, train: bool = False
     ) -> at.Float[at.Array, "*b ah"]:
+        loss, _ = self.compute_loss_with_metrics(rng, observation, actions, train=train)
+        return loss
+
+    def compute_loss_with_metrics(
+        self, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions, *, train: bool = False
+    ) -> tuple[at.Array, dict[str, at.Array]]:
+        if self.train_subtask_prediction and (
+            observation.token_ar_mask is None or observation.token_loss_mask is None
+        ):
+            raise ValueError("Subtask training requires token_ar_mask and token_loss_mask from the subtask tokenizer.")
         preprocess_rng, noise_rng, time_rng = jax.random.split(rng, 3)
         observation = _model.preprocess_observation(preprocess_rng, observation, train=train)
 
@@ -203,7 +220,9 @@ class Pi0(_model.BaseModel):
         prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
         suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(observation, x_t, time)
         input_mask = jnp.concatenate([prefix_mask, suffix_mask], axis=1)
-        ar_mask = jnp.concatenate([prefix_ar_mask, suffix_ar_mask], axis=0)
+        ar_mask = jnp.concatenate(
+            [prefix_ar_mask, jnp.broadcast_to(suffix_ar_mask, suffix_mask.shape)], axis=1
+        )
         attn_mask = make_attn_mask(input_mask, ar_mask)
         positions = jnp.cumsum(input_mask, axis=1) - 1
         (prefix_out, suffix_out), _ = self.PaliGemma.llm(
@@ -211,7 +230,67 @@ class Pi0(_model.BaseModel):
         )
         v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
 
-        return jnp.mean(jnp.square(v_t - u_t), axis=-1)
+        action_loss = jnp.mean(jnp.square(v_t - u_t), axis=-1)
+        metrics = {"action_loss": jnp.mean(action_loss)}
+        if not self.train_subtask_prediction:
+            return action_loss, metrics
+        subtask_loss, token_accuracy, counts = self._compute_subtask_metrics(prefix_out, observation)
+        metrics.update(
+            subtask_loss=jnp.mean(subtask_loss),
+            subtask_token_accuracy=jnp.sum(token_accuracy * counts) / jnp.maximum(jnp.sum(counts), 1),
+            subtask_tokens=jnp.mean(counts.astype(jnp.float32)),
+        )
+        return action_loss + self.subtask_loss_weight * subtask_loss[:, None], metrics
+
+    def _compute_subtask_metrics(self, prefix_out: at.Array, observation: _model.Observation):
+        """Next-token CE, gathering only label positions and rematerializing small vocab projections.
+
+        Projecting every prompt/padding token to the 257k vocabulary can consume
+        many GB per batch. A rematerialized scan bounds the live logits to
+        [batch, subtask_loss_chunk_size, vocabulary], including during backward.
+        """
+        tokens = observation.tokenized_prompt
+        loss_mask = observation.token_loss_mask.astype(jnp.bool_)
+        counts = jnp.sum(loss_mask, axis=-1)
+        positions = jax.vmap(lambda m: jnp.nonzero(m, size=self.max_subtask_len, fill_value=0)[0])(loss_mask)
+        selected_mask = jnp.arange(self.max_subtask_len)[None, :] < counts[:, None]
+        batch_indices = jnp.arange(tokens.shape[0])[:, None]
+        text_hidden = prefix_out[:, -tokens.shape[1]:]
+        hidden = text_hidden[batch_indices, jnp.maximum(positions - 1, 0)]
+        targets = tokens[batch_indices, positions]
+
+        chunk_size = self.subtask_loss_chunk_size
+        padding = (-self.max_subtask_len) % chunk_size
+        hidden = jnp.pad(hidden, ((0, 0), (0, padding), (0, 0)))
+        targets = jnp.pad(targets, ((0, 0), (0, padding)))
+        selected_mask = jnp.pad(selected_mask, ((0, 0), (0, padding)))
+        chunks = (
+            einops.rearrange(hidden, "b (n c) d -> n b c d", c=chunk_size),
+            einops.rearrange(targets, "b (n c) -> n b c", c=chunk_size),
+            einops.rearrange(selected_mask, "b (n c) -> n b c", c=chunk_size),
+        )
+
+        @jax.checkpoint
+        def chunk_metrics(carry, chunk):
+            h, target, mask = chunk
+            logits = self.PaliGemma.llm(h, method="deembed").astype(jnp.float32)
+            logp = jax.nn.log_softmax(logits, axis=-1)
+            nll = -jnp.take_along_axis(logp, target[..., None], axis=-1).squeeze(-1)
+            correct = jnp.argmax(logits, axis=-1) == target
+            loss_sum, correct_sum = carry
+            return (
+                loss_sum + jnp.sum(jnp.where(mask, nll, 0), axis=-1),
+                correct_sum + jnp.sum(mask & correct, axis=-1),
+            ), None
+
+        zeros = jnp.zeros((tokens.shape[0],), dtype=jnp.float32)
+        (loss_sum, correct_sum), _ = jax.lax.scan(chunk_metrics, (zeros, zeros), chunks)
+        # The data transform rejects malformed labels before JIT. Fail visibly
+        # (instead of a plausible zero CE) for callers bypassing that transform.
+        valid = (counts > 0) & (counts <= self.max_subtask_len) & ~loss_mask[:, 0]
+        valid &= jnp.all(~loss_mask | observation.tokenized_prompt_mask, axis=-1)
+        loss = jnp.where(valid, loss_sum / jnp.maximum(counts, 1), jnp.nan)
+        return loss, correct_sum / jnp.maximum(counts, 1), counts
 
     @override
     def sample_actions(

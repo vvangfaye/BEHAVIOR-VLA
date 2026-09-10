@@ -118,6 +118,8 @@ class DataConfig:
     # Fraction of frames that keep the whole-episode task prompt when sub-task
     # conditioning is on, so the closed-loop server's fixed prompt stays in-distribution.
     subtask_whole_task_prob: float = 0.0
+    # Derived from the model config for the B1K loader. Keeps task and label separate.
+    subtask_prediction: bool = False
 
 
 class GroupFactory(Protocol):
@@ -147,6 +149,19 @@ class ModelTransformFactory(GroupFactory):
                 )
             case _model.ModelType.PI05:
                 assert isinstance(model_config, pi0_config.Pi0Config)
+                if model_config.train_subtask_prediction:
+                    return _transforms.Group(
+                        inputs=[
+                            _transforms.InjectDefaultPrompt(self.default_prompt),
+                            _transforms.ResizeImages(224, 224),
+                            _transforms.TokenizeSubtaskPrompt(
+                                _tokenizer.PaligemmaTokenizer(model_config.max_token_len),
+                                max_subtask_len=model_config.max_subtask_len,
+                                discrete_state_input=model_config.discrete_state_input,
+                            ),
+                            _transforms.PadStatesAndActions(model_config.action_dim),
+                        ],
+                    )
                 return _transforms.Group(
                     inputs=[
                         _transforms.InjectDefaultPrompt(self.default_prompt),
@@ -421,6 +436,9 @@ class LeRobotB1KDataConfig(DataConfigFactory):
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         robot_config = ROBOT_REGISTRY[self.robot_config_name]
+        subtask_prediction = getattr(model_config, "train_subtask_prediction", False)
+        if subtask_prediction and self.subtask_whole_task_prob != 0:
+            raise ValueError("Subtask prediction needs separate labels; subtask_whole_task_prob must be 0.")
 
         # Build repack mapping dynamically based on available observations
         repack_mapping = {}
@@ -437,6 +455,8 @@ class LeRobotB1KDataConfig(DataConfigFactory):
                 "prompt": "prompt",
             }
         )
+        if subtask_prediction:
+            repack_mapping["subtask"] = "subtask"
 
         repack_transform = _transforms.Group(inputs=[_transforms.RepackTransform(repack_mapping)])
 
@@ -462,6 +482,14 @@ class LeRobotB1KDataConfig(DataConfigFactory):
 
         # We return all data transforms for training and inference. No need to change anything here.
         base_config = self.create_base_config(assets_dirs, model_config)
+        dataset_root = self.dataset_root or base_config.dataset_root
+        if subtask_prediction and not base_config.prompt_from_task:
+            raise ValueError("B1K subtask prediction requires prompt_from_task=True for the high-level instruction.")
+        subtask_path = self.subtask_prompts_path
+        if subtask_prediction and subtask_path is None:
+            if dataset_root is None:
+                raise ValueError("Set dataset_root or subtask_prompts_path for subtask supervision.")
+            subtask_path = str(pathlib.Path(dataset_root) / "meta" / "subtask_segments.parquet")
         return dataclasses.replace(
             base_config,
             repack_transforms=repack_transform,
@@ -469,11 +497,12 @@ class LeRobotB1KDataConfig(DataConfigFactory):
             model_transforms=model_transforms,
             action_sequence_keys=(robot_config.action_key,),
             use_quantile_norm=False,
-            dataset_root=self.dataset_root or base_config.dataset_root,
+            dataset_root=dataset_root,
             episodes_index=self.episodes_index or base_config.episodes_index,
             frame_stride=self.frame_stride,
-            subtask_prompts_path=self.subtask_prompts_path,
+            subtask_prompts_path=subtask_path,
             subtask_whole_task_prob=self.subtask_whole_task_prob,
+            subtask_prediction=subtask_prediction,
         )
 
 
