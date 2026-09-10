@@ -78,13 +78,13 @@ OmniGibson / Isaac Sim 里做**闭环 rollout**，在与训练不同的**场景�
   - **每任务 q_score** = 该任务所有实例的均值；**总体 q_score** = 100 个任务的均值。
 
 **我们实际跑的**：`mode=public_test`，`instance_indices = 0 1 2 3 4` → 实例 **301–305**
-（20 个公开实例中的 5 个）× 100 任务 ≈ 500 rollout（π0.5 实收 475，
+（20 个公开实例中的 5 个）× 100 任务 ≈ 500 rollout（π0.5 实收 475、GR00T 491，
 少数因模拟器崩溃丢失）。结论见 `EVAL_SUMMARY.md` / `EVAL_FINDINGS.md`。
 
 ## 注意事项
 
 - 这是本机暂存副本，只放了 **3 路 RGB**；depth 相机（`observation.depth_linear.*`）
-  故意未拷贝——π0.5 只用 RGB，省去约一半空间。
+  故意未拷贝——两个模型（π0.5 / GR00T）都只用 RGB，省去约一半空间。
 - 本机 `meta/info.json` 已剔除 depth 视频键（原件备份为 `info.json.orig`）；但
   `meta/episodes/*.parquet` 元数据里仍保留 depth 列引用，本机并无对应 depth 视频文件。
   不影响 RGB 训练。

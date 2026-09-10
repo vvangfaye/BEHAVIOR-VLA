@@ -1,0 +1,110 @@
+# BEHAVIOR-1K Sub-task Variability by Task
+
+Source: `/var/tmp/behavior-1k/2026-challenge-demos/meta/subtask_segments.parquet`
+
+统计口径：每个任务200个 episode；“序列”只比较非空 sub-task 文本及其顺序，不比较帧边界。主序列覆盖率是最常见序列出现次数 / 200。
+
+稳定度：高 ≥90%，较高 ≥80%，中 ≥50%，低 <50%。
+
+| Index | Task | 不同序列数 | 主序列次数 | 覆盖率 | 不同文本集合 | sub-task文本数 | 片段数 min/median/max | 稳定度 |
+|---:|---|---:|---:|---:|---:|---:|---:|---|
+| 0 | `turning_on_radio` | 2 | 198 | 99.0% | 2 | 5 | 4/4/4 | 高 |
+| 1 | `picking_up_trash` | 12 | 177 | 88.5% | 9 | 14 | 12/12/12 | 较高 |
+| 2 | `putting_away_Halloween_decorations` | 69 | 25 | 12.5% | 10 | 19 | 1/26/28 | 低 |
+| 3 | `cleaning_up_plates_and_food` | 10 | 125 | 62.5% | 4 | 13 | 15/18/19 | 中 |
+| 4 | `can_meat` | 59 | 13 | 6.5% | 8 | 14 | 22/25/27 | 低 |
+| 5 | `setting_mousetraps` | 3 | 197 | 98.5% | 2 | 6 | 8/8/9 | 高 |
+| 6 | `hiding_Easter_eggs` | 39 | 48 | 24.0% | 10 | 12 | 7/12/15 | 低 |
+| 7 | `picking_up_toys` | 169 | 5 | 2.5% | 34 | 23 | 21/26/34 | 低 |
+| 8 | `rearranging_kitchen_furniture` | 28 | 78 | 39.0% | 21 | 24 | 14/15/18 | 低 |
+| 9 | `putting_up_Christmas_decorations_inside` | 50 | 54 | 27.0% | 14 | 28 | 23/32/34 | 低 |
+| 10 | `set_up_a_coffee_station_in_your_kitchen` | 104 | 13 | 6.5% | 28 | 21 | 10/18/21 | 低 |
+| 11 | `putting_dishes_away_after_cleaning` | 45 | 37 | 18.5% | 2 | 9 | 19/25/28 | 低 |
+| 12 | `preparing_lunch_box` | 112 | 23 | 11.5% | 40 | 29 | 14/21/26 | 低 |
+| 13 | `loading_the_car` | 31 | 66 | 33.0% | 13 | 20 | 14/16/19 | 低 |
+| 14 | `carrying_in_groceries` | 14 | 165 | 82.5% | 11 | 26 | 20/21/24 | 较高 |
+| 15 | `bringing_in_wood` | 16 | 184 | 92.0% | 7 | 9 | 11/12/15 | 高 |
+| 16 | `moving_boxes_to_storage` | 2 | 199 | 99.5% | 2 | 7 | 10/10/10 | 高 |
+| 17 | `bringing_water` | 11 | 116 | 58.0% | 8 | 11 | 6/9/10 | 中 |
+| 18 | `tidying_bedroom` | 12 | 185 | 92.5% | 10 | 16 | 9/11/12 | 高 |
+| 19 | `outfit_a_basic_toolbox` | 184 | 4 | 2.0% | 48 | 28 | 16/21.5/29 | 低 |
+| 20 | `sorting_vegetables` | 200 | 1 | 0.5% | 6 | 20 | 36/42/51 | 低 |
+| 21 | `collecting_childrens_toys` | 38 | 67 | 33.5% | 19 | 32 | 22/25/28 | 低 |
+| 22 | `putting_shoes_on_rack` | 36 | 33 | 16.5% | 6 | 11 | 12/14/14 | 低 |
+| 23 | `boxing_books_up_for_storage` | 11 | 166 | 83.0% | 4 | 11 | 25/28/29 | 较高 |
+| 24 | `storing_food` | 157 | 5 | 2.5% | 7 | 22 | 29/33/40 | 低 |
+| 25 | `clearing_food_from_table_into_fridge` | 7 | 158 | 79.0% | 4 | 18 | 20/22/23 | 中 |
+| 26 | `assembling_gift_baskets` | 132 | 29 | 14.5% | 7 | 22 | 47/58/61 | 低 |
+| 27 | `sorting_household_items` | 133 | 7 | 3.5% | 33 | 29 | 18/22/28 | 低 |
+| 28 | `getting_organized_for_work` | 196 | 2 | 1.0% | 143 | 53 | 27/43/52 | 低 |
+| 29 | `clean_up_your_desk` | 187 | 3 | 1.5% | 67 | 58 | 37/42/48 | 低 |
+| 30 | `setting_the_fire` | 19 | 165 | 82.5% | 9 | 20 | 16/17/18 | 较高 |
+| 31 | `clean_boxing_gloves` | 18 | 73 | 36.5% | 7 | 12 | 7/9/13 | 低 |
+| 32 | `wash_a_baseball_cap` | 15 | 40 | 20.0% | 5 | 10 | 8/11/12 | 低 |
+| 33 | `wash_dog_toys` | 144 | 6 | 3.0% | 28 | 24 | 15/18/21 | 低 |
+| 34 | `hanging_pictures` | 5 | 101 | 50.5% | 5 | 7 | 4/5/6 | 中 |
+| 35 | `attach_a_camera_to_a_tripod` | 8 | 162 | 81.0% | 6 | 11 | 5/6/9 | 较高 |
+| 36 | `clean_a_patio` | 176 | 4 | 2.0% | 19 | 23 | 41/53/69 | 低 |
+| 37 | `clean_a_trumpet` | 10 | 182 | 91.0% | 9 | 10 | 5/6/9 | 高 |
+| 38 | `spraying_for_bugs` | 11 | 190 | 95.0% | 8 | 12 | 9/10/18 | 高 |
+| 39 | `spraying_fruit_trees` | 11 | 175 | 87.5% | 8 | 12 | 10/10/10 | 较高 |
+| 40 | `make_microwave_popcorn` | 3 | 197 | 98.5% | 2 | 8 | 8/8/8 | 高 |
+| 41 | `cook_cabbage` | 141 | 22 | 11.0% | 66 | 38 | 29/34/45 | 低 |
+| 42 | `chop_an_onion` | 160 | 8 | 4.0% | 53 | 29 | 14/19/27 | 低 |
+| 43 | `slicing_vegetables` | 184 | 3 | 1.5% | 55 | 38 | 25/28/35 | 低 |
+| 44 | `chopping_wood` | 64 | 46 | 23.0% | 12 | 16 | 25/27/31 | 低 |
+| 45 | `cook_hot_dogs` | 11 | 188 | 94.0% | 11 | 19 | 11/12/12 | 高 |
+| 46 | `cook_bacon` | 16 | 104 | 52.0% | 14 | 21 | 10/14/15 | 中 |
+| 47 | `freeze_pies` | 33 | 90 | 45.0% | 15 | 25 | 17/26/27 | 低 |
+| 48 | `canning_food` | 177 | 5 | 2.5% | 54 | 56 | 58/66/72 | 低 |
+| 49 | `make_pizza` | 198 | 2 | 1.0% | 149 | 79 | 50/61/72 | 低 |
+| 50 | `freeze_fruit` | 97 | 25 | 12.5% | 40 | 34 | 22/29/36 | 低 |
+| 51 | `cook_a_brisket` | 24 | 75 | 37.5% | 16 | 20 | 6/17/19 | 低 |
+| 52 | `sorting_bottles_cans_and_paper` | 197 | 2 | 1.0% | 40 | 34 | 19/23/33 | 低 |
+| 53 | `tidying_living_room` | 20 | 103 | 51.5% | 11 | 21 | 16/17/20 | 中 |
+| 54 | `putting_away_toys` | 38 | 96 | 48.0% | 3 | 6 | 20/24/28 | 低 |
+| 55 | `re_shelving_library_books` | 26 | 68 | 34.0% | 3 | 11 | 17/21/21 | 低 |
+| 56 | `make_rose_centerpieces` | 18 | 87 | 43.5% | 3 | 9 | 9/13/16 | 低 |
+| 57 | `sweeping_garage` | 4 | 193 | 96.5% | 3 | 5 | 4/4/6 | 高 |
+| 58 | `stacking_wood` | 34 | 55 | 27.5% | 6 | 7 | 18/21/22 | 低 |
+| 59 | `organizing_art_supplies` | 109 | 7 | 3.5% | 10 | 16 | 15/17/19 | 低 |
+| 60 | `scrubbing_bathroom_floor` | 20 | 44 | 22.0% | 2 | 5 | 4/9/19 | 低 |
+| 61 | `bringing_paper_to_recycling` | 58 | 30 | 15.0% | 9 | 19 | 19/22/24 | 低 |
+| 62 | `halve_an_egg` | 12 | 119 | 59.5% | 11 | 16 | 13/14/15 | 中 |
+| 63 | `installing_smoke_detectors` | 7 | 156 | 78.0% | 3 | 6 | 4/4/8 | 中 |
+| 64 | `setting_the_table` | 13 | 159 | 79.5% | 4 | 21 | 27/29/30 | 中 |
+| 65 | `unloading_the_car` | 44 | 44 | 22.0% | 20 | 19 | 12/15/20 | 低 |
+| 66 | `turning_out_all_lights_before_sleep` | 12 | 144 | 72.0% | 3 | 8 | 12/14/16 | 中 |
+| 67 | `boxing_food_after_dinner` | 22 | 50 | 25.0% | 4 | 18 | 19/22/24 | 低 |
+| 68 | `cleaning_up_branches_and_twigs` | 25 | 77 | 38.5% | 4 | 9 | 12/17/19 | 低 |
+| 69 | `vacuuming_floors` | 55 | 88 | 44.0% | 4 | 9 | 6/10/22 | 低 |
+| 70 | `thawing_frozen_food` | 19 | 98 | 49.0% | 6 | 16 | 15/15/19 | 低 |
+| 71 | `clean_your_rusty_garden_tools` | 3 | 141 | 70.5% | 3 | 15 | 15/15/16 | 中 |
+| 72 | `cook_a_frozen_pie` | 2 | 174 | 87.0% | 1 | 13 | 13/13/14 | 较高 |
+| 73 | `organizing_school_stuff` | 16 | 83 | 41.5% | 5 | 22 | 24/25/27 | 低 |
+| 74 | `carrying_out_garden_furniture` | 44 | 79 | 39.5% | 30 | 21 | 10/11/15 | 低 |
+| 75 | `put_together_a_basic_pruning_kit` | 2 | 106 | 53.0% | 1 | 9 | 11/12/12 | 中 |
+| 76 | `dispose_of_glass` | 28 | 47 | 23.5% | 2 | 8 | 12/15/16 | 低 |
+| 77 | `installing_a_modem` | 4 | 141 | 70.5% | 2 | 6 | 5/5/7 | 中 |
+| 78 | `make_cabinet_doors` | 15 | 118 | 59.0% | 6 | 10 | 5/6/9 | 中 |
+| 79 | `polishing_shoes` | 29 | 103 | 51.5% | 10 | 17 | 14/15/21 | 中 |
+| 80 | `clean_up_broken_glass` | 4 | 179 | 89.5% | 1 | 4 | 8/10/12 | 较高 |
+| 81 | `packing_meal_for_delivery` | 27 | 79 | 39.5% | 4 | 8 | 16/20/27 | 低 |
+| 82 | `store_batteries` | 10 | 71 | 35.5% | 6 | 13 | 14/18/20 | 低 |
+| 83 | `store_honey` | 12 | 178 | 89.0% | 6 | 15 | 6/18/18 | 较高 |
+| 84 | `tidying_bathroom` | 39 | 49 | 24.5% | 26 | 25 | 18/20/21 | 低 |
+| 85 | `putting_dirty_dishes_in_sink` | 3 | 197 | 98.5% | 3 | 15 | 16/18/18 | 高 |
+| 86 | `make_gift_bags_for_baby_showers` | 107 | 9 | 4.5% | 10 | 17 | 17/23/29 | 低 |
+| 87 | `collecting_aluminum_cans` | 12 | 148 | 74.0% | 1 | 5 | 13/16/18 | 中 |
+| 88 | `rearrange_your_room` | 2 | 199 | 99.5% | 2 | 10 | 14/14/14 | 高 |
+| 89 | `installing_a_fax_machine` | 5 | 141 | 70.5% | 5 | 7 | 4/7/7 | 中 |
+| 90 | `composting_waste` | 16 | 89 | 44.5% | 6 | 12 | 10/12/12 | 低 |
+| 91 | `store_produce` | 59 | 43 | 21.5% | 30 | 28 | 16/20/22 | 低 |
+| 92 | `installing_a_scanner` | 5 | 127 | 63.5% | 4 | 7 | 5/6/7 | 中 |
+| 93 | `clean_a_keyboard` | 4 | 178 | 89.0% | 4 | 8 | 4/6/6 | 较高 |
+| 94 | `dispose_of_batteries` | 38 | 40 | 20.0% | 14 | 20 | 14/17/19 | 低 |
+| 95 | `cook_brussels_sprouts` | 167 | 4 | 2.0% | 23 | 33 | 42/48/54 | 低 |
+| 96 | `cook_broccolini` | 9 | 113 | 56.5% | 3 | 10 | 9/9/11 | 中 |
+| 97 | `setup_a_bar_for_a_cocktail_party` | 38 | 28 | 14.0% | 8 | 24 | 27/29/34 | 低 |
+| 98 | `laying_tile_floors` | 12 | 81 | 40.5% | 4 | 8 | 15/16/19 | 低 |
+| 99 | `sorting_books_on_shelf` | 68 | 81 | 40.5% | 46 | 30 | 12/13/24 | 低 |

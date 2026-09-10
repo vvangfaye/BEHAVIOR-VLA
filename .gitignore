@@ -1,6 +1,7 @@
 # The upstream repositories are flattened into this workspace repository.
 
-# Large datasets, generated views, models, and training artifacts.
+# Large local source trees, datasets, generated views, models, and training artifacts.
+/BEHAVIOR-1K/
 /dataset_views/
 /datasets/
 /data/
@@ -26,6 +27,7 @@ __pycache__/
 .downloads/
 .hfd/
 .hf-shards/
+/nebula/config.sh
 
 # Runtime logs and temporary files.
 *.log

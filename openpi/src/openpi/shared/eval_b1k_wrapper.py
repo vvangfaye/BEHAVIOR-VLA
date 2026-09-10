@@ -1,8 +1,13 @@
+import logging
+
 import numpy as np
 import torch
 from openpi_client.base_policy import BasePolicy
 from openpi_client.image_tools import resize_with_pad
 from openpi.configs.robots import ROBOT_REGISTRY
+
+
+logger = logging.getLogger(__name__)
 
 
 class B1KPolicyWrapper:
@@ -38,14 +43,25 @@ class B1KPolicyWrapper:
         self.sequence_lengths = None  # Shape: (batch, max_sequences) - total length of each sequence
         self.num_active_sequences = None  # Shape: (batch,) - number of active sequences per batch element
         self.step_counter = None  # Shape: (batch,)
+        self._last_prompt = None
 
-    def reset(self):
+    def _clear_action_buffers(self):
         self.batch_size = None
         self.action_buffer = None
         self.sequence_indices = None
         self.sequence_lengths = None
         self.num_active_sequences = None
         self.step_counter = None
+
+    def _resolve_prompt(self, obs: dict) -> str:
+        prompt = obs.get("prompt")
+        if isinstance(prompt, str) and prompt.strip():
+            return prompt.strip()
+        return self.text_prompt
+
+    def reset(self):
+        self._clear_action_buffers()
+        self._last_prompt = None
         self.policy.reset()
 
     def _ensure_batch_initialized(self, batch_size: int, action_dim: int = None):
@@ -73,6 +89,7 @@ class B1KPolicyWrapper:
         if prop_state.ndim == 1:
             prop_state = prop_state[None, :]  # Add batch dimension
         batch_size = prop_state.shape[0]
+        prompt = self._resolve_prompt(obs)
         # Process camera images from robot config
         observations = []
         for camera_key in sorted(self.robot.observations.keys()):
@@ -91,7 +108,7 @@ class B1KPolicyWrapper:
                 "observation/image_1": img_obs[i, 1],
                 "observation/image_2": img_obs[i, 2],
                 "observation/state": prop_state[i],
-                "prompt": self.text_prompt,
+                "prompt": prompt,
             }
             for i in range(batch_size)
         ]
@@ -171,7 +188,8 @@ class B1KPolicyWrapper:
         batch_size = len(input_batch)
 
         # Initialize buffers on first call
-        if self.action_buffer is None:
+        initialized = self.action_buffer is None
+        if initialized:
             # Need to infer once to get action_dim
             action = []
             for i in range(batch_size):
@@ -189,6 +207,8 @@ class B1KPolicyWrapper:
 
         # Step 1: Run policy for elements that need replanning
         needs_replan = (self.step_counter % self.action_horizon) == 0
+        if initialized:
+            needs_replan[:] = False
         if needs_replan.any():
             indices_needing_replan = np.where(needs_replan)[0]
 
@@ -355,6 +375,14 @@ class B1KPolicyWrapper:
 
     def act(self, input_obs):
         """Dispatch to the appropriate action method based on control mode."""
+        prompt = self._resolve_prompt(input_obs)
+        if self._last_prompt is not None and prompt != self._last_prompt:
+            logger.info("Policy prompt changed; clearing action buffers for immediate replanning.")
+            self._clear_action_buffers()
+        self._last_prompt = prompt
+        input_obs = dict(input_obs)
+        input_obs["prompt"] = prompt
+
         if self.control_mode == "receding_temporal":
             return self.act_receding_temporal(input_obs)
         elif self.control_mode == "receding_horizon":

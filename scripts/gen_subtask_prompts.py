@@ -23,7 +23,7 @@ run, written to <dataset>/meta/subtask_segments.parquet:
 The runs tile [0, episode_length) so a frame lookup is an interval search. This is
 ~1000x smaller than a per-frame table, so every dataloader worker can hold it.
 
-  openpi/.venv/bin/python scripts/gen_subtask_prompts.py \
+  /dev/shm/wangfaye/conda_envs/b1k-groot/bin/python scripts/gen_subtask_prompts.py \
       --dataset /var/tmp/behavior-1k/2026-challenge-demos \
       --annotations /var/tmp/behavior-1k/2026-challenge-demos/annotations
 """

@@ -12,8 +12,10 @@ NUM_WORKERS="${NUM_WORKERS:-8}"
 # Optional (default off = unchanged behavior):
 #   SUBTASK_PROMPTS=<segment parquet>  -> condition on the current sub-task
 #   FRAME_STRIDE=<int>                 -> subsample training frames by this stride
+#   EPISODES_FILE=<newline list>       -> train only the listed original episode indices
 SUBTASK_PROMPTS="${SUBTASK_PROMPTS:-}"
 FRAME_STRIDE="${FRAME_STRIDE:-1}"
+EPISODES_FILE="${EPISODES_FILE:-}"
 
 if [[ ! -f "$DATASET_ROOT/meta/info.json" ]]; then
     echo "Dataset not found or incomplete: $DATASET_ROOT/meta/info.json" >&2
@@ -46,6 +48,24 @@ case "$MODE" in
         exit 2
         ;;
 esac
+
+if [[ -n "$EPISODES_FILE" ]]; then
+    if [[ ! -f "$EPISODES_FILE" ]]; then
+        echo "Episode index file not found: $EPISODES_FILE" >&2
+        exit 1
+    fi
+    mapfile -t EPISODES_INDEX < "$EPISODES_FILE"
+    if (( ${#EPISODES_INDEX[@]} == 0 )); then
+        echo "Episode index file is empty: $EPISODES_FILE" >&2
+        exit 1
+    fi
+    for EPISODE_INDEX in "${EPISODES_INDEX[@]}"; do
+        if [[ ! "$EPISODE_INDEX" =~ ^[0-9]+$ ]]; then
+            echo "Invalid episode index '$EPISODE_INDEX' in $EPISODES_FILE" >&2
+            exit 1
+        fi
+    done
+fi
 
 if [[ "$NUM_GPUS" -ne "$(awk -F, '{print NF}' <<<"$CUDA_DEVICES")" ]]; then
     echo "NUM_GPUS=$NUM_GPUS does not match CUDA_DEVICES=$CUDA_DEVICES" >&2

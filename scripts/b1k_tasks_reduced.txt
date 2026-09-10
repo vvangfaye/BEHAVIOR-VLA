@@ -3,7 +3,7 @@
 # Columns: task <TAB> instances <TAB> est_steps
 #
 # Budget: 160 rollouts instead of 500. Derived from three full 500-rollout
-# historical sweeps (pi05 results shown below):
+# sweeps (pi05 50k, pi05 270k, GROOT N1.7 ~1450 rollouts total):
 #   - Only 20 of the 100 tasks ever produced a nonzero q_score. Those get 4
 #     instances each, which is where nearly all the discriminative power sits.
 #   - The other 80 tasks were at the floor on every model and instance. They
@@ -22,6 +22,7 @@
 #              n    mean    nonzero      n    mean    nonzero
 #   pi05 50k   475  0.0045  14           159  0.0119  12
 #   pi05 270k  488  0.0145  31           159  0.0333  23
+#   GROOT      491  0.0008   3           159  0.0025   3
 #
 # Mean q_score is inflated about 2.3x here because the dropped rollouts were all
 # at the floor. Compare reduced-set numbers only against other reduced-set

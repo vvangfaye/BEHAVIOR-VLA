@@ -14,7 +14,7 @@
 - 另有两个汇总表：`skill_summary.csv`（技能词表 + 统计）、`skill_type_summary.csv`（技能类型统计）。
 - 共约 **406,341 个技能片段**，**35 种技能**，3 大类型。
 
-> 重要：当前 π0.5 训练与推理**都没用**这些 sub-task，只喂了整任务级 prompt
+> 重要：当前 π0.5 / GR00T 训练与推理**都没用**这些 sub-task，只喂了整任务级 prompt
 > （`prompt_from_task=True`，`tasks.jsonl` 每任务一句话）。见文末"如何接入"。
 
 ---
@@ -97,6 +97,7 @@
 3. 训练/推理改喂当前 sub-task 而非整任务：
    - π0.5：openpi 数据管线支持逐帧 `prompt`，改造主要在数据侧（生成 per-frame 语言列）；
      这与 π0.5 本身的分层设计（高层预测 sub-task 语言、低层动作专家执行）一致。
+   - GR00T：`annotation.human.task_description` 改为逐帧 sub-task 文本。
 4. 推理时若无高层规划器，可先用固定/启发式子任务序列，或再训一个高层 sub-task 预测头。
 
 > 动机：当前把 ~5 分钟、约 10 个子步骤的长程任务当成"整任务→扁平动作"，模型分不清当前处于哪一步，
@@ -121,7 +122,7 @@
 ### 生成脚本与产物
 
 ```bash
-openpi/.venv/bin/python scripts/gen_subtask_prompts.py \
+/dev/shm/wangfaye/conda_envs/b1k-groot/bin/python scripts/gen_subtask_prompts.py \
     --dataset /var/tmp/behavior-1k/2026-challenge-demos
 ```
 
@@ -166,7 +167,8 @@ openpi/.venv/bin/python scripts/gen_subtask_prompts.py \
 
 ### 待办
 
-1. **闭环推理仍缺高层**：`openpi` 中搜不到任何 sub-task/high-level 机制，所以闭环时没有东西
+1. **GR00T 侧注入**：把段表接到 `annotation.human.task_description`（逐帧改为当前子任务）。
+2. **闭环推理仍缺高层**：`openpi` 中搜不到任何 sub-task/high-level 机制，所以闭环时没有东西
    产出"当前该做哪个子任务"。需要二选一：训练一个高层子任务预测头，或先用规则/脚本化子任务序列。
-2. 建议先做**开环验证**：用 GT 子任务喂入，量 `left_arm/right_arm` 的开环 L1 能否跑赢 `hold`，
+3. 建议先做**开环验证**：用 GT 子任务喂入，量 `left_arm/right_arm` 的开环 L1 能否跑赢 `hold`，
    再决定是否投入高层头的训练。
