@@ -76,6 +76,8 @@ class WebsocketPolicyServer:
                 action = {
                     "action": action.cpu().numpy(),
                 }
+                if subtasks := getattr(self._policy, "last_subtasks", None):
+                    action["subtasks"] = [subtasks[i] for i in sorted(subtasks)]
                 action["server_timing"] = {
                     "infer_ms": infer_time * 1000,
                 }

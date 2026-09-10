@@ -44,6 +44,8 @@ class B1KPolicyWrapper:
         self.num_active_sequences = None  # Shape: (batch,) - number of active sequences per batch element
         self.step_counter = None  # Shape: (batch,)
         self._last_prompt = None
+        self._last_subtask = None
+        self.last_subtasks = {}
 
     def _clear_action_buffers(self):
         self.batch_size = None
@@ -52,6 +54,7 @@ class B1KPolicyWrapper:
         self.sequence_lengths = None
         self.num_active_sequences = None
         self.step_counter = None
+        self.last_subtasks = {}
 
     def _resolve_prompt(self, obs: dict) -> str:
         prompt = obs.get("prompt")
@@ -62,7 +65,14 @@ class B1KPolicyWrapper:
     def reset(self):
         self._clear_action_buffers()
         self._last_prompt = None
+        self._last_subtask = None
         self.policy.reset()
+
+    def _infer(self, obs, index):
+        result = self.policy.infer(obs)
+        if "subtask" in result:
+            self.last_subtasks[int(index)] = result["subtask"]
+        return result
 
     def _ensure_batch_initialized(self, batch_size: int, action_dim: int = None):
         """Ensure buffers are initialized for the given batch size."""
@@ -89,6 +99,8 @@ class B1KPolicyWrapper:
         if prop_state.ndim == 1:
             prop_state = prop_state[None, :]  # Add batch dimension
         batch_size = prop_state.shape[0]
+        if batch_size > 1 and getattr(self.policy, "metadata", {}).get("subtask_interval", 1) > 1:
+            raise ValueError("Batched B1K environments require subtask_interval=1 or separate policy instances.")
         prompt = self._resolve_prompt(obs)
         # Process camera images from robot config
         observations = []
@@ -112,6 +124,9 @@ class B1KPolicyWrapper:
             }
             for i in range(batch_size)
         ]
+        if "subtask" in obs:
+            for item in processed_input:
+                item["subtask"] = obs["subtask"]
         return processed_input
 
     def _get_current_actions(
@@ -152,7 +167,7 @@ class B1KPolicyWrapper:
             # Create sub-batch for elements that need inference
             action = []
             for i in indices_needing_inference:
-                action.append(self.policy.infer(input_batch[i]))
+                action.append(self._infer(input_batch[i], i))
             target_action = np.array([a["actions"].copy() for a in action])  # (sub_batch_size, T, action_dim)
 
             # Initialize buffers on first inference
@@ -193,7 +208,7 @@ class B1KPolicyWrapper:
             # Need to infer once to get action_dim
             action = []
             for i in range(batch_size):
-                action.append(self.policy.infer(input_batch[i]))
+                action.append(self._infer(input_batch[i], i))
             target_action = np.array([a["actions"].copy() for a in action])  # (B, T, action_dim)
             action_dim = target_action.shape[2]
             self._ensure_batch_initialized(batch_size, action_dim)
@@ -215,7 +230,7 @@ class B1KPolicyWrapper:
             # Run inference only on sub-batch
             action = []
             for i in indices_needing_replan:
-                action.append(self.policy.infer(input_batch[i]))
+                action.append(self._infer(input_batch[i], i))
             target_action = np.array([a["actions"].copy() for a in action])  # (B, T, action_dim)
 
             # Add new sequences (vectorized where possible)
@@ -302,7 +317,7 @@ class B1KPolicyWrapper:
         batch_size = len(input_batch)
         action = []
         for i in range(batch_size):
-            action.append(self.policy.infer(input_batch[i]))
+            action.append(self._infer(input_batch[i], i))
         target_action = np.array([a["actions"].copy() for a in action])  # (B, T, action_dim)
         action_dim = target_action.shape[2]
 
@@ -376,10 +391,15 @@ class B1KPolicyWrapper:
     def act(self, input_obs):
         """Dispatch to the appropriate action method based on control mode."""
         prompt = self._resolve_prompt(input_obs)
-        if self._last_prompt is not None and prompt != self._last_prompt:
-            logger.info("Policy prompt changed; clearing action buffers for immediate replanning.")
+        subtask = input_obs.get("subtask")
+        if subtask is not None and not isinstance(subtask, str):
+            raise ValueError("An explicit B1K subtask override must be a text string.")
+        if self._last_prompt is not None and (prompt != self._last_prompt or subtask != self._last_subtask):
+            logger.info("Policy instruction changed; clearing action buffers for immediate replanning.")
             self._clear_action_buffers()
+            self.policy.reset()
         self._last_prompt = prompt
+        self._last_subtask = subtask
         input_obs = dict(input_obs)
         input_obs["prompt"] = prompt
 

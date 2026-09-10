@@ -10,7 +10,7 @@ Challenge baselines:
 Official documentation: [challenge](https://behavior.stanford.edu/challenge/index.html)
 and [baseline guide](https://behavior.stanford.edu/challenge/baselines.html).
 
-For joint **subtask language prediction + action training** on BEHAVIOR 2026, see
+For joint **subtask language prediction + action training and autonomous inference** on BEHAVIOR 2026, see
 [the subtask training guide](docs/subtask_training.md) and
 `scripts/train_pi05_subtask_b1k.sh`. This is separate from replacing the task prompt with a subtask.
 

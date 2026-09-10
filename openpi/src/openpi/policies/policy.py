@@ -62,7 +62,7 @@ class Policy(BasePolicy):
         else:
             # JAX model setup
             self._sample_actions = nnx_utils.module_jit(model.sample_actions)
-            self._rng = rng or jax.random.key(0)
+            self._rng = rng if rng is not None else jax.random.key(0)
 
     @override
     def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
@@ -97,7 +97,9 @@ class Policy(BasePolicy):
         if self._is_pytorch_model:
             outputs = jax.tree.map(lambda x: np.asarray(x[0, ...].detach().cpu()), outputs)
         else:
-            outputs = jax.tree.map(lambda x: np.asarray(x[0, ...]), outputs)
+            # Robot output transforms may modify actions in place. JAX's NumPy
+            # view can be read-only, so materialize writable host arrays here.
+            outputs = jax.tree.map(lambda x: np.array(x[0, ...], copy=True), outputs)
 
         outputs = self._output_transform(outputs)
         outputs["policy_timing"] = {
@@ -120,6 +122,13 @@ class PolicyRecorder(_base_policy.BasePolicy):
         self._record_dir = pathlib.Path(record_dir)
         self._record_dir.mkdir(parents=True, exist_ok=True)
         self._record_step = 0
+
+    @property
+    def metadata(self):
+        return self._policy.metadata
+
+    def reset(self):
+        self._policy.reset()
 
     @override
     def infer(self, obs: dict) -> dict:  # type: ignore[misc]

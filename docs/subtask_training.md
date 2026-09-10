@@ -51,7 +51,7 @@ DATASET_ROOT=/path/to/2026-challenge-demos \
 
 默认检查全数据的标注覆盖和 token 预算，不加载视频、基础模型或优化器。报告保存至
 `openpi/outputs/subtask_preflight/<EXP_NAME>.json`。预算检查结合最长任务、最长 subtask
-和机器人状态数字的保守长度上界；数据 tokenizer 也对每条实际样本再次严格检查。
+和机器人状态数字的保守长度上界，并预留完整生成预算；数据 tokenizer 也对每条实际样本再次严格检查。
 
 ```bash
 DATASET_ROOT=/path/to/2026-challenge-demos \
@@ -130,12 +130,60 @@ cd openpi
 先检查小数据切片上 subtask CE 下降、token 准确率上升，并同时观察动作损失。token 准确率
 是使用真实前文时的指标，不是自由生成文本正确率，也不等于机器人任务成功率。
 
+## 5. 自动生成 subtask 的在线推理
+
+已补齐 `整任务 + 当前图像/状态 → 自回归生成 subtask → 动作块`。
+使用联合监督训练得到的 checkpoint，启动 B1K 服务：
+
+```bash
+cd openpi
+.venv/bin/python scripts/b1k/serve_b1k.py \
+  --robot b1k/R1Pro --task b1k/turning_on_radio \
+  --repo-id behavior-1k/2026-challenge-demos \
+  --policy.config pi05_b1k --policy.dir /path/to/subtask-checkpoint/49999 \
+  --subtask-prediction --max-token-len 512 --max-subtask-len 64 \
+  --subtask-interval 1 --action-horizon 16 --port 8000
+```
+
+`repo-id` 必须对应 checkpoint 的 assets 目录；token 长度配置与训练保持一致。
+普通 action-only checkpoint 没有经过新增的文本监督，不能仅靠开启服务参数就获得可靠的
+subtask 预测。JAX checkpoint 由原有加载流程恢复；PyTorch 暂不支持此功能。
+
+- 默认不需要输入真值 subtask。`create_trained_policy` 检测到模型配置中的
+  `train_subtask_prediction=True` 时会创建 `SubtaskPolicy`。
+- 语言前缀与训练完全一致。逐 token 解码使用固定容量 KV cache，保留每条样本独立的
+  位置、有效掩码和 EOS 停止状态。动作端直接使用生成的 token，包含 EOS 和 Action 提示，
+  不经过文字解码再编码。语言生成和动作采样各做一次图像编码，未跨阶段复用视觉特征。
+- `subtask_interval=1` 表示每次请求新动作块时重新生成；结合 `action_horizon=16`，通常
+  执行 16 个控制步后根据新观测重新预测。设置 N>1 可在 N 次动作块请求之间复用 subtask，
+  但动作预测始终读取当前图像和状态。多环境批处理必须使用 interval=1 或独立 policy 实例。
+- 这是按动作块重新预测的调度，并未新增独立的 subtask 完成判别器。重新生成相同文本
+  表示继续当前 subtask；切换质量仍需真实闭环评测。
+- 显式传入 `subtask` 时执行给定文本的动作推理，输出标记 `provided`。下一次不提供
+  subtask 时恢复自主生成，不会缓存真值供后续使用。任务或手动 subtask 改变、episode reset
+  时清空相关状态；B1K 动作缓存和录制 wrapper 的 reset 也已接通。
+- 没有生成 EOS、标签为空或 token 预算不足会报错，不会截断后继续动作预测。
+
+`policy.infer` 输出 `actions`、`subtask`、`subtask_source`（generated / cached / provided）
+和耗时。B1K websocket 保留原有 `action` 字段，并附带 `subtasks` 列表；服务日志也记录
+新生成的文本。每个机器人环境应有自己的有状态 policy/server 实例。
+
+原有闭环评测脚本也已接入（从 BEHAVIOR-VLAs 根目录运行）：
+
+```bash
+MODEL=pi05 SUBTASK_PREDICTION=1 \
+PI05_CKPT=/path/to/subtask-checkpoint/49999 \
+OUTPUT_ROOT=/path/to/subtask-evaluation \
+  bash scripts/eval_b1k.sh turning_on_radio
+```
+
+可用 MAX_TOKEN_LEN、MAX_SUBTASK_LEN、SUBTASK_INTERVAL、SUBTASK_TEMPERATURE 调整服务参数。
+默认 greedy 解码（temperature=0）；请给预测 subtask 与 oracle 评测使用不同输出目录。
+
 ## 实现范围与回归测试
 
-本次实现训练和 **给定真实 subtask 的动作评估**；没有移植 #942 的自动生成 subtask / 两阶段
-在线推理。使用此训练格式进行动作评估时，输入需要同时提供 prompt 和 subtask，并启用相同
-model 配置。原有只给整任务指令的 server 不能据此被认定为有效的分层策略评估。
-PyTorch trainer 对此开关明确报 NotImplementedError。
+当前包含联合训练、自动 subtask 生成及动作推理、给定 subtask 的对比推理和 B1K 服务接入。
+本次仅实现和验证本地代码，没有启动 GPU 训练或 OmniGibson 闭环任务。
 
 在安装了仓库训练依赖的环境中，从 `openpi/` 运行：
 
@@ -144,6 +192,8 @@ JAX_PLATFORMS=cpu .venv/bin/python -m pytest -q \
   src/openpi/training/subtask_data_test.py \
   src/openpi/training/subtask_pipeline_test.py \
   src/openpi/models/subtask_test.py \
+  src/openpi/models/subtask_inference_test.py \
+  src/openpi/policies/subtask_policy_test.py \
   scripts/b1k/check_subtask_data_test.py
 ```
 
@@ -151,10 +201,14 @@ JAX_PLATFORMS=cpu .venv/bin/python -m pytest -q \
 和梯度一致性、真实 Pi0/Gemma 接口的联合反向传播、小样本过拟合和原动作 API 回归。
 模型测试使用小词表和轻量图像编码器，避免下载数 GB 权重；不代表已完成 BEHAVIOR 全量训练。
 
-本次本地验证（2026-09-10）：新增测试与相关旧路径回归共 **47 项通过**，使用 CPU、
+本次本地验证（2026-09-10）：新增测试与相关旧路径回归共 **58 项通过**，使用 CPU、
 Python 3.12、JAX 0.5.3、Flax 0.10.2、Torch 2.7.1。另用官方 257,152 词表 tokenizer
 验证了标签解码、EOS 和离散状态的长度预算，并检查了启动脚本的预检、episode 子集、
 恢复训练及参数传递。新增 Python 文件通过 Ruff；启动脚本通过语法检查。
+
+推理验证包括：KV cache 解码与 teacher forcing logits 一致、不同长度前缀与 EOS 处理、
+小模型训练后保存/恢复参数再自由生成正确标签、bfloat16 参数与缓存解码、自动与给定
+subtask 路由、B1K 输入/动作适配、录制 wrapper reset、websocket 文本输出和服务 CLI。
 
 这里的数据链路测试使用合成的 BEHAVIOR 格式帧和段表，不读取真实演示视频。未执行真实
 数据上的完整 π0.5 GPU 训练，也未验证完整 checkpoint 的恢复、收敛或在线机器人成功率。

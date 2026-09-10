@@ -39,6 +39,13 @@ class Args:
     port: int = 8000
     # Record the policy's behavior for debugging.
     record: bool = False
+    # Use the joint subtask-trained checkpoint and generate text before actions.
+    subtask_prediction: bool = False
+    max_token_len: int = 512
+    max_subtask_len: int = 64
+    # Refresh every N model action-chunk requests (not simulator frames).
+    subtask_interval: int = 1
+    subtask_temperature: float = 0.0
 
 
 def main(args: Args) -> None:
@@ -47,9 +54,20 @@ def main(args: Args) -> None:
     task_prompt = TASK_REGISTRY[task_bucket][task_name]
     # log the prompt used
     logging.info(f"Using robot: {args.robot}, prompt: {task_prompt}")
-    
+
     # Load training config and override request-specific fields.
     config = _config.get_config(args.policy.config)
+    if args.subtask_prediction:
+        config = dataclasses.replace(
+            config,
+            model=dataclasses.replace(
+                config.model,
+                train_subtask_prediction=True,
+                max_token_len=args.max_token_len,
+                max_subtask_len=args.max_subtask_len,
+                subtask_loss_chunk_size=min(config.model.subtask_loss_chunk_size, args.max_subtask_len),
+            ),
+        )
     norm_stats_repo_id = args.repo_id or args.task
     logging.info("Using norm stats for repo: %s", norm_stats_repo_id)
     config = dataclasses.replace(
@@ -57,7 +75,11 @@ def main(args: Args) -> None:
     )
 
     policy = _policy_config.create_trained_policy(
-        config, args.policy.dir, default_prompt=task_prompt
+        config,
+        args.policy.dir,
+        default_prompt=task_prompt,
+        subtask_interval=args.subtask_interval,
+        subtask_temperature=args.subtask_temperature,
     )
     policy_metadata = policy.metadata
 

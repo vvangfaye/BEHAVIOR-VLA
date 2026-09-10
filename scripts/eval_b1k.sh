@@ -42,6 +42,18 @@ OMNIGIBSON_DATA_PATH="${OMNIGIBSON_DATA_PATH:-$REPO_ROOT/BEHAVIOR-1K/omnigibson-
 SERVER_GPU="${SERVER_GPU:-0}"
 EVAL_GPU="${EVAL_GPU:-1}"
 PI05_MEM_FRACTION="${PI05_MEM_FRACTION:-0.85}"
+SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-0}"
+if [[ "$SUBTASK_PREDICTION" != 0 && "$SUBTASK_PREDICTION" != 1 ]]; then
+    echo "SUBTASK_PREDICTION must be 0 or 1" >&2; exit 2
+fi
+SUBTASK_SERVER_ARGS=()
+if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
+    [[ "$MODEL" == pi05 ]] || { echo "Subtask generation requires MODEL=pi05" >&2; exit 2; }
+    : "${PI05_CKPT:?set PI05_CKPT to your joint subtask-trained checkpoint}"
+    SUBTASK_SERVER_ARGS=(--subtask-prediction --max-token-len "${MAX_TOKEN_LEN:-512}"
+        --max-subtask-len "${MAX_SUBTASK_LEN:-64}" --subtask-interval "${SUBTASK_INTERVAL:-1}"
+        --subtask-temperature "${SUBTASK_TEMPERATURE:-0.0}")
+fi
 EVAL_RUNTIME_ROOT="${EVAL_RUNTIME_ROOT:-/dev/shm/wangfaye/omnigibson-runtime/$PORT}"
 
 TASKS=("$@")
@@ -122,6 +134,7 @@ start_server() {
                 --policy.dir "$PI05_CKPT" \
                 --control_mode receding_horizon \
                 --action_horizon 16 \
+                "${SUBTASK_SERVER_ARGS[@]}" \
                 --port "$PORT" >> "$SERVER_LOG" 2>&1 &
             ;;
         groot)

@@ -47,10 +47,9 @@ class PaligemmaTokenizer:
 
         return np.asarray(tokens), np.asarray(mask)
 
-    def _subtask_token_blocks(self, prompt: str, subtask: str, state: np.ndarray | None):
+    def _subtask_prefix(self, prompt: str, state: np.ndarray | None):
         prompt = prompt.replace("_", " ").replace("\n", " ").strip()
-        subtask = subtask.replace("_", " ").replace("\n", " ").strip()
-        if not prompt or not subtask:
+        if not prompt:
             raise ValueError("Subtask supervision requires non-empty task and subtask text.")
         prefix = f"Task: {prompt}"
         if state is not None:
@@ -60,10 +59,52 @@ class PaligemmaTokenizer:
             discretized = np.digitize(state, bins=np.linspace(-1, 1, 257)[:-1]) - 1
             prefix += f", State: {' '.join(map(str, discretized))}"
         prefix += ";\nSubtask: "
+        return self._tokenizer.encode(prefix, add_bos=True)
+
+    @property
+    def eos_id(self) -> int:
+        return self._tokenizer.eos_id()
+
+    def _subtask_token_blocks(self, prompt: str, subtask: str, state: np.ndarray | None):
+        subtask = subtask.replace("_", " ").replace("\n", " ").strip()
+        if not subtask:
+            raise ValueError("Subtask supervision requires non-empty task and subtask text.")
         return (
-            self._tokenizer.encode(prefix, add_bos=True),
+            self._subtask_prefix(prompt, state),
             self._tokenizer.encode(subtask, add_eos=True),
             self._tokenizer.encode("\nAction: "),
+        )
+
+    def tokenize_subtask_prefix(self, prompt: str, state: np.ndarray | None = None, *, max_subtask_len: int = 64):
+        """Only observed context, reserving room for generated text, EOS and the action cue."""
+        prefix = self._subtask_prefix(prompt, state)
+        reserve = max_subtask_len + len(self._tokenizer.encode("\nAction: "))
+        if max_subtask_len < 2 or len(prefix) + reserve > self._max_len:
+            raise ValueError("max_token_len cannot fit the task/state plus max_subtask_len and the action cue.")
+        padding = self._max_len - len(prefix)
+        return (
+            np.asarray(prefix + [0] * padding, dtype=np.int32),
+            np.asarray([True] * len(prefix) + [False] * padding),
+            np.zeros(self._max_len, dtype=np.int32),
+            np.zeros(self._max_len, dtype=np.bool_),
+        )
+
+    def decode_subtask(self, tokens: np.ndarray) -> str:
+        return self._tokenizer.decode(np.asarray(tokens).tolist()).strip()
+
+    def tokenize_subtask_tokens(
+        self, prompt: str, tokens: np.ndarray, state: np.ndarray | None = None, *, max_subtask_len: int = 64
+    ):
+        """Condition actions on the exact generated tokens, without a decode/re-encode round trip."""
+        tokens = np.asarray(tokens)
+        if tokens.ndim != 1 or not np.issubdtype(tokens.dtype, np.integer):
+            raise ValueError("Generated subtask tokens must be a one-dimensional integer array.")
+        if len(tokens) < 2 or tokens[-1] != self.eos_id or np.any(tokens[:-1] == self.eos_id):
+            raise ValueError("Generated subtask must contain text followed by one final EOS.")
+        if np.any(tokens < 0) or np.any(tokens >= self._tokenizer.vocab_size()) or not self.decode_subtask(tokens):
+            raise ValueError("Generated subtask contains invalid or empty text.")
+        return self._pack_subtask(
+            self._subtask_prefix(prompt, state), tokens.tolist(), self._tokenizer.encode("\nAction: "), max_subtask_len
         )
 
     def subtask_token_lengths(self, prompt: str, subtask: str, state: np.ndarray | None = None) -> tuple[int, int, int]:
@@ -79,6 +120,9 @@ class PaligemmaTokenizer:
         `max_subtask_len` includes EOS and bounds the model's CE projection work.
         """
         prefix, label, suffix = self._subtask_token_blocks(prompt, subtask, state)
+        return self._pack_subtask(prefix, label, suffix, max_subtask_len)
+
+    def _pack_subtask(self, prefix, label, suffix, max_subtask_len):
         if len(label) > max_subtask_len:
             raise ValueError(
                 f"Subtask needs {len(label)} tokens including EOS, exceeds max_subtask_len={max_subtask_len}."

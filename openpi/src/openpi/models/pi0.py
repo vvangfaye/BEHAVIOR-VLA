@@ -1,4 +1,5 @@
 import logging
+import math
 
 import einops
 import flax.nnx as nnx
@@ -136,7 +137,8 @@ class Pi0(_model.BaseModel):
             # Tasks/images are bidirectional; supervised subtask tokens are causal.
             ar_mask.append(
                 jnp.zeros_like(obs.tokenized_prompt_mask)
-                if obs.token_ar_mask is None else obs.token_ar_mask.astype(jnp.bool_)
+                if obs.token_ar_mask is None
+                else obs.token_ar_mask.astype(jnp.bool_)
             )
         tokens = jnp.concatenate(tokens, axis=1)
         input_mask = jnp.concatenate(input_mask, axis=1)
@@ -202,9 +204,7 @@ class Pi0(_model.BaseModel):
     def compute_loss_with_metrics(
         self, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions, *, train: bool = False
     ) -> tuple[at.Array, dict[str, at.Array]]:
-        if self.train_subtask_prediction and (
-            observation.token_ar_mask is None or observation.token_loss_mask is None
-        ):
+        if self.train_subtask_prediction and (observation.token_ar_mask is None or observation.token_loss_mask is None):
             raise ValueError("Subtask training requires token_ar_mask and token_loss_mask from the subtask tokenizer.")
         preprocess_rng, noise_rng, time_rng = jax.random.split(rng, 3)
         observation = _model.preprocess_observation(preprocess_rng, observation, train=train)
@@ -220,9 +220,7 @@ class Pi0(_model.BaseModel):
         prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
         suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(observation, x_t, time)
         input_mask = jnp.concatenate([prefix_mask, suffix_mask], axis=1)
-        ar_mask = jnp.concatenate(
-            [prefix_ar_mask, jnp.broadcast_to(suffix_ar_mask, suffix_mask.shape)], axis=1
-        )
+        ar_mask = jnp.concatenate([prefix_ar_mask, jnp.broadcast_to(suffix_ar_mask, suffix_mask.shape)], axis=1)
         attn_mask = make_attn_mask(input_mask, ar_mask)
         positions = jnp.cumsum(input_mask, axis=1) - 1
         (prefix_out, suffix_out), _ = self.PaliGemma.llm(
@@ -255,7 +253,7 @@ class Pi0(_model.BaseModel):
         positions = jax.vmap(lambda m: jnp.nonzero(m, size=self.max_subtask_len, fill_value=0)[0])(loss_mask)
         selected_mask = jnp.arange(self.max_subtask_len)[None, :] < counts[:, None]
         batch_indices = jnp.arange(tokens.shape[0])[:, None]
-        text_hidden = prefix_out[:, -tokens.shape[1]:]
+        text_hidden = prefix_out[:, -tokens.shape[1] :]
         hidden = text_hidden[batch_indices, jnp.maximum(positions - 1, 0)]
         targets = tokens[batch_indices, positions]
 
@@ -291,6 +289,96 @@ class Pi0(_model.BaseModel):
         valid &= jnp.all(~loss_mask | observation.tokenized_prompt_mask, axis=-1)
         loss = jnp.where(valid, loss_sum / jnp.maximum(counts, 1), jnp.nan)
         return loss, correct_sum / jnp.maximum(counts, 1), counts
+
+    def _decode_subtask_token(self, token, positions, write_indices, valid_mask, kv_cache, active):
+        """Append one token using the existing Gemma cache API, then compact into fixed slots.
+
+        Gemma returns [old cache, new KV]. Move that last entry into this row's
+        reserved text slot so shapes stay constant inside the decoding loop.
+        """
+        embedded = self.PaliGemma.llm(token[:, None], method="embed")
+        mask = jnp.concatenate([valid_mask, active[:, None]], axis=1) & active[:, None]
+        (hidden, _), appended = self.PaliGemma.llm(
+            [embedded, None], positions=positions[:, None], mask=mask[:, None, :], kv_cache=kv_cache
+        )
+        rows = jnp.arange(token.shape[0])
+
+        def compact(cache):
+            old = cache[:, :, :-1]
+            entry = jnp.where(active[None, :, None, None], cache[:, :, -1], old[:, rows, write_indices])
+            return old.at[:, rows, write_indices].set(entry)
+
+        cache = jax.tree.map(compact, appended)
+        valid_mask = valid_mask.at[rows, write_indices].set(active)
+        logits = self.PaliGemma.llm(hidden, method="deembed")[:, 0].astype(jnp.float32)
+        return logits, cache, valid_mask
+
+    def generate_subtask(self, rng, observation, *, max_decoding_steps=None, temperature=0.0, eos_token_id=1):
+        """Autoregressive text inference from task/images/state, with a fixed-size KV cache.
+
+        Shape-changing decoding settings must be static when JIT-compiling.
+        Returns tokens, lengths including EOS, and per-row EOS/prefix validity.
+        Reaching the length limit does not fabricate EOS or a complete subtask.
+        """
+        if not self.train_subtask_prediction:
+            raise ValueError("Subtask generation requires a model configured for subtask prediction.")
+        limit = self.max_subtask_len if max_decoding_steps is None else max_decoding_steps
+        if not 2 <= limit <= self.max_subtask_len:
+            raise ValueError("Require 2 <= max_decoding_steps <= max_subtask_len (including EOS).")
+        if not math.isfinite(temperature) or temperature < 0:
+            raise ValueError("temperature must be finite and nonnegative.")
+        if observation.tokenized_prompt is None or observation.tokenized_prompt_mask is None:
+            raise ValueError("Subtask generation requires a tokenized task/state prefix.")
+        observation = _model.preprocess_observation(None, observation, train=False)
+        text_mask = observation.tokenized_prompt_mask
+        text_lengths = jnp.sum(text_mask, axis=1)
+        valid_prefix = (text_lengths > 0) & (text_lengths + limit <= text_mask.shape[1])
+        valid_prefix &= jnp.all(text_mask == (jnp.arange(text_mask.shape[1])[None, :] < text_lengths[:, None]), axis=1)
+        if observation.token_ar_mask is not None:
+            valid_prefix &= ~jnp.any(observation.token_ar_mask != 0, axis=1)
+        if observation.token_loss_mask is not None:
+            valid_prefix &= ~jnp.any(observation.token_loss_mask, axis=1)
+        prefix, valid_mask, ar = self.embed_prefix(observation)
+        positions = jnp.cumsum(valid_mask, axis=1) - 1
+        (hidden, _), cache = self.PaliGemma.llm(
+            [prefix, None], mask=make_attn_mask(valid_mask, ar), positions=positions
+        )
+        rows = jnp.arange(prefix.shape[0])
+        starts = prefix.shape[1] - text_mask.shape[1] + text_lengths
+        last_hidden = hidden[rows, starts - 1][:, None]
+        logits = self.PaliGemma.llm(last_hidden, method="deembed")[:, 0].astype(jnp.float32)
+        generated = jnp.zeros((prefix.shape[0], limit), dtype=jnp.int32)
+        lengths = jnp.zeros((prefix.shape[0],), dtype=jnp.int32)
+
+        def cond(carry):
+            i, _, _, _, done, _, _, _ = carry
+            return (i < limit) & ~jnp.all(done)
+
+        def step(carry):
+            i, cache, mask, logits, done, tokens, lengths, key = carry
+            key, sample_key = jax.random.split(key)
+            # PaliGemma's padding/unknown and BOS are not subtask text. Never
+            # accept an empty EOS-only instruction.
+            logits = logits.at[:, 0].set(-jnp.inf).at[:, 2].set(-jnp.inf)
+            logits = logits.at[:, eos_token_id].set(jnp.where(i == 0, -jnp.inf, logits[:, eos_token_id]))
+            token = (
+                jnp.argmax(logits, axis=-1)
+                if temperature == 0
+                else jax.random.categorical(sample_key, logits / temperature)
+            ).astype(jnp.int32)
+            active = ~done
+            token = jnp.where(active, token, 0)
+            tokens = tokens.at[:, i].set(token)
+            lengths = lengths + active.astype(jnp.int32)
+            logits, cache, mask = self._decode_subtask_token(
+                token, jnp.sum(mask, axis=1), jnp.minimum(starts + i, mask.shape[1] - 1), mask, cache, active
+            )
+            return i + 1, cache, mask, logits, done | (token == eos_token_id), tokens, lengths, key
+
+        _, _, _, _, done, tokens, lengths, _ = jax.lax.while_loop(
+            cond, step, (0, cache, valid_mask, logits, ~valid_prefix, generated, lengths, rng)
+        )
+        return {"tokens": tokens, "lengths": lengths, "has_eos": done & valid_prefix, "valid_prefix": valid_prefix}
 
     @override
     def sample_actions(

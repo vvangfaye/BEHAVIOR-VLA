@@ -7,6 +7,7 @@ import jax.numpy as jnp
 
 import openpi.models.model as _model
 import openpi.policies.policy as _policy
+from openpi.policies.subtask_policy import SubtaskPolicy
 import openpi.shared.download as download
 from openpi.training import checkpoints as _checkpoints
 from openpi.training import config as _config
@@ -22,6 +23,8 @@ def create_trained_policy(
     default_prompt: str | None = None,
     norm_stats: dict[str, transforms.NormStats] | None = None,
     pytorch_device: str | None = None,
+    subtask_interval: int = 1,
+    subtask_temperature: float = 0.0,
 ) -> _policy.Policy:
     """Create a policy from a trained checkpoint.
 
@@ -72,15 +75,34 @@ def create_trained_policy(
         except ImportError:
             pytorch_device = "cpu"
 
-    return _policy.Policy(
+    input_transforms = [
+        *repack_transforms.inputs,
+        transforms.InjectDefaultPrompt(default_prompt),
+        *data_config.data_transforms.inputs,
+        transforms.Normalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
+        *data_config.model_transforms.inputs,
+    ]
+    policy_cls = _policy.Policy
+    subtask_kwargs = {}
+    if getattr(train_config.model, "train_subtask_prediction", False):
+        tokenizers = [t for t in input_transforms if isinstance(t, transforms.TokenizeSubtaskPrompt)]
+        if len(tokenizers) != 1:
+            raise ValueError("Subtask inference requires exactly one matching training tokenizer transform.")
+        input_transforms = [
+            t
+            for t in input_transforms
+            if not isinstance(t, (transforms.TokenizeSubtaskPrompt, transforms.PadStatesAndActions))
+        ]
+        policy_cls = SubtaskPolicy
+        subtask_kwargs = {
+            "tokenizer_transform": tokenizers[0],
+            "subtask_interval": subtask_interval,
+            "subtask_temperature": subtask_temperature,
+        }
+    return policy_cls(
         model,
-        transforms=[
-            *repack_transforms.inputs,
-            transforms.InjectDefaultPrompt(default_prompt),
-            *data_config.data_transforms.inputs,
-            transforms.Normalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
-            *data_config.model_transforms.inputs,
-        ],
+        transforms=input_transforms,
+        **subtask_kwargs,
         output_transforms=[
             *data_config.model_transforms.outputs,
             transforms.Unnormalize(norm_stats, use_quantiles=data_config.use_quantile_norm),

@@ -78,6 +78,9 @@ def check_dataset(
     prefix_len, label_len, cue_len = tokenizer.subtask_token_lengths(longest_task, longest_label, state)
     # Calls the same strict validation used in the training data transform.
     tokenizer.tokenize_subtask_training(longest_task, longest_label, state, max_subtask_len=max_subtask_len)
+    # The same checkpoint must have room for the configured generation budget,
+    # even when the longest label observed during training is shorter.
+    tokenizer.tokenize_subtask_prefix(longest_task, state, max_subtask_len=max_subtask_len)
     return {
         "dataset_root": str(dataset_root.resolve()),
         "segments_path": str(segments_path.resolve()),
@@ -90,6 +93,7 @@ def check_dataset(
         "max_label_tokens_including_eos": label_len,
         "action_cue_tokens": cue_len,
         "conservative_sequence_tokens": prefix_len + label_len + cue_len,
+        "generation_sequence_budget": prefix_len + max_subtask_len + cue_len,
         "max_token_len": max_token_len,
         "max_subtask_len": max_subtask_len,
         "status": "passed",
