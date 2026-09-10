@@ -164,7 +164,9 @@ def create_b1k_dataset(data_config: _config.DataConfig, action_horizon: int) -> 
             raise ValueError("Subtask supervision requires task prompts and a subtask segment table.")
         if data_config.subtask_whole_task_prob != 0:
             raise ValueError("subtask_whole_task_prob must be 0 when training subtask prediction.")
-        subtask_transform = SubtaskFromSegments.from_parquet(data_config.subtask_prompts_path)
+        subtask_transform = SubtaskFromSegments.from_parquet(
+            data_config.subtask_prompts_path, episodes_index=data_config.episodes_index
+        )
     if isinstance(data_config.repo_id, list):
         dataset_meta = _lerobot_compat.LeRobotDatasetMetadata(
             repo_id=data_config.repo_id[0], root=os.path.join(data_config.dataset_root, data_config.repo_id[0])

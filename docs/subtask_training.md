@@ -37,10 +37,19 @@ openpi/.venv/bin/python scripts/gen_subtask_prompts.py \
 episode 内的局部帧号，episode id 必须是原始 LeRobot id；选子集或设置 FRAME_STRIDE
 时不能重编号。使用生成脚本中 metadata 的 `annotation_path` 映射，不能按文件名猜配对。
 
-训练标签严格要求每个被选 episode 的 `[0, length)` 都被覆盖。未知 episode、空文本、
-重复/重叠区间、间隙和越界帧会报错，不会回退为整任务标签，也不会自动延长最后一段。
-尾部 settle 帧应由段表生成步骤明确覆盖。预检失败时修正段表或用 EPISODES_FILE 选择
-已验证的完整 episodes，不要把缺标注帧伪装成有效监督。
+训练标签严格要求每个最终保留 episode 的 `[0, length)` 都被非空标签覆盖。段表生成器
+会把首次有效标注之前的未覆盖帧写成空字符串，因此现有段表可能含有空标签。
+
+启动脚本默认使用 `SUBTASK_EMPTY_LABEL_POLICY=drop_episode`：先按 EPISODES_FILE
+或 smoke 子集筛选，再剔除含空字符串、纯空白或 null 标签的**整条 episode**，保存剔除
+原因、区间及最终名单。未选中 episode 的空标签不会阻止当前子集训练。不会只删掉空段后
+保留有缺口的 episode，也不会用整任务、相邻 subtask 或 EOS-only 目标填补缺失标签。
+原段表和传入的 EPISODES_FILE 不修改。
+
+如需遇到空标签立即停止，设置 `SUBTASK_EMPTY_LABEL_POLICY=error`。直接调用预检 CLI
+或 trainer 仍默认严格报错；自动筛选由启动脚本组织。未知 episode、缺少全部标注、
+保留 episode 的重复/重叠区间、间隙、越界和 token 超限仍会报错；剔除后没有 episode
+时也会停止。尾部 settle 帧应由段表生成步骤明确覆盖。
 
 ## 2. 先预检，再 smoke test
 
@@ -49,9 +58,26 @@ DATASET_ROOT=/path/to/2026-challenge-demos \
   bash scripts/train_pi05_subtask_b1k.sh check
 ```
 
-默认检查全数据的标注覆盖和 token 预算，不加载视频、基础模型或优化器。报告保存至
-`openpi/outputs/subtask_preflight/<EXP_NAME>.json`。预算检查结合最长任务、最长 subtask
+默认检查全数据；设置 EPISODES_FILE 则只检查指定子集。筛选后检查标注覆盖和 token
+预算，不加载视频、基础模型或优化器。报告保存至
+`openpi/outputs/subtask_preflight/<EXP_NAME>.json`，最终原始 episode ID 名单保存至同目录
+`<EXP_NAME>.episodes.txt`。报告包含 requested/selected/dropped 数量、丢弃的 episode
+及空标签区间。预算检查结合最长任务、最长 subtask
 和机器人状态数字的保守长度上界，并预留完整生成预算；数据 tokenizer 也对每条实际样本再次严格检查。
+
+例如只训练当前两任务时，保留已有的 400 个 episode 名单作为输入：
+
+```bash
+DATASET_ROOT=/path/to/2026-challenge-demos \
+EPISODES_FILE=/path/to/two_tasks_episodes.txt \
+EXP_NAME=pi05_subtask_two_tasks_check \
+  bash scripts/train_pi05_subtask_b1k.sh check
+```
+
+若这份子集恰好有 78 个 episode 含空标签，报告应显示 requested=400、dropped=78、
+episodes=322；这是按所述数据情况推算，需以实际生成的报告为准。`full` 和 `smoke`
+也会执行同一预检，并将最终名单自动用于归一化统计（需要新计算时）和训练器。
+已有 normalization stats 继续复用，不因筛选而重写。
 
 ```bash
 DATASET_ROOT=/path/to/2026-challenge-demos \
@@ -86,6 +112,7 @@ BATCH_SIZE=64 NUM_WORKERS=8 TRAIN_STEPS=50000 LR_DECAY_STEPS=50000 \
 | 环境变量 | 默认值 | 作用 |
 | --- | --- | --- |
 | SUBTASK_PROMPTS | `<DATASET_ROOT>/meta/subtask_segments.parquet` | 帧级标签段表 |
+| SUBTASK_EMPTY_LABEL_POLICY | drop_episode | 剔除含空标签的整条 episode；error 表示严格报错 |
 | MAX_TOKEN_LEN | 512 | 完整语言序列上限，包含离散 state 和动作提示 |
 | MAX_SUBTASK_LEN | 64 | 标签 token 上限，包含 EOS |
 | SUBTASK_LOSS_WEIGHT | 1.0 | 文本 CE 权重 |
@@ -117,6 +144,14 @@ cd openpi
 ```
 
 直接运行 trainer 不会自动运行全表预检，请先执行 check 命令。逐样本校验始终启用。
+若直接运行 trainer，必须把预检报告中的最终名单作为 `--data.episodes-index` 传入；
+仅生成名单文件而不传给 trainer，不会改变它的采样范围。
+
+动作块目前仍按起始帧的 subtask 条件监督完整 32 步动作。因此起始帧接近 subtask
+边界时，动作块可能跨越边界；本次空标签修复没有剔除这些样本或新增动作损失掩码。
+这项训练设计需要后续消融验证，不能把覆盖预检通过视为已经验证跨边界样本的效果。
+512-token 的完整模型 GPU 峰值也未实测；先从小 batch smoke 开始，不能把普通 π0.5
+的 batch 估计直接当作 subtask 联合训练的容量保证。
 
 ## 4. 观察训练是否有效
 
@@ -212,3 +247,9 @@ subtask 路由、B1K 输入/动作适配、录制 wrapper reset、websocket 文�
 
 这里的数据链路测试使用合成的 BEHAVIOR 格式帧和段表，不读取真实演示视频。未执行真实
 数据上的完整 π0.5 GPU 训练，也未验证完整 checkpoint 的恢复、收敛或在线机器人成功率。
+
+空标签修复的本地回归：上述 `subtask_data_test.py`、`check_subtask_data_test.py` 和
+`subtask_pipeline_test.py` 共 **27 项通过**。覆盖未选中 episode 的空标签、整 episode
+剔除、null/空白标签、全部被剔除时停止，以及真实启动脚本将最终名单传给归一化统计
+与 trainer。启动脚本测试只记录重型训练调用，模型反向传播使用小模型；未复核真实
+两任务数据的 322/400 数量。提交打包脚本也已补入预检程序和 subtask 启动 wrapper。

@@ -3,6 +3,7 @@
 import argparse
 import json
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pyarrow.parquet as pq
@@ -56,6 +57,7 @@ def check_dataset(
     robot: str = "b1k/R1Pro",
     max_token_len: int = 512,
     max_subtask_len: int = 64,
+    empty_label_policy: Literal["error", "drop_episode"] = "error",
 ) -> dict:
     lengths = episode_lengths(dataset_root)
     if episodes_index is not None:
@@ -63,7 +65,15 @@ def check_dataset(
         if unknown:
             raise ValueError(f"Unknown selected episode ids: {sorted(unknown)[:10]}")
         lengths = {ep: lengths[ep] for ep in episodes_index}
-    labels = SubtaskFromSegments.from_parquet(segments_path)
+    requested_lengths = lengths.copy()
+    labels = SubtaskFromSegments.from_parquet(
+        segments_path, episodes_index=list(lengths), empty_label_policy=empty_label_policy
+    )
+    lengths = {ep: length for ep, length in lengths.items() if ep not in labels.dropped_episodes}
+    if not lengths:
+        raise ValueError(
+            f"No episodes remain after dropping {len(labels.dropped_episodes)} episodes with empty subtask labels."
+        )
     labels.validate_coverage(lengths)
     instructions = task_texts(dataset_root)
     vocabulary = {text for ep in lengths for text in labels.segments[ep][2]}
@@ -84,6 +94,17 @@ def check_dataset(
     return {
         "dataset_root": str(dataset_root.resolve()),
         "segments_path": str(segments_path.resolve()),
+        "empty_label_policy": empty_label_policy,
+        "requested_episodes": len(requested_lengths),
+        "requested_frames": sum(requested_lengths.values()),
+        "selected_episode_indices": list(lengths),
+        "dropped_episode_indices": sorted(labels.dropped_episodes),
+        "dropped_episode_frames": sum(requested_lengths[ep] for ep in labels.dropped_episodes),
+        "empty_label_segments": sum(len(intervals) for intervals in labels.dropped_episodes.values()),
+        "dropped_episodes": [
+            {"episode_index": ep, "reason": "empty_subtask_label", "empty_intervals": intervals}
+            for ep, intervals in sorted(labels.dropped_episodes.items())
+        ],
         "episodes": len(lengths),
         "frames": sum(lengths.values()),
         "segments": sum(len(labels.segments[ep][0]) for ep in lengths),
@@ -108,7 +129,11 @@ def main():
     parser.add_argument("--robot", default="b1k/R1Pro")
     parser.add_argument("--max-token-len", type=int, default=512)
     parser.add_argument("--max-subtask-len", type=int, default=64)
+    parser.add_argument("--empty-label-policy", choices=("error", "drop_episode"), default="error")
     parser.add_argument("--report-file", type=Path)
+    parser.add_argument(
+        "--write-episodes-file", type=Path, help="Write the validated original episode IDs for training."
+    )
     args = parser.parse_args()
     report = check_dataset(
         args.dataset_root,
@@ -117,12 +142,25 @@ def main():
         robot=args.robot,
         max_token_len=args.max_token_len,
         max_subtask_len=args.max_subtask_len,
+        empty_label_policy=args.empty_label_policy,
     )
     text = json.dumps(report, ensure_ascii=False, indent=2)
-    print(text)
     if args.report_file:
         args.report_file.parent.mkdir(parents=True, exist_ok=True)
         args.report_file.write_text(text + "\n")
+    if args.write_episodes_file:
+        args.write_episodes_file.parent.mkdir(parents=True, exist_ok=True)
+        args.write_episodes_file.write_text("".join(f"{ep}\n" for ep in report["selected_episode_indices"]))
+    # Keep launch logs compact; the JSON report retains every ID and interval.
+    summary = {
+        k: v
+        for k, v in report.items()
+        if k not in ("selected_episode_indices", "dropped_episode_indices", "dropped_episodes")
+    }
+    summary["dropped_episodes"] = len(report["dropped_episode_indices"])
+    summary["report_file"] = str(args.report_file) if args.report_file else None
+    summary["episodes_file"] = str(args.write_episodes_file) if args.write_episodes_file else None
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

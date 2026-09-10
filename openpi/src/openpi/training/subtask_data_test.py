@@ -70,3 +70,32 @@ def test_indices_cannot_be_silently_truncated(tmp_path, value):
     transform = SubtaskFromSegments.from_parquet(_write_table(tmp_path, [_row()]))
     with pytest.raises(ValueError, match="single integer"):
         transform({"episode_index": 42, "frame_index": value})
+
+
+def test_selected_episode_filter_runs_before_label_validation(tmp_path):
+    path = _write_table(tmp_path, [_row(ep=5, text=""), _row(), _row(ep=99, text=None)])
+    transform = SubtaskFromSegments.from_parquet(path, episodes_index=[42])
+    transform.validate_coverage({42: 5})
+    assert set(transform.segments) == {42}
+    assert transform.dropped_episodes == {}
+    with pytest.raises(ValueError, match="Empty subtask label: episode=5"):
+        SubtaskFromSegments.from_parquet(path)
+    with pytest.raises(ValueError, match="No episodes selected"):
+        SubtaskFromSegments.from_parquet(path, episodes_index=[])
+
+
+@pytest.mark.parametrize("text", ["", " \n\t", None])
+def test_drop_empty_label_removes_whole_episode_without_filling_targets(tmp_path, text):
+    path = _write_table(tmp_path, [_row(), _row(start=5, end=10, text=text), _row(ep=99)])
+    transform = SubtaskFromSegments.from_parquet(path, empty_label_policy="drop_episode")
+    assert transform.dropped_episodes == {42: [(5, 10)]}
+    assert set(transform.segments) == {99}
+    transform.validate_coverage({99: 5})
+    with pytest.raises(ValueError, match="No subtask annotation"):
+        transform({"episode_index": 42, "frame_index": 0})
+
+
+def test_drop_policy_still_rejects_malformed_intervals(tmp_path):
+    path = _write_table(tmp_path, [_row(text=""), _row(start=-1)])
+    with pytest.raises(ValueError, match="Invalid subtask interval"):
+        SubtaskFromSegments.from_parquet(path, empty_label_policy="drop_episode")

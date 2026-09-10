@@ -1,7 +1,9 @@
 """Strict frame-to-subtask supervision from BEHAVIOR's compact segment table."""
 
+from collections.abc import Collection
 import dataclasses
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 
@@ -10,32 +12,64 @@ import numpy as np
 class SubtaskFromSegments:
     # Episode ids remain the ORIGINAL LeRobot ids, including when using a subset.
     segments: dict[int, tuple[np.ndarray, np.ndarray, list[str]]]
+    dropped_episodes: dict[int, list[tuple[int, int]]] = dataclasses.field(default_factory=dict)
 
     @classmethod
-    def from_parquet(cls, path: str | Path) -> "SubtaskFromSegments":
+    def from_parquet(
+        cls,
+        path: str | Path,
+        *,
+        episodes_index: Collection[int] | None = None,
+        empty_label_policy: Literal["error", "drop_episode"] = "error",
+    ) -> "SubtaskFromSegments":
         import pyarrow as pa  # noqa: PLC0415
+        import pyarrow.compute as pc  # noqa: PLC0415
         import pyarrow.parquet as pq  # noqa: PLC0415
 
+        if empty_label_policy not in ("error", "drop_episode"):
+            raise ValueError(f"Unknown empty_label_policy: {empty_label_policy!r}")
         path = Path(path)
         if not path.is_file():
             raise FileNotFoundError(f"Subtask segments not found: {path}. Run scripts/gen_subtask_prompts.py first.")
         table = pq.read_table(path, columns=["episode_index", "start", "end", "subtask"])
         if table.num_rows == 0:
             raise ValueError(f"Subtask segment table is empty: {path}")
-        for name in table.column_names:
-            if table[name].null_count:
-                raise ValueError(f"Null values in subtask segment column {name!r}.")
         for name in ("episode_index", "start", "end"):
             if not pa.types.is_integer(table.schema.field(name).type):
                 raise ValueError(f"Subtask segment column {name!r} must contain integer frame/episode indices.")
+        if table["episode_index"].null_count:
+            raise ValueError("Null values in subtask segment column 'episode_index'.")
+        if episodes_index is not None:
+            if len(episodes_index) == 0:
+                raise ValueError("No episodes selected for subtask training.")
+            # Filter before validating labels: excluded episodes must not block
+            # a valid subset, even when the parquet contains the full dataset.
+            table = table.filter(pc.is_in(table["episode_index"], value_set=pa.array(list(episodes_index))))
+        for name in ("start", "end"):
+            if table[name].null_count:
+                raise ValueError(f"Null values in subtask segment column {name!r}.")
         grouped = {}
+        empty_intervals = {}
         for row in table.to_pylist():
             ep, start, end, text = (row[k] for k in ("episode_index", "start", "end", "subtask"))
             if ep < 0 or start < 0 or end <= start:
                 raise ValueError(f"Invalid subtask interval: episode={ep}, [{start}, {end}).")
-            if not isinstance(text, str) or not text.strip():
-                raise ValueError(f"Empty subtask label: episode={ep}, [{start}, {end}).")
+            if text is None or (isinstance(text, str) and not text.strip()):
+                if empty_label_policy == "error":
+                    raise ValueError(
+                        f"Empty subtask label: episode={ep}, [{start}, {end}). "
+                        "Run the subtask preflight with --empty-label-policy drop_episode "
+                        "to select fully annotated episodes."
+                    )
+                empty_intervals.setdefault(ep, []).append((start, end))
+                continue
+            if not isinstance(text, str):
+                raise ValueError(f"Subtask label must be a string: episode={ep}, [{start}, {end}).")
             grouped.setdefault(ep, []).append((start, end, text.strip()))
+        # Drop whole episodes so all remaining samples retain strict coverage.
+        # Do not replace missing labels or train EOS-only language targets.
+        for ep in empty_intervals:
+            grouped.pop(ep, None)
         segments = {}
         for ep, runs in grouped.items():
             runs.sort(key=lambda r: r[0])
@@ -44,7 +78,7 @@ class SubtaskFromSegments:
             if np.any(starts[1:] < ends[:-1]):
                 raise ValueError(f"Overlapping/duplicate subtask intervals in episode={ep}.")
             segments[ep] = (starts, ends, [r[2] for r in runs])
-        return cls(segments)
+        return cls(segments, dropped_episodes=empty_intervals)
 
     def validate_coverage(self, episode_lengths: dict[int, int]) -> None:
         """Require an exact tiling of each selected episode's [0, length)."""

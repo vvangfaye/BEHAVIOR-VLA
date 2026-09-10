@@ -41,10 +41,11 @@ def test_b1k_pipeline_preserves_task_and_original_frame_indices(tmp_path, monkey
     pq.write_table(
         pa.table(
             {
-                "episode_index": [42, 42],
-                "start": [0, 5],
-                "end": [5, 10],
-                "subtask": ["move to radio", "press radio"],
+                # A bad label outside the selected subset must not block loading.
+                "episode_index": [5, 42, 42],
+                "start": [0, 0, 5],
+                "end": [576, 5, 10],
+                "subtask": ["", "move to radio", "press radio"],
             }
         ),
         tmp_path / "meta" / "subtask_segments.parquet",

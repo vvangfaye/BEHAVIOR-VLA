@@ -65,9 +65,13 @@ cp -a \
     "$REPO_ROOT/openpi/LICENSE" \
     "$BUNDLE_DIR/openpi/"
 cp -a "$REPO_ROOT/openpi/scripts/compute_norm_stats.py" "$BUNDLE_DIR/openpi/scripts/"
-cp -a "$REPO_ROOT/openpi/scripts/b1k/train_b1k.py" "$BUNDLE_DIR/openpi/scripts/b1k/"
+cp -a \
+    "$REPO_ROOT/openpi/scripts/b1k/train_b1k.py" \
+    "$REPO_ROOT/openpi/scripts/b1k/check_subtask_data.py" \
+    "$BUNDLE_DIR/openpi/scripts/b1k/"
 cp -a \
     "$REPO_ROOT/scripts/train_pi05_b1k.sh" \
+    "$REPO_ROOT/scripts/train_pi05_subtask_b1k.sh" \
     "$REPO_ROOT/scripts/strip_depth_from_info.py" \
     "$BUNDLE_DIR/scripts/"
 cp -a \

@@ -23,6 +23,7 @@ if [[ "$SUBTASK_PREDICTION" != 0 && "$SUBTASK_PREDICTION" != 1 ]]; then
 fi
 if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
     SUBTASK_PROMPTS="${SUBTASK_PROMPTS:-$DATASET_ROOT/meta/subtask_segments.parquet}"
+    SUBTASK_EMPTY_LABEL_POLICY="${SUBTASK_EMPTY_LABEL_POLICY:-drop_episode}"
     MAX_TOKEN_LEN="${MAX_TOKEN_LEN:-512}"
     MAX_SUBTASK_LEN="${MAX_SUBTASK_LEN:-64}"
     if [[ "${WHOLE_TASK_PROB:-0}" != 0 && "${WHOLE_TASK_PROB:-0}" != 0.0 ]]; then
@@ -101,17 +102,35 @@ source .venv/bin/activate
 export CUDA_VISIBLE_DEVICES="$CUDA_DEVICES"
 
 if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
+    VALIDATED_EPISODES_FILE="outputs/subtask_preflight/$EXP_NAME.episodes.txt"
     PREFLIGHT_ARGS=(
         --dataset-root "$DATASET_ROOT"
         --segments-path "$SUBTASK_PROMPTS"
         --max-token-len "$MAX_TOKEN_LEN"
         --max-subtask-len "$MAX_SUBTASK_LEN"
+        --empty-label-policy "$SUBTASK_EMPTY_LABEL_POLICY"
         --report-file "outputs/subtask_preflight/$EXP_NAME.json"
+        --write-episodes-file "$VALIDATED_EPISODES_FILE"
     )
     if (( ${#EPISODES_INDEX[@]} )); then
         PREFLIGHT_ARGS+=(--episodes-index "${EPISODES_INDEX[@]}")
     fi
     python scripts/b1k/check_subtask_data.py "${PREFLIGHT_ARGS[@]}"
+    # Use exactly the validated subset for both norm stats and training. The
+    # source segment table and the caller's EPISODES_FILE remain untouched.
+    EPISODES_INDEX=()
+    while IFS= read -r EPISODE_INDEX || [[ -n "$EPISODE_INDEX" ]]; do
+        if [[ ! "$EPISODE_INDEX" =~ ^[0-9]+$ ]]; then
+            echo "Invalid validated episode id '$EPISODE_INDEX' in $VALIDATED_EPISODES_FILE" >&2
+            exit 2
+        fi
+        EPISODES_INDEX+=("$EPISODE_INDEX")
+    done < "$VALIDATED_EPISODES_FILE"
+    if (( ${#EPISODES_INDEX[@]} == 0 )); then
+        echo "No fully annotated episodes remain; training will not start." >&2
+        exit 2
+    fi
+    echo "Subtask preflight retained ${#EPISODES_INDEX[@]} episodes: $VALIDATED_EPISODES_FILE"
     if [[ "${PREFLIGHT_ONLY:-0}" == 1 ]]; then
         exit 0
     fi
