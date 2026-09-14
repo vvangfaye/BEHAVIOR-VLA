@@ -21,13 +21,14 @@ import torch
 import torch.utils.checkpoint
 from torch import nn
 
-from ...cache_utils import Cache, HybridCache, StaticCache
+from ...cache_utils import Cache, StaticCache
 from ...generation import GenerationMixin
 from ...modeling_flash_attention_utils import FlashAttentionKwargs
 from ...modeling_outputs import BaseModelOutputWithPast
 from ...modeling_utils import PreTrainedModel
 from ...processing_utils import Unpack
-from ...utils import LossKwargs, ModelOutput, auto_docstring, can_return_tuple, is_torchdynamo_compiling, logging
+from ...utils import TransformersKwargs as LossKwargs, ModelOutput, auto_docstring, can_return_tuple, logging
+from ...utils.import_utils import is_torchdynamo_compiling
 from ..auto import AutoModel
 from .configuration_paligemma import PaliGemmaConfig
 
@@ -144,7 +145,9 @@ class PaliGemmaModel(PaliGemmaPreTrainedModel):
         language_model = AutoModel.from_config(config=config.text_config)
         self.language_model = language_model
 
-        self.pad_token_id = self.config.pad_token_id if self.config.pad_token_id is not None else -1
+        self.pad_token_id = getattr(self.config, "pad_token_id", self.config.text_config.pad_token_id)
+        if self.pad_token_id is None:
+            self.pad_token_id = -1
         self.post_init()
 
     # Copied from transformers.models.llava.modeling_llava.LlavaModel.get_input_embeddings with Llava->PaliGemma
@@ -182,8 +185,6 @@ class PaliGemmaModel(PaliGemmaPreTrainedModel):
 
         inputs_lead_dim, sequence_length = input_tensor.shape[:2]
         if using_static_cache:
-            target_length = past_key_values.get_max_cache_shape()
-        elif isinstance(past_key_values, HybridCache):
             target_length = past_key_values.get_max_cache_shape()
         else:
             target_length = (
@@ -264,6 +265,8 @@ class PaliGemmaModel(PaliGemmaPreTrainedModel):
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Union[tuple, PaligemmaModelOutputWithPast]:
         r"""
+        cache_position (`torch.LongTensor` of shape `(sequence_length,)`, *optional*):
+            Physical positions used when appending keys and values to the cache.
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
             Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
             config.text_config.vocab_size]` or -100 (see `input_ids` docstring). Tokens with indices set to `-100` are ignored
@@ -384,7 +387,7 @@ class PaliGemmaForConditionalGeneration(PaliGemmaPreTrainedModel, GenerationMixi
         "^multi_modal_projector": "model.multi_modal_projector",
         "^language_model.lm_head": "lm_head",
     }
-    _tied_weights_keys = ["lm_head.weight"]
+    _tied_weights_keys = {"lm_head.weight": "model.language_model.embed_tokens.weight"}
 
     def __init__(self, config: PaliGemmaConfig):
         super().__init__(config)
@@ -447,6 +450,8 @@ class PaliGemmaForConditionalGeneration(PaliGemmaPreTrainedModel, GenerationMixi
         **kwargs: Unpack[KwargsForCausalLM],
     ) -> Union[tuple, PaliGemmaCausalLMOutputWithPast]:
         r"""
+        cache_position (`torch.LongTensor` of shape `(sequence_length,)`, *optional*):
+            Physical positions used when appending keys and values to the cache.
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
             Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
             config.text_config.vocab_size]` or -100 (see `input_ids` docstring). Tokens with indices set to `-100` are ignored
@@ -553,7 +558,7 @@ class PaliGemmaForConditionalGeneration(PaliGemmaPreTrainedModel, GenerationMixi
         if cache_position[0] == 0:
             model_inputs["pixel_values"] = pixel_values
         is_training = token_type_ids is not None and labels is not None
-        if cache_position[0] == 0 and isinstance(past_key_values, HybridCache):
+        if cache_position[0] == 0 and isinstance(past_key_values, StaticCache):
             input_tensor = inputs_embeds if inputs_embeds is not None else input_ids
             causal_mask = self.model._update_causal_mask(
                 attention_mask, token_type_ids, past_key_values, cache_position, input_tensor, is_training

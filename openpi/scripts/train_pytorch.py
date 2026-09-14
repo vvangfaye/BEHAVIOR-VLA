@@ -1,631 +1,606 @@
-"""
-PyTorch training entrypoint for PI0/PI05 with multi-GPU and multi-node (DDP) support.
-This script mirrors the behavior of the JAX trainer (`scripts/train.py`) but runs
-entirely in PyTorch using the `PI0Pytorch` model and your existing config/data
-pipeline from `src/openpi/training/config.py` and `src/openpi/training/data_loader.py`.
+"""PyTorch fine-tuning with FP32 weights, BF16 autocast, accumulation and DDP.
 
-Usage
+``batch_size`` is the global microbatch, divided across torchrun workers. An
+optimizer update consumes ``batch_size * pytorch_gradient_accumulation_steps``
+samples. Checkpoint step names count completed optimizer updates.
+
 Single GPU:
-  python scripts/train_pytorch.py <config_name> --exp_name <run_name> --save_interval <interval>
-  Example:
-  python scripts/train_pytorch.py debug --exp_name pytorch_ddp_test
-  python scripts/train_pytorch.py debug --exp_name pytorch_ddp_test --resume  # Resume from latest checkpoint
-Multi-GPU (single node):
-  torchrun --standalone --nnodes=1 --nproc_per_node=<num_gpus> scripts/train_pytorch.py <config_name> --exp_name <run_name>
-  Example:
-  torchrun --standalone --nnodes=1 --nproc_per_node=2 scripts/train_pytorch.py pi0_aloha_sim --exp_name pytorch_ddp_test
-  torchrun --standalone --nnodes=1 --nproc_per_node=2 scripts/train_pytorch.py pi0_aloha_sim --exp_name pytorch_ddp_test --resume
-Multi-Node Training:
-	torchrun \
-    --nnodes=<num_nodes> --nproc_per_node=<gpus_per_node> --node_rank=<rank_of_node> \
-    --master_addr=<master_ip> --master_port=<port> \
-    scripts/train_pytorch.py <config_name> --exp_name=<run_name> --save_interval <interval>
-
+    python scripts/b1k/train_b1k_pytorch.py pi05_b1k_pytorch --exp-name run \
+        --pytorch-weight-path /path/to/converted_base
+Multiple GPUs:
+    torchrun --standalone --nproc-per-node=2 scripts/b1k/train_b1k_pytorch.py \
+        pi05_b1k_pytorch --exp-name run --pytorch-weight-path /path/to/converted_base
 """
 
+from __future__ import annotations
+
+import contextlib
 import dataclasses
-import gc
+import json
 import logging
+import math
 import os
-import platform
+from pathlib import Path
+import random
 import shutil
 import time
+from typing import TYPE_CHECKING
 
-import jax
+# Shared OpenPI configuration and transforms import JAX. Only Torch may own GPUs
+# in this entrypoint, including spawned data workers.
+os.environ["JAX_PLATFORMS"] = "cpu"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+
 import numpy as np
 import safetensors.torch
 import torch
 import torch.distributed as dist
-import torch.nn.parallel
-import tqdm
-import wandb
 
-import openpi.models.pi0_config
-import openpi.models_pytorch.pi0_pytorch
-import openpi.shared.normalize as _normalize
-import openpi.training.config as _config
-import openpi.training.data_loader as _data
+if TYPE_CHECKING:
+    import openpi.training.config as _config
+
+
+_CHECKPOINT_FILES = ("model.safetensors", "optimizer.pt", "metadata.json", "rng.pt")
 
 
 def init_logging():
-    level_mapping = {"DEBUG": "D", "INFO": "I", "WARNING": "W", "ERROR": "E", "CRITICAL": "C"}
-
-    class CustomFormatter(logging.Formatter):
-        def format(self, record):
-            record.levelname = level_mapping.get(record.levelname, record.levelname)
-            return super().format(record)
-
-    formatter = CustomFormatter(
-        fmt="%(asctime)s.%(msecs)03d [%(levelname)s] %(message)-80s (%(process)d:%(filename)s:%(lineno)s)",
-        datefmt="%H:%M:%S",
-    )
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        ch = logging.StreamHandler()
-        ch.setFormatter(formatter)
-        logger.addHandler(ch)
-    else:
-        logger.handlers[0].setFormatter(formatter)
-
-
-def init_wandb(config: _config.TrainConfig, *, resuming: bool, enabled: bool = True):
-    """Initialize wandb logging."""
-    if not enabled:
-        wandb.init(mode="disabled")
-        return
-
-    ckpt_dir = config.checkpoint_dir
-    if not ckpt_dir.exists():
-        raise FileNotFoundError(f"Checkpoint directory {ckpt_dir} does not exist.")
-
-    if resuming:
-        run_id = (ckpt_dir / "wandb_id.txt").read_text().strip()
-        wandb.init(id=run_id, resume="must", project=config.project_name)
-    else:
-        wandb.init(
-            name=config.exp_name,
-            config=dataclasses.asdict(config),
-            project=config.project_name,
-        )
-        (ckpt_dir / "wandb_id.txt").write_text(wandb.run.id)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)
 
 
 def setup_ddp():
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
-    use_ddp = world_size > 1
-    if use_ddp and not torch.distributed.is_initialized():
-        backend = "nccl" if torch.cuda.is_available() else "gloo"
-        torch.distributed.init_process_group(backend=backend, init_method="env://")
-
-        # Set up debugging environment variables for DDP issues
-        if os.environ.get("TORCH_DISTRIBUTED_DEBUG") is None:
-            os.environ["TORCH_DISTRIBUTED_DEBUG"] = "INFO"
-
-    local_rank = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0")))
-    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
-    if torch.cuda.is_available():
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    device = torch.device("cuda", local_rank) if torch.cuda.is_available() else torch.device("cpu")
+    if device.type == "cuda":
+        # NCCL must know the local device before its first collective.
         torch.cuda.set_device(device)
-    return use_ddp, local_rank, device
+    if world_size > 1 and not dist.is_initialized():
+        dist.init_process_group(backend="nccl" if device.type == "cuda" else "gloo", init_method="env://")
+    return dist.is_initialized(), local_rank, device
 
 
 def cleanup_ddp():
-    if torch.distributed.is_initialized():
-        torch.distributed.barrier()
-        torch.distributed.destroy_process_group()
+    # A barrier in a finally block would hang if another rank raised earlier.
+    if dist.is_initialized():
+        dist.destroy_process_group()
 
 
-def set_seed(seed: int, local_rank: int):
-    torch.manual_seed(seed + local_rank)
-    np.random.seed(seed + local_rank)
+def _rank():
+    return dist.get_rank() if dist.is_initialized() else 0
+
+
+def _world_size():
+    return dist.get_world_size() if dist.is_initialized() else 1
+
+
+def _on_primary(operation):
+    """Run a filesystem operation once and propagate failures to every DDP rank."""
+    result = [None]
+    if _rank() == 0:
+        try:
+            result[0] = (True, operation())
+        except Exception as exc:  # All ranks must receive the failure before raising.
+            result[0] = (False, f"{type(exc).__name__}: {exc}")
+    if dist.is_initialized():
+        dist.broadcast_object_list(result, src=0)
+    success, value = result[0]
+    if not success:
+        raise RuntimeError(value)
+    return value
+
+
+def set_seed(seed: int, rank: int):
+    random.seed(seed + rank)
+    np.random.seed(seed + rank)
+    torch.manual_seed(seed + rank)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed + local_rank)
+        torch.cuda.manual_seed_all(seed + rank)
 
 
-def build_datasets(config: _config.TrainConfig):
-    # Use the unified data loader with PyTorch framework
-    data_loader = _data.create_data_loader(config, framework="pytorch", shuffle=True)
-    return data_loader, data_loader.data_config()
+def _unwrap(model):
+    return model.module if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model
 
 
 def get_model_state_dict(model):
-    """Get state dict from model, handling DDP wrapper."""
-    return (
-        model.module.state_dict()
-        if isinstance(model, torch.nn.parallel.DistributedDataParallel)
-        else model.state_dict()
-    )
+    return _unwrap(model).state_dict()
 
 
 def get_model_parameters(model):
-    """Get parameters from model, handling DDP wrapper."""
-    return (
-        model.module.parameters()
-        if isinstance(model, torch.nn.parallel.DistributedDataParallel)
-        else model.parameters()
+    return (parameter for parameter in _unwrap(model).parameters() if parameter.requires_grad)
+
+
+def move_to_device(value, device):
+    """Move Observation dataclasses without creating any JAX arrays or backend."""
+    if isinstance(value, torch.Tensor):
+        return value.to(device=device, non_blocking=True)
+    if isinstance(value, np.ndarray):
+        return torch.as_tensor(value, device=device)
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return dataclasses.replace(
+            value,
+            **{field.name: move_to_device(getattr(value, field.name), device) for field in dataclasses.fields(value)},
+        )
+    if isinstance(value, dict):
+        return {key: move_to_device(item, device) for key, item in value.items()}
+    if isinstance(value, tuple) and hasattr(value, "_fields"):
+        return type(value)(*(move_to_device(item, device) for item in value))
+    if isinstance(value, tuple | list):
+        return type(value)(move_to_device(item, device) for item in value)
+    return value
+
+
+def learning_rate_at(schedule, completed_steps: int) -> float:
+    """Evaluate the supported OpenPI schedules without calling JAX/Optax."""
+    warmup = schedule.warmup_steps
+    if warmup < 0 or schedule.peak_lr <= 0:
+        raise ValueError("Learning rate warmup must be nonnegative and peak_lr positive.")
+    if completed_steps < warmup:
+        initial = schedule.peak_lr / (warmup + 1)
+        return initial + (schedule.peak_lr - initial) * completed_steps / warmup
+    if hasattr(schedule, "decay_steps"):
+        if schedule.decay_steps <= warmup:
+            raise ValueError("decay_steps must exceed warmup_steps.")
+        progress = min(1.0, (completed_steps - warmup) / (schedule.decay_steps - warmup))
+        return schedule.decay_lr + (schedule.peak_lr - schedule.decay_lr) * 0.5 * (1 + math.cos(math.pi * progress))
+    if hasattr(schedule, "timescale") and schedule.timescale > 0:
+        return schedule.peak_lr / math.sqrt((schedule.timescale + completed_steps - warmup) / schedule.timescale)
+    raise TypeError(f"Unsupported PyTorch LR schedule: {type(schedule).__name__}")
+
+
+def _autocast(device, precision):
+    if precision == "bfloat16" and device.type == "cuda":
+        return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+    return contextlib.nullcontext()
+
+
+def _loss_and_metrics(output):
+    if isinstance(output, tuple) and len(output) == 2 and isinstance(output[1], dict):
+        losses, metrics = output
+    elif isinstance(output, dict):
+        losses, metrics = output["loss"], {key: value for key, value in output.items() if key != "loss"}
+    else:
+        losses, metrics = output, {}
+    if not isinstance(losses, torch.Tensor) or not losses.requires_grad:
+        raise TypeError("The model must return a differentiable loss tensor.")
+    loss = losses.float().mean()
+    return loss, {
+        "loss": loss.detach(),
+        **{
+            key: value.detach().float().mean()
+            if isinstance(value, torch.Tensor)
+            else torch.tensor(float(value), device=loss.device)
+            for key, value in metrics.items()
+        },
+    }
+
+
+def train_one_update(
+    model, optimizer, data_iter, *, device, accumulation_steps, precision, clip_gradient_norm, return_metrics=True
+):
+    """Consume microbatches and perform exactly one optimizer update."""
+    if accumulation_steps < 1:
+        raise ValueError("accumulation_steps must be positive.")
+    optimizer.zero_grad(set_to_none=True)
+    totals = {}
+    for microstep in range(accumulation_steps):
+        try:
+            observation, actions = next(data_iter)
+        except StopIteration as exc:
+            raise RuntimeError("Training data exhausted before the requested optimizer updates completed.") from exc
+        observation = move_to_device(observation, device)
+        actions = move_to_device(actions, device).float()
+        sync_context = (
+            model.no_sync()
+            if hasattr(model, "no_sync") and microstep + 1 < accumulation_steps
+            else contextlib.nullcontext()
+        )
+        with sync_context:
+            with _autocast(device, precision):
+                output = (
+                    model(observation, actions, return_metrics=True) if return_metrics else model(observation, actions)
+                )
+                loss, metrics = _loss_and_metrics(output)
+            finite = torch.isfinite(loss.detach()).to(torch.int32)
+            if dist.is_initialized():
+                dist.all_reduce(finite, op=dist.ReduceOp.MIN)
+            if not finite.item():
+                raise FloatingPointError("Non-finite training loss; optimizer update was not applied.")
+            (loss / accumulation_steps).backward()
+        # Token accuracy is a token-weighted statistic, unlike the per-example
+        # CE/action losses. Keep its numerator until microbatches/ranks combine.
+        if "subtask_token_accuracy" in metrics and "subtask_tokens" in metrics:
+            metrics["subtask_token_accuracy"] = metrics["subtask_token_accuracy"] * metrics["subtask_tokens"]
+        for key, value in metrics.items():
+            totals[key] = totals.get(key, 0) + value / accumulation_steps
+    parameters = list(get_model_parameters(model))
+    grad_norm = torch.nn.utils.clip_grad_norm_(parameters, clip_gradient_norm, error_if_nonfinite=True)
+    optimizer.step()
+    optimizer.zero_grad(set_to_none=True)
+    totals["grad_norm"] = grad_norm.detach()
+    if dist.is_initialized():
+        keys = sorted(totals)
+        reduced = torch.stack([totals[key] for key in keys])
+        dist.all_reduce(reduced, op=dist.ReduceOp.SUM)
+        totals = dict(zip(keys, reduced / _world_size(), strict=True))
+    if "subtask_token_accuracy" in totals and "subtask_tokens" in totals:
+        totals["subtask_token_accuracy"] = totals["subtask_token_accuracy"] / totals["subtask_tokens"].clamp_min(1)
+    return {key: value.item() for key, value in totals.items()}
+
+
+def _capture_rng_state():
+    return {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "torch": torch.get_rng_state(),
+        "cuda": torch.cuda.get_rng_state() if torch.cuda.is_available() else None,
+    }
+
+
+def _restore_rng_state(state):
+    random.setstate(state["python"])
+    np.random.set_state(state["numpy"])
+    torch.set_rng_state(state["torch"].cpu())
+    if state["cuda"] is not None and torch.cuda.is_available():
+        torch.cuda.set_rng_state(state["cuda"].cpu())
+
+
+def checkpoint_due(completed_steps, config):
+    return completed_steps > 0 and (
+        completed_steps % config.save_interval == 0 or completed_steps == config.num_train_steps
     )
-
-
-def save_checkpoint(model, optimizer, global_step, config, is_main, data_config):
-    """Save a checkpoint with model state, optimizer state, and metadata."""
-    if not is_main:
-        return
-
-    # Only save if it's time to save or if it's the final step
-    if (global_step % config.save_interval == 0 and global_step > 0) or global_step == config.num_train_steps - 1:
-        # Create temporary directory for atomic checkpoint saving
-        final_ckpt_dir = config.checkpoint_dir / f"{global_step}"
-        tmp_ckpt_dir = config.checkpoint_dir / f"tmp_{global_step}"
-
-        # Remove any existing temp directory and create new one
-        if tmp_ckpt_dir.exists():
-            shutil.rmtree(tmp_ckpt_dir)
-        tmp_ckpt_dir.mkdir(parents=True, exist_ok=True)
-
-        # Save model state using safetensors (handle shared tensors)
-        model_to_save = model.module if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model
-        safetensors.torch.save_model(model_to_save, tmp_ckpt_dir / "model.safetensors")
-
-        # Save optimizer state using PyTorch format
-        torch.save(optimizer.state_dict(), tmp_ckpt_dir / "optimizer.pt")
-
-        # Save training metadata (avoid saving full config to prevent JAX/Flax compatibility issues)
-        metadata = {
-            "global_step": global_step,
-            "config": dataclasses.asdict(config),
-            "timestamp": time.time(),
-        }
-        torch.save(metadata, tmp_ckpt_dir / "metadata.pt")
-
-        # save norm stats
-        norm_stats = data_config.norm_stats
-        if norm_stats is not None and data_config.asset_id is not None:
-            _normalize.save(tmp_ckpt_dir / "assets" / data_config.asset_id, norm_stats)
-
-        # Atomically move temp directory to final location
-        if final_ckpt_dir.exists():
-            shutil.rmtree(final_ckpt_dir)
-        tmp_ckpt_dir.rename(final_ckpt_dir)
-
-        logging.info(f"Saved checkpoint at step {global_step} -> {final_ckpt_dir}")
-
-        # Log checkpoint to wandb
-        if config.wandb_enabled:
-            wandb.log({"checkpoint_step": global_step}, step=global_step)
-
-
-def load_checkpoint(model, optimizer, checkpoint_dir, device):
-    """Load the latest checkpoint and return the global step."""
-    checkpoint_steps = [
-        int(d.name)
-        for d in checkpoint_dir.iterdir()
-        if d.is_dir() and d.name.isdigit() and not d.name.startswith("tmp_")
-    ]
-
-    if not checkpoint_steps:
-        raise FileNotFoundError(f"No checkpoints found in {checkpoint_dir}")
-
-    latest_step = max(checkpoint_steps)
-    ckpt_dir = checkpoint_dir / f"{latest_step}"
-
-    # Clear memory before loading checkpoints
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        gc.collect()
-        log_memory_usage(device, latest_step, "before_loading_checkpoint")
-
-    try:
-        # Load model state with error handling
-        logging.info("Loading model state...")
-        safetensors_path = ckpt_dir / "model.safetensors"
-
-        if safetensors_path.exists():
-            model_to_load = model.module if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model
-            safetensors.torch.load_model(model_to_load, safetensors_path, device=str(device))
-            logging.info("Loaded model state from safetensors format")
-        else:
-            raise FileNotFoundError(f"No model checkpoint found at {ckpt_dir}")
-
-        torch.cuda.empty_cache()
-        gc.collect()
-        log_memory_usage(device, latest_step, "after_loading_model")
-
-        # Load optimizer state with error handling
-        logging.info("Loading optimizer state...")
-        optimizer_path = ckpt_dir / "optimizer.pt"
-
-        if optimizer_path.exists():
-            optimizer_state_dict = torch.load(optimizer_path, map_location=device, weights_only=False)
-            logging.info("Loaded optimizer state from pt format")
-        else:
-            raise FileNotFoundError(f"No optimizer checkpoint found at {ckpt_dir}")
-
-        optimizer.load_state_dict(optimizer_state_dict)
-        del optimizer_state_dict
-        torch.cuda.empty_cache()
-        gc.collect()
-        log_memory_usage(device, latest_step, "after_loading_optimizer")
-
-        # Load metadata
-        logging.info("Loading metadata...")
-        metadata = torch.load(ckpt_dir / "metadata.pt", map_location=device, weights_only=False)
-        global_step = metadata.get("global_step", latest_step)
-        del metadata
-        torch.cuda.empty_cache()
-        gc.collect()
-        log_memory_usage(device, latest_step, "after_loading_metadata")
-
-        logging.info(f"Successfully loaded all checkpoint components from step {latest_step}")
-        return global_step
-
-    except RuntimeError as e:
-        if "out of memory" in str(e):
-            # Clear memory and provide detailed error message
-            torch.cuda.empty_cache()
-            gc.collect()
-            logging.error(f"Out of memory error while loading checkpoint: {e!s}")
-            log_memory_usage(device, latest_step, "after_oom_error")
-            raise RuntimeError(
-                "Out of memory while loading checkpoint. Try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
-            ) from e
-        raise
 
 
 def get_latest_checkpoint_step(checkpoint_dir):
-    """Get the latest checkpoint step number from a checkpoint directory."""
-    checkpoint_steps = [
-        int(d.name)
-        for d in checkpoint_dir.iterdir()
-        if d.is_dir() and d.name.isdigit() and not d.name.startswith("tmp_")
+    checkpoint_dir = Path(checkpoint_dir)
+    if not checkpoint_dir.exists():
+        return None
+    steps = [
+        int(path.name)
+        for path in checkpoint_dir.iterdir()
+        if path.is_dir() and path.name.isdigit() and all((path / name).is_file() for name in _CHECKPOINT_FILES)
     ]
-    return max(checkpoint_steps) if checkpoint_steps else None
+    return max(steps) if steps else None
 
 
-def log_memory_usage(device, step, phase="unknown"):
-    """Log detailed memory usage information."""
-    if not torch.cuda.is_available():
+def _config_summary(config):
+    # JSON metadata never requires unpickling Python/Flax config classes.
+    def encode(value):
+        if callable(value) and hasattr(value, "__qualname__"):
+            return f"{value.__module__}.{value.__qualname__}"
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        return str(value)
+
+    fields = dataclasses.asdict(config) if dataclasses.is_dataclass(config) else vars(config)
+    return json.loads(json.dumps(fields, default=encode))
+
+
+def save_checkpoint(model, optimizer, global_step, config, is_main=None, data_config=None):
+    """Collect per-rank RNG, then atomically publish a complete, inference-ready checkpoint.
+
+    All DDP ranks must call this function; ``is_main`` remains only for call-site
+    compatibility. New step directories count completed optimizer updates.
+    """
+    if not checkpoint_due(global_step, config):
         return
-
-    memory_allocated = torch.cuda.memory_allocated(device) / 1e9
-    memory_reserved = torch.cuda.memory_reserved(device) / 1e9
-    memory_free = torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
-    memory_free = memory_free / 1e9
-
-    # Get more detailed memory info
-    memory_stats = torch.cuda.memory_stats(device)
-    max_memory_allocated = memory_stats.get("allocated_bytes.all.peak", 0) / 1e9
-    max_memory_reserved = memory_stats.get("reserved_bytes.all.peak", 0) / 1e9
-
-    # Get DDP info if available
-    ddp_info = ""
+    local_rng = _capture_rng_state()
     if dist.is_initialized():
-        ddp_info = f" | DDP: rank={dist.get_rank()}, world_size={dist.get_world_size()}"
+        rng_states = [None] * _world_size()
+        dist.all_gather_object(rng_states, local_rng)
+    else:
+        rng_states = [local_rng]
 
-    logging.info(
-        f"Step {step} ({phase}): GPU memory - allocated: {memory_allocated:.2f}GB, reserved: {memory_reserved:.2f}GB, free: {memory_free:.2f}GB, peak_allocated: {max_memory_allocated:.2f}GB, peak_reserved: {max_memory_reserved:.2f}GB{ddp_info}"
-    )
+    def write():
+        final_dir = config.checkpoint_dir / str(global_step)
+        temporary_dir = config.checkpoint_dir / f".tmp_{global_step}"
+        if final_dir.exists():
+            raise FileExistsError(f"Refusing to replace an existing complete checkpoint: {final_dir}")
+        if temporary_dir.exists():
+            shutil.rmtree(temporary_dir)
+        temporary_dir.mkdir(parents=True)
+        safetensors.torch.save_model(_unwrap(model), temporary_dir / "model.safetensors")
+        torch.save(optimizer.state_dict(), temporary_dir / "optimizer.pt")
+        torch.save(rng_states, temporary_dir / "rng.pt")
+        metadata = {
+            "format_version": 2,
+            "global_step": global_step,
+            "completed_steps": global_step,
+            "micro_batches_seen": global_step * config.pytorch_gradient_accumulation_steps,
+            "batch_size": config.batch_size,
+            "world_size": _world_size(),
+            "gradient_accumulation_steps": config.pytorch_gradient_accumulation_steps,
+            "config": _config_summary(config),
+            "timestamp": time.time(),
+        }
+        (temporary_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
+        if data_config is not None and data_config.norm_stats is not None and data_config.asset_id is not None:
+            import openpi.shared.normalize as normalize
+
+            normalize.save(temporary_dir / "assets" / data_config.asset_id, data_config.norm_stats)
+        temporary_dir.rename(final_dir)
+        logging.info("Saved checkpoint after %d optimizer updates: %s", global_step, final_dir)
+
+    _on_primary(write)
+
+
+def load_checkpoint(model, optimizer, checkpoint_dir, device, config=None):
+    """Restore weights, AdamW moments and rank-local RNG without a second GPU copy."""
+    latest = get_latest_checkpoint_step(checkpoint_dir)
+    if latest is None:
+        raise FileNotFoundError(f"No complete Torch training checkpoints in {checkpoint_dir}")
+    directory = Path(checkpoint_dir) / str(latest)
+    metadata = json.loads((directory / "metadata.json").read_text())
+    if metadata["format_version"] != 2 or metadata["completed_steps"] != latest:
+        raise ValueError(f"Invalid checkpoint step/format metadata in {directory}")
+    if metadata["world_size"] != _world_size():
+        raise ValueError("Resume requires the original world size to restore sampler and per-rank RNG state.")
+    if config is not None:
+        if (
+            metadata["batch_size"] != config.batch_size
+            or metadata["gradient_accumulation_steps"] != config.pytorch_gradient_accumulation_steps
+        ):
+            raise ValueError("Resume requires the original batch size and gradient accumulation steps.")
+        saved_config = metadata["config"]
+        current_config = _config_summary(config)
+        for name in ("model", "data", "optimizer", "lr_schedule", "seed", "pytorch_training_precision"):
+            if name in saved_config and saved_config[name] != current_config.get(name):
+                raise ValueError(
+                    f"Resume configuration changed {name}; use a new experiment for a new fine-tuning run."
+                )
+    # CPU staging also lets load_state_dict cast saved state into FP32 master parameters.
+    safetensors.torch.load_model(_unwrap(model), directory / "model.safetensors", device="cpu", strict=True)
+    optimizer_state = torch.load(directory / "optimizer.pt", map_location="cpu", weights_only=True)
+    optimizer.load_state_dict(optimizer_state)
+    del optimizer_state
+    rng_states = torch.load(directory / "rng.pt", map_location="cpu", weights_only=False)
+    _restore_rng_state(rng_states[_rank()])
+    logging.info("Resumed after %d optimizer updates (%d microbatches).", latest, metadata["micro_batches_seen"])
+    return latest
+
+
+def _prepare_output(config):
+    def prepare():
+        directory = config.checkpoint_dir
+        if config.resume:
+            if get_latest_checkpoint_step(directory) is None:
+                raise FileNotFoundError(f"No complete Torch training checkpoint in {directory}")
+        else:
+            if directory.exists():
+                if not config.overwrite:
+                    raise FileExistsError(
+                        f"Experiment already exists: {directory}; choose --resume or another --exp-name."
+                    )
+                shutil.rmtree(directory)
+            directory.mkdir(parents=True)
+
+    _on_primary(prepare)
+
+
+def _data_config_for_resume(config):
+    """Restore normalization from the model's checkpoint, even on a new machine."""
+    if not config.resume:
+        return config
+    latest = get_latest_checkpoint_step(config.checkpoint_dir)
+    if latest is None:
+        raise FileNotFoundError(f"No complete Torch training checkpoint in {config.checkpoint_dir}")
+    assets = config.checkpoint_dir / str(latest) / "assets"
+    if config.data.repo_id != "fake" and not assets.is_dir():
+        raise FileNotFoundError(f"Training checkpoint is missing normalization assets: {assets}")
+    data_assets = dataclasses.replace(config.data.assets, assets_dir=str(assets))
+    return dataclasses.replace(config, data=dataclasses.replace(config.data, assets=data_assets))
+
+
+def _validate_config(config, device):
+    if config.resume and config.overwrite:
+        raise ValueError("Cannot resume and overwrite at the same time.")
+    for name in (
+        "batch_size",
+        "pytorch_gradient_accumulation_steps",
+        "num_train_steps",
+        "save_interval",
+        "log_interval",
+    ):
+        if getattr(config, name) < 1:
+            raise ValueError(f"{name} must be positive.")
+    if config.batch_size % _world_size():
+        raise ValueError("batch_size must be divisible by the torchrun world size.")
+    if config.ema_decay is not None:
+        raise ValueError("Torch trainer does not implement EMA; use pi05_b1k_pytorch or --ema-decay None explicitly.")
+    if config.fsdp_devices != 1:
+        raise ValueError("This Torch trainer uses DDP, not FSDP; set --fsdp-devices 1.")
+    if config.val_log_interval is not None:
+        raise ValueError("Periodic validation is not implemented in the Torch trainer; use the evaluation scripts.")
+    if config.pytorch_training_precision not in ("bfloat16", "float32"):
+        raise ValueError("pytorch_training_precision must be bfloat16 or float32.")
+    if device.type == "cuda" and config.pytorch_training_precision == "bfloat16" and not torch.cuda.is_bf16_supported():
+        raise ValueError("This CUDA device does not support BF16; select --pytorch-training-precision float32.")
+    if not config.resume and config.pytorch_weight_path is None and config.data.repo_id != "fake":
+        raise ValueError(
+            "BEHAVIOR fine-tuning requires --pytorch-weight-path pointing to a converted model.safetensors checkpoint."
+        )
+    if config.pytorch_weight_path is not None and not config.resume:
+        path = Path(config.pytorch_weight_path)
+        path = path / "model.safetensors" if path.is_dir() else path
+        if not path.is_file():
+            raise FileNotFoundError(f"Converted PyTorch weights do not exist: {path}")
+    if type(config.optimizer).__name__ != "AdamW":
+        raise TypeError("Torch trainer currently supports the AdamW optimizer config.")
+    if config.optimizer.clip_gradient_norm <= 0:
+        raise ValueError("clip_gradient_norm must be positive.")
+    learning_rate_at(config.lr_schedule, 0)
+
+
+def log_memory_usage(device, step, phase="training"):
+    if device.type == "cuda":
+        logging.info(
+            "step=%d %s CUDA allocated=%.2f GiB reserved=%.2f GiB peak=%.2f GiB",
+            step,
+            phase,
+            torch.cuda.memory_allocated(device) / 2**30,
+            torch.cuda.memory_reserved(device) / 2**30,
+            torch.cuda.max_memory_allocated(device) / 2**30,
+        )
+
+
+def _init_wandb(config):
+    import wandb
+
+    run_id_file = config.checkpoint_dir / "wandb_id.txt"
+    kwargs = {}
+    if config.resume and run_id_file.exists():
+        kwargs.update(id=run_id_file.read_text().strip(), resume="must")
+    run = wandb.init(name=config.exp_name, project=config.project_name, config=_config_summary(config), **kwargs)
+    run_id_file.write_text(run.id)
+    return run
 
 
 def train_loop(config: _config.TrainConfig):
-    use_ddp, local_rank, device = setup_ddp()
-    is_main = (not use_ddp) or (dist.get_rank() == 0)
-    set_seed(config.seed, local_rank)
+    use_ddp, _, device = setup_ddp()
+    run = None
+    progress = None
+    try:
+        _validate_config(config, device)
+        # Import the heavyweight shared stack only after JAX has been restricted to CPU.
+        import flax.nnx as nnx
+        import tqdm
 
-    # Initialize checkpoint directory and wandb
-    resuming = False
-    if config.resume:
-        # Find checkpoint directory based on experiment name
-        exp_checkpoint_dir = config.checkpoint_dir
-        if exp_checkpoint_dir.exists():
-            # Use validation to find the latest working checkpoint
-            latest_step = get_latest_checkpoint_step(exp_checkpoint_dir)
-            if latest_step is not None:
-                resuming = True
-                logging.info(
-                    f"Resuming from experiment checkpoint directory: {exp_checkpoint_dir} at step {latest_step}"
-                )
-            else:
-                raise FileNotFoundError(f"No valid checkpoints found in {exp_checkpoint_dir} for resume")
-        else:
-            raise FileNotFoundError(f"Experiment checkpoint directory {exp_checkpoint_dir} does not exist for resume")
-    elif config.overwrite and config.checkpoint_dir.exists():
-        shutil.rmtree(config.checkpoint_dir)
-        logging.info(f"Overwriting checkpoint directory: {config.checkpoint_dir}")
+        from openpi.models.pi0_config import Pi0Config
+        from openpi.models_pytorch.pi0_pytorch import PI0Pytorch
+        import openpi.training.data_loader as data_loader
 
-    # Create checkpoint directory with experiment name
-    if not resuming:
-        # For new runs, create experiment-specific checkpoint directory
-        exp_checkpoint_dir = config.checkpoint_dir
-        exp_checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        logging.info(f"Created experiment checkpoint directory: {exp_checkpoint_dir}")
-    else:
-        # For resume, checkpoint_dir is already set to the experiment directory
-        logging.info(f"Using existing experiment checkpoint directory: {config.checkpoint_dir}")
-
-    # Initialize wandb (only on main process)
-    if is_main:
-        init_wandb(config, resuming=resuming, enabled=config.wandb_enabled)
-
-    # Build data loader using the unified data loader
-    # Calculate effective batch size per GPU for DDP
-    # For N GPUs, each GPU should get batch_size/N samples, so total across all GPUs is batch_size
-    world_size = torch.distributed.get_world_size() if use_ddp else 1
-    effective_batch_size = config.batch_size // world_size
-    logging.info(
-        f"Using batch size per GPU: {effective_batch_size} (total batch size across {world_size} GPUs: {config.batch_size})"
-    )
-
-    # Pass the original batch size to data loader - it will handle DDP splitting internally
-    loader, data_config = build_datasets(config)
-
-    # Log sample images to wandb on first batch
-    if is_main and config.wandb_enabled and not resuming:
-        # Create a separate data loader for sample batch to avoid consuming the main loader
-        sample_data_loader = _data.create_data_loader(config, framework="pytorch", shuffle=False)
-        sample_batch = next(iter(sample_data_loader))
-        # Convert observation and actions to torch tensors
-        observation, actions = sample_batch
-        sample_batch = observation.to_dict()
-        sample_batch["actions"] = actions
-
-        # Create sample images for wandb
-        images_to_log = []
-        # Get batch size from the first image tensor
-        batch_size = next(iter(sample_batch["image"].values())).shape[0]
-        for i in range(min(5, batch_size)):
-            # Concatenate all camera views horizontally for this batch item
-            # Convert from NCHW to NHWC format for wandb
-            img_concatenated = torch.cat([img[i].permute(1, 2, 0) for img in sample_batch["image"].values()], axis=1)
-            img_concatenated = img_concatenated.cpu().numpy()
-            images_to_log.append(wandb.Image(img_concatenated))
-
-        wandb.log({"camera_views": images_to_log}, step=0)
-
-        # Clear sample batch from memory aggressively
-        del sample_batch, observation, actions, images_to_log, img_concatenated
-        del sample_data_loader  # Also delete the sample data loader
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        logging.info("Cleared sample batch and data loader from memory")
-
-    # Build model
-    if not isinstance(config.model, openpi.models.pi0_config.Pi0Config):
-        # Convert dataclass to Pi0Config if needed
-        model_cfg = openpi.models.pi0_config.Pi0Config(
-            dtype=config.pytorch_training_precision,
-            action_dim=config.model.action_dim,
-            action_horizon=config.model.action_horizon,
-            max_token_len=config.model.max_token_len,
-            paligemma_variant=getattr(config.model, "paligemma_variant", "gemma_2b"),
-            action_expert_variant=getattr(config.model, "action_expert_variant", "gemma_300m"),
-            pi05=getattr(config.model, "pi05", False),
+        if not isinstance(config.model, Pi0Config):
+            raise TypeError("Torch trainer requires a Pi0Config model.")
+        if not isinstance(config.freeze_filter, nnx.Nothing):
+            raise ValueError("JAX freeze_filter is not supported by this Torch full-finetuning entrypoint.")
+        if "lora" in config.model.paligemma_variant or "lora" in config.model.action_expert_variant:
+            raise ValueError("This Torch entrypoint supports full fine-tuning; JAX LoRA variants are not implemented.")
+        _prepare_output(config)
+        set_seed(config.seed, _rank())
+        loader = data_loader.create_data_loader(_data_config_for_resume(config), framework="pytorch", shuffle=True)
+        data_config = loader.data_config()
+        # FP32 master weights prevent small fine-tuning updates from rounding to zero.
+        # Autocast controls activation/matmul precision independently.
+        model_config = dataclasses.replace(config.model, dtype="float32", pytorch_compile_mode=None)
+        model = PI0Pytorch(model_config)
+        if config.pytorch_gradient_checkpointing:
+            model.gradient_checkpointing_enable()
+        if config.pytorch_weight_path is not None and not config.resume:
+            weight_path = Path(config.pytorch_weight_path)
+            weight_path = weight_path / "model.safetensors" if weight_path.is_dir() else weight_path
+            if not weight_path.is_file():
+                raise FileNotFoundError(f"Converted PyTorch weights do not exist: {weight_path}")
+            safetensors.torch.load_model(model, weight_path, device="cpu", strict=True)
+        model.to(device=device, dtype=torch.float32)
+        model.train()
+        if use_ddp:
+            model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[device.index] if device.type == "cuda" else None,
+                find_unused_parameters=True,
+                gradient_as_bucket_view=True,
+            )
+        optimizer_config = config.optimizer
+        optimizer_kwargs = {"fused": True} if device.type == "cuda" else {"foreach": False}
+        optimizer = torch.optim.AdamW(
+            get_model_parameters(model),
+            lr=learning_rate_at(config.lr_schedule, 0),
+            betas=(optimizer_config.b1, optimizer_config.b2),
+            eps=optimizer_config.eps,
+            weight_decay=optimizer_config.weight_decay,
+            **optimizer_kwargs,
         )
-    else:
-        model_cfg = config.model
-        # Update dtype to match pytorch_training_precision
-        object.__setattr__(model_cfg, "dtype", config.pytorch_training_precision)
-
-    model = openpi.models_pytorch.pi0_pytorch.PI0Pytorch(model_cfg).to(device)
-
-    if hasattr(model, "gradient_checkpointing_enable"):
-        enable_gradient_checkpointing = True
-        model.gradient_checkpointing_enable()
-        logging.info("Enabled gradient checkpointing for memory optimization")
-    else:
-        enable_gradient_checkpointing = False
-        logging.info("Gradient checkpointing is not supported for this model")
-
-    # Log initial memory usage after model creation
-    if is_main and torch.cuda.is_available():
-        log_memory_usage(device, 0, "after_model_creation")
-
-    # Enable memory optimizations for large-scale training
-    if world_size >= 8:
-        torch.backends.cudnn.benchmark = True
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        # Set memory allocation configuration
-        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128,expandable_segments:True"
-        logging.info("Enabled memory optimizations for 8+ GPU training")
-
-    if use_ddp:
-        model = torch.nn.parallel.DistributedDataParallel(
-            model,
-            device_ids=[device.index] if device.type == "cuda" else None,
-            find_unused_parameters=True,  # Disable for memory efficiency
-            gradient_as_bucket_view=True,  # Enable for memory efficiency
-            static_graph=world_size >= 8,  # Enable for 8+ GPUs
+        completed_steps = (
+            load_checkpoint(model, optimizer, config.checkpoint_dir, device, config) if config.resume else 0
         )
+        if completed_steps > config.num_train_steps:
+            raise ValueError("Checkpoint already exceeds num_train_steps.")
+        if completed_steps:
+            if not hasattr(loader, "set_start_batch"):
+                raise TypeError("This data loader cannot restore the sampler position for Torch resume.")
+            loader.set_start_batch(completed_steps * config.pytorch_gradient_accumulation_steps)
+            logging.info(
+                "Sampler order resumes at the saved microbatch; data-worker augmentation RNG is reinitialized."
+            )
+        # Iterating a DataLoader must not perturb restored model/noise RNG state.
+        saved_rng = _capture_rng_state()
+        iterator = iter(loader)
+        _restore_rng_state(saved_rng)
+        if config.wandb_enabled:
 
-    # Load weights from weight_loader if specified (for fine-tuning)
-    if config.pytorch_weight_path is not None:
-        logging.info(f"Loading weights from: {config.pytorch_weight_path}")
+            def initialize_tracking():
+                nonlocal run
+                run = _init_wandb(config)
 
-        model_path = os.path.join(config.pytorch_weight_path, "model.safetensors")
-        safetensors.torch.load_model(
-            (model.module if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model), model_path
-        )
-        logging.info(f"Loaded PyTorch weights from {config.pytorch_weight_path}")
-
-    # Optimizer + learning rate schedule from config
-    warmup_steps = config.lr_schedule.warmup_steps
-    peak_lr = config.lr_schedule.peak_lr
-    decay_steps = config.lr_schedule.decay_steps
-    end_lr = config.lr_schedule.decay_lr
-
-    # Create optimizer with config parameters
-    optim = torch.optim.AdamW(
-        model.parameters(),
-        lr=peak_lr,
-        betas=(config.optimizer.b1, config.optimizer.b2),
-        eps=config.optimizer.eps,
-        weight_decay=config.optimizer.weight_decay,
-    )
-
-    # Load checkpoint if resuming
-    global_step = 0
-    if resuming:
-        global_step = load_checkpoint(model, optim, config.checkpoint_dir, device)
-        logging.info(f"Resumed training from step {global_step}")
-
-    def lr_schedule(step: int):
-        if step < warmup_steps:
-            # Match JAX behavior: start from peak_lr / (warmup_steps + 1)
-            init_lr = peak_lr / (warmup_steps + 1)
-            return init_lr + (peak_lr - init_lr) * step / warmup_steps
-        # cosine decay
-        progress = min(1.0, (step - warmup_steps) / max(1, decay_steps - warmup_steps))
-        cos = 0.5 * (1 + np.cos(np.pi * progress))
-        return end_lr + (peak_lr - end_lr) * cos
-
-    model.train()
-    start_time = time.time()
-    infos = []  # Collect stats over log interval
-    if is_main:
+            _on_primary(initialize_tracking)
         logging.info(
-            f"Running on: {platform.node()} | world_size={torch.distributed.get_world_size() if use_ddp else 1}"
+            "Torch %s: world_size=%d microbatch/global=%d microbatch/GPU=%d accumulation=%d effective_batch=%d",
+            device,
+            _world_size(),
+            config.batch_size,
+            config.batch_size // _world_size(),
+            config.pytorch_gradient_accumulation_steps,
+            config.batch_size * config.pytorch_gradient_accumulation_steps,
         )
         logging.info(
-            f"Training config: batch_size={config.batch_size}, effective_batch_size={effective_batch_size}, num_train_steps={config.num_train_steps}"
+            "Parameters/AdamW states=FP32; compute=%s; EMA=disabled; gradient_checkpointing=%s",
+            config.pytorch_training_precision if device.type == "cuda" else "float32 (CPU)",
+            config.pytorch_gradient_checkpointing,
         )
-        logging.info(f"Memory optimizations: gradient_checkpointing={enable_gradient_checkpointing}")
-        logging.info(
-            f"LR schedule: warmup={warmup_steps}, peak_lr={peak_lr:.2e}, decay_steps={decay_steps}, end_lr={end_lr:.2e}"
-        )
-        logging.info(
-            f"Optimizer: {type(config.optimizer).__name__}, weight_decay={config.optimizer.weight_decay}, clip_norm={config.optimizer.clip_gradient_norm}"
-        )
-        logging.info("EMA is not supported for PyTorch training")
-        logging.info(f"Training precision: {model_cfg.dtype}")
-
-    # Training loop - iterate until we reach num_train_steps
-    pbar = (
-        tqdm.tqdm(total=config.num_train_steps, initial=global_step, desc="Training", disable=not is_main)
-        if is_main
-        else None
-    )
-
-    while global_step < config.num_train_steps:
-        # Set epoch for distributed training
-        if use_ddp and hasattr(loader, "set_epoch"):
-            loader.set_epoch(global_step // len(loader))
-
-        for observation, actions in loader:
-            # Check if we've reached the target number of steps
-            if global_step >= config.num_train_steps:
-                break
-
-            # The unified data loader returns (observation, actions) tuple
-            observation = jax.tree.map(lambda x: x.to(device), observation)  # noqa: PLW2901
-            actions = actions.to(torch.float32)  # noqa: PLW2901
-            actions = actions.to(device)  # noqa: PLW2901
-
-            # Update LR
-            for pg in optim.param_groups:
-                pg["lr"] = lr_schedule(global_step)
-
-            # Forward pass
-            losses = model(observation, actions)
-            # Ensure losses is a tensor and handle different return types
-            if isinstance(losses, list | tuple):
-                losses = torch.stack(losses)
-            elif not isinstance(losses, torch.Tensor):
-                losses = torch.tensor(losses, device=device, dtype=torch.float32)
-
-            loss = losses.mean()
-
-            # Backward pass
-            loss.backward()
-
-            # Log memory usage after backward pass
-            if global_step < 5 and is_main and torch.cuda.is_available():
-                log_memory_usage(device, global_step, "after_backward")
-
-            # Gradient clipping
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.optimizer.clip_gradient_norm)
-
-            # Optimizer step
-            optim.step()
-            optim.zero_grad(set_to_none=True)
-
-            # Clear gradients more aggressively
-            for param in model.parameters():
-                if param.grad is not None:
-                    param.grad.detach_()
-                    param.grad = None
-
-            # Collect stats
-            if is_main:
-                infos.append(
-                    {
-                        "loss": loss.item(),
-                        "learning_rate": optim.param_groups[0]["lr"],
-                        "grad_norm": float(grad_norm) if isinstance(grad_norm, torch.Tensor) else grad_norm,
-                    }
-                )
-
-            if is_main and (global_step % config.log_interval == 0):
-                elapsed = time.time() - start_time
-
-                # Average stats over log interval
-                avg_loss = sum(info["loss"] for info in infos) / len(infos)
-                avg_lr = sum(info["learning_rate"] for info in infos) / len(infos)
-
-                avg_grad_norm = None
-                if any("grad_norm" in info for info in infos):
-                    vals = [
-                        info["grad_norm"] for info in infos if "grad_norm" in info and info["grad_norm"] is not None
-                    ]
-                    if len(vals) > 0:
-                        avg_grad_norm = sum(vals) / len(vals)
-                logging.info(
-                    f"step={global_step} loss={avg_loss:.4f} lr={avg_lr:.2e} grad_norm={avg_grad_norm:.2f} time={elapsed:.1f}s"
-                    if avg_grad_norm is not None
-                    else f"step={global_step} loss={avg_loss:.4f} lr={avg_lr:.2e} time={elapsed:.1f}s"
-                )
-
-                # Log to wandb
-                if config.wandb_enabled and len(infos) > 0:
-                    log_payload = {
-                        "loss": avg_loss,
-                        "learning_rate": avg_lr,
-                        "step": global_step,
-                        "time_per_step": elapsed / config.log_interval,
-                    }
-                    if avg_grad_norm is not None:
-                        log_payload["grad_norm"] = avg_grad_norm
-                    wandb.log(log_payload, step=global_step)
-
-                start_time = time.time()
-                infos = []  # Reset stats collection
-
-            global_step += 1
-            # Save checkpoint using the new mechanism
-            save_checkpoint(model, optim, global_step, config, is_main, data_config)
-
-            # Update progress bar
-            if pbar is not None:
-                pbar.update(1)
-                pbar.set_postfix(
-                    {"loss": f"{loss.item():.4f}", "lr": f"{optim.param_groups[0]['lr']:.2e}", "step": global_step}
-                )
-
-    # Close progress bar
-    if pbar is not None:
-        pbar.close()
-
-    # Finish wandb run
-    if is_main and config.wandb_enabled:
-        wandb.finish()
-
-    cleanup_ddp()
+        log_memory_usage(device, completed_steps, "initialized")
+        progress = tqdm.tqdm(total=config.num_train_steps, initial=completed_steps, disable=_rank() != 0)
+        accumulated_metrics = {}
+        logged_updates = 0
+        started = time.monotonic()
+        while completed_steps < config.num_train_steps:
+            learning_rate = learning_rate_at(config.lr_schedule, completed_steps)
+            for group in optimizer.param_groups:
+                group["lr"] = learning_rate
+            metrics = train_one_update(
+                model,
+                optimizer,
+                iterator,
+                device=device,
+                accumulation_steps=config.pytorch_gradient_accumulation_steps,
+                precision=config.pytorch_training_precision,
+                clip_gradient_norm=optimizer_config.clip_gradient_norm,
+            )
+            completed_steps += 1
+            logged_updates += 1
+            metrics["learning_rate"] = learning_rate
+            if "subtask_token_accuracy" in metrics and "subtask_tokens" in metrics:
+                metrics["subtask_token_accuracy"] *= metrics["subtask_tokens"]
+            for key, value in metrics.items():
+                accumulated_metrics[key] = accumulated_metrics.get(key, 0.0) + value
+            progress.update(1)
+            if completed_steps % config.log_interval == 0 or completed_steps == config.num_train_steps:
+                average = {key: value / logged_updates for key, value in accumulated_metrics.items()}
+                if "subtask_token_accuracy" in average and "subtask_tokens" in average:
+                    average["subtask_token_accuracy"] /= max(average["subtask_tokens"], 1)
+                average["time_per_update"] = (time.monotonic() - started) / logged_updates
+                if _rank() == 0:
+                    logging.info(
+                        "step=%d %s", completed_steps, " ".join(f"{key}={value:.5g}" for key, value in average.items())
+                    )
+                    log_memory_usage(device, completed_steps)
+                    if run is not None:
+                        run.log(average, step=completed_steps)
+                accumulated_metrics.clear()
+                logged_updates = 0
+                started = time.monotonic()
+            save_checkpoint(model, optimizer, completed_steps, config, data_config=data_config)
+    finally:
+        if progress is not None:
+            progress.close()
+        if run is not None:
+            run.finish()
+        cleanup_ddp()
 
 
 def main():
+    import openpi.training.config as config
+
     init_logging()
-    config = _config.cli()
-    train_loop(config)
+    train_loop(config.cli())
 
 
 if __name__ == "__main__":

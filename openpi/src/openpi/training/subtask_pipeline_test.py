@@ -14,6 +14,7 @@ import optax
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+import torch
 
 from openpi.configs import ROBOT_REGISTRY
 from openpi.models import tokenizer as tokenizer_lib
@@ -26,7 +27,16 @@ from scripts.b1k import train_b1k
 pytest_plugins = ["openpi.models.subtask_test"]
 
 
-def test_b1k_pipeline_preserves_task_and_original_frame_indices(tmp_path, monkeypatch, tokenizer):
+@pytest.mark.parametrize("framework", ["jax", "pytorch"])
+def test_b1k_pipeline_preserves_task_and_original_frame_indices(tmp_path, monkeypatch, tokenizer, framework):
+    if framework == "pytorch":
+
+        def no_jax_backend(*args, **kwargs):
+            raise AssertionError("PyTorch data loading must not initialize a JAX backend")
+
+        monkeypatch.setattr(jax, "devices", no_jax_backend)
+        monkeypatch.setattr(jax, "process_count", no_jax_backend)
+        monkeypatch.setattr(jax, "process_index", no_jax_backend)
     (tmp_path / "meta").mkdir()
     (tmp_path / "meta" / "tasks.jsonl").write_text(
         json.dumps(
@@ -69,7 +79,7 @@ def test_b1k_pipeline_preserves_task_and_original_frame_indices(tmp_path, monkey
                 "action": np.zeros((2, 23)),
             }
             row.update(
-                {obs.dataset_key: np.zeros((3, 224, 224), dtype=np.float32) for obs in robot.observations.values()}
+                {obs.dataset_key: np.zeros((3, 32, 48), dtype=np.float32) for obs in robot.observations.values()}
             )
             return row
 
@@ -105,6 +115,37 @@ def test_b1k_pipeline_preserves_task_and_original_frame_indices(tmp_path, monkey
         tokenizer._tokenizer.decode(converted["tokenized_prompt"][converted["token_loss_mask"]].tolist())
         == "press radio"
     )
+    if framework == "pytorch":
+        train_config = dataclasses.replace(config, data=factory, model=model_config, batch_size=2, num_workers=0)
+        loader = data_loader.create_data_loader(train_config, framework="pytorch", skip_norm_stats=True, num_batches=1)
+        observation, actions = next(iter(loader))
+        assert all(isinstance(leaf, torch.Tensor) for leaf in jax.tree.leaves((observation, actions)))
+        assert observation.tokenized_prompt.dtype == torch.int32
+        assert observation.token_ar_mask.dtype == torch.int32
+        assert observation.token_loss_mask.dtype == torch.bool
+        assert observation.tokenized_prompt_mask.dtype == torch.bool
+        assert observation.token_loss_mask.any(dim=1).all()
+        assert observation.images["base_0_rgb"].dtype == torch.float32
+        assert actions.shape == (2, 2, 32)
+        prompt = tokenizer._tokenizer.decode(
+            observation.tokenized_prompt[0, observation.tokenized_prompt_mask[0]].tolist()
+        )
+        assert "turn on radio" in prompt
+        assert "move to radio" in prompt
+        plain_config = dataclasses.replace(
+            train_config, model=dataclasses.replace(model_config, train_subtask_prediction=False)
+        )
+        plain_observation, plain_actions = next(
+            iter(data_loader.create_data_loader(plain_config, framework="pytorch", skip_norm_stats=True, num_batches=1))
+        )
+        assert plain_observation.token_loss_mask is None
+        assert plain_observation.token_ar_mask is None
+        assert plain_actions.shape == actions.shape
+        plain_prompt = tokenizer._tokenizer.decode(
+            plain_observation.tokenized_prompt[0, plain_observation.tokenized_prompt_mask[0]].tolist()
+        )
+        assert "turn on radio" in plain_prompt
+        assert "move to radio" not in plain_prompt
     with pytest.raises(ValueError, match="subtask_whole_task_prob"):
         dataclasses.replace(factory, subtask_whole_task_prob=0.15).create(tmp_path, model_config)
     with pytest.raises(ValueError, match="one dataset root"):

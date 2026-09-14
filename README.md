@@ -6,6 +6,9 @@ OmniGibson 闭环评测。训练与模型服务使用 OpenPI，星云提交脚�
 完整的联合训练机制、数据预检和推理参数见
 [Subtask 训练与推理指南](docs/subtask_training.md)。
 
+PyTorch 版普通训练、subtask 联合训练、权重转换和梯度累积见
+[Torch 训练指南](docs/pytorch_training.md)。
+
 ## 入口
 
 以下命令在仓库根目录、已配置环境的 GPU 机器上执行。
@@ -14,6 +17,8 @@ OmniGibson 闭环评测。训练与模型服务使用 OpenPI，星云提交脚�
 | --- | --- | --- |
 | 普通 π0.5 训练 | [train_pi05_b1k.sh](scripts/train_pi05_b1k.sh) | `smoke` / `full` |
 | Subtask 联合训练 | [train_pi05_subtask_b1k.sh](scripts/train_pi05_subtask_b1k.sh) | `check` / `smoke` / `full` |
+| Torch 普通训练 | [train_pi05_pytorch_b1k.sh](scripts/train_pi05_pytorch_b1k.sh) | `smoke` / `full` |
+| Torch Subtask 联合训练 | [train_pi05_subtask_pytorch_b1k.sh](scripts/train_pi05_subtask_pytorch_b1k.sh) | `check` / `smoke` / `full` |
 | 在线策略服务 | [serve_b1k.py](openpi/scripts/b1k/serve_b1k.py) | checkpoint、任务及 subtask 生成参数 |
 | 闭环评测 | [eval_b1k.sh](scripts/eval_b1k.sh) | 任务名；自动启动策略服务和仿真 |
 | 多任务评测 | [eval_sweep.sh](scripts/eval_sweep.sh) | `TASK_FILE`、`WORKERS` |

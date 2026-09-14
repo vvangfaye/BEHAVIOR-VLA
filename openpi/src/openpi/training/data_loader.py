@@ -1,4 +1,5 @@
 from collections.abc import Iterator, Sequence
+import itertools
 import logging
 import multiprocessing
 import os
@@ -49,6 +50,15 @@ class DataLoader(Protocol[T_co]):
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError("Subclasses of DataLoader should implement __iter__.")
+
+    @property
+    def batches_per_epoch(self) -> int:
+        """Number of complete batches per process for an indexed dataset."""
+        raise NotImplementedError("This data loader does not expose indexed epochs.")
+
+    def set_start_batch(self, index: int) -> None:
+        """Set the microbatch position before creating the next iterator."""
+        raise NotImplementedError("This data loader does not support restoring its sample position.")
 
 
 class TransformedDataset(Dataset[T_co]):
@@ -124,11 +134,27 @@ class IterableTransformedDataset(IterableDataset[T_co]):
 
 
 class FakeDataset(Dataset):
-    def __init__(self, model_config: _model.BaseModelConfig, num_samples: int):
+    def __init__(self, model_config: _model.BaseModelConfig, num_samples: int, *, framework: str = "jax"):
         self._num_samples = num_samples
         self._observation_spec, self._action_spec = model_config.inputs_spec()
+        self._framework = framework
 
     def __getitem__(self, index: SupportsIndex) -> dict:
+        if self._framework == "pytorch":
+            rng = np.random.default_rng(index.__index__())
+
+            def make_numpy(spec):
+                shape = spec.shape[1:]
+                if spec.dtype == jnp.float32:
+                    return rng.uniform(-1, 1, size=shape).astype(np.float32)
+                if spec.dtype == jnp.int32:
+                    return rng.integers(0, 2048, size=shape, dtype=np.int32)
+                return np.zeros(shape, dtype=spec.dtype)
+
+            # Tree operations only inspect Python structure; no JAX backend is initialized.
+            observation = jax.tree.map(make_numpy, self._observation_spec)
+            return {**observation.to_dict(), "actions": jax.tree.map(make_numpy, self._action_spec)}
+
         rng = jax.random.key(index.__index__())
 
         def make_from_spec(spec: jax.ShapeDtypeStruct):
@@ -193,9 +219,7 @@ def create_b1k_dataset(data_config: _config.DataConfig, action_horizon: int) -> 
             if isinstance(data_config.repo_id, list)
             else data_config.dataset_root
         )
-        tasks = _lerobot_compat.b1k_task_prompts(
-            meta_root, _lerobot_compat.tasks_from_metadata(dataset_meta)
-        )
+        tasks = _lerobot_compat.b1k_task_prompts(meta_root, _lerobot_compat.tasks_from_metadata(dataset_meta))
         if subtask_transform is not None:
             dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(tasks), subtask_transform])
         elif data_config.subtask_prompts_path:
@@ -215,14 +239,20 @@ def create_b1k_dataset(data_config: _config.DataConfig, action_horizon: int) -> 
 
 
 def create_torch_dataset(
-    data_config: _config.DataConfig, action_horizon: int, model_config: _model.BaseModelConfig
+    data_config: _config.DataConfig,
+    action_horizon: int,
+    model_config: _model.BaseModelConfig,
+    *,
+    framework: str = "jax",
 ) -> Dataset:
     """Create a dataset for training."""
     repo_id = data_config.repo_id
     if repo_id is None:
         raise ValueError("Repo ID is not set. Cannot create dataset.")
     if repo_id == "fake":
-        return FakeDataset(model_config, num_samples=1024)
+        return FakeDataset(model_config, num_samples=1024, framework=framework)
+    if data_config.dataset_root is not None:
+        return create_b1k_dataset(data_config, action_horizon)
 
     dataset_meta = _lerobot_compat.LeRobotDatasetMetadata(repo_id)
     dataset = _lerobot_compat.LeRobotDataset(
@@ -259,7 +289,12 @@ def create_rlds_dataset(
     )
 
 
-def transform_dataset(dataset: Dataset, data_config: _config.DataConfig, *, skip_norm_stats: bool = False) -> Dataset:
+def transform_dataset(
+    dataset: Dataset,
+    data_config: _config.DataConfig,
+    *,
+    skip_norm_stats: bool = False,
+) -> Dataset:
     """Transform the dataset by applying the data transforms."""
     norm_stats = {}
     if data_config.repo_id != "fake" and not skip_norm_stats:
@@ -270,15 +305,13 @@ def transform_dataset(dataset: Dataset, data_config: _config.DataConfig, *, skip
             )
         norm_stats = data_config.norm_stats
 
-    return TransformedDataset(
-        dataset,
-        [
-            *data_config.repack_transforms.inputs,
-            *data_config.data_transforms.inputs,
-            _transforms.Normalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
-            *data_config.model_transforms.inputs,
-        ],
-    )
+    transforms = [
+        *data_config.repack_transforms.inputs,
+        *data_config.data_transforms.inputs,
+        _transforms.Normalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
+        *data_config.model_transforms.inputs,
+    ]
+    return TransformedDataset(dataset, transforms)
 
 
 def transform_iterable_dataset(
@@ -365,22 +398,22 @@ def create_b1k_data_loader(
     shuffle: bool = False,
     num_batches: int | None = None,
     skip_norm_stats: bool = False,
+    framework: Literal["jax", "pytorch"] = "jax",
 ) -> DataLoader[tuple[_model.Observation, _model.Actions]]:
     data_config = config.data.create(config.assets_dirs, config.model)
     dataset = create_b1k_dataset(data_config=data_config, action_horizon=config.model.action_horizon)
-    dataset = transform_dataset(dataset, data_config, skip_norm_stats=skip_norm_stats)
-
-    data_loader = TorchDataLoader(
+    return _create_map_data_loader(
+        data_config,
         dataset,
-        local_batch_size=config.batch_size // jax.process_count(),
+        batch_size=config.batch_size,
         sharding=sharding,
         shuffle=shuffle,
         num_batches=num_batches,
         num_workers=config.num_workers,
         seed=config.seed,
+        skip_norm_stats=skip_norm_stats,
+        framework=framework,
     )
-
-    return DataLoaderImpl(data_config, data_loader)
 
 
 def create_torch_data_loader(
@@ -414,35 +447,57 @@ def create_torch_data_loader(
             execute in the main process.
         seed: The seed to use for shuffling the data.
     """
-    dataset = create_torch_dataset(data_config, action_horizon, model_config)
+    dataset = create_torch_dataset(data_config, action_horizon, model_config, framework=framework)
+    return _create_map_data_loader(
+        data_config,
+        dataset,
+        batch_size=batch_size,
+        sharding=sharding,
+        skip_norm_stats=skip_norm_stats,
+        shuffle=shuffle,
+        num_batches=num_batches,
+        num_workers=num_workers,
+        seed=seed,
+        framework=framework,
+    )
+
+
+def _create_map_data_loader(
+    data_config: _config.DataConfig,
+    dataset: Dataset,
+    *,
+    batch_size: int,
+    sharding: jax.sharding.Sharding | None,
+    skip_norm_stats: bool,
+    shuffle: bool,
+    num_batches: int | None,
+    num_workers: int,
+    seed: int,
+    framework: str,
+) -> DataLoader[tuple[_model.Observation, _model.Actions]]:
     dataset = transform_dataset(dataset, data_config, skip_norm_stats=skip_norm_stats)
 
     # Use TorchDataLoader for both frameworks
     # For PyTorch DDP, create DistributedSampler and divide batch size by world size
     # For JAX, divide by process count
-    sampler = None
     if framework == "pytorch":
-        if torch.distributed.is_initialized():
-            sampler = torch.utils.data.distributed.DistributedSampler(
-                dataset,
-                num_replicas=torch.distributed.get_world_size(),
-                rank=torch.distributed.get_rank(),
-                shuffle=shuffle,
-                drop_last=True,
-            )
-            local_batch_size = batch_size // torch.distributed.get_world_size()
-        else:
-            local_batch_size = batch_size
+        process_count = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
+    elif framework == "jax":
+        process_count = jax.process_count()
     else:
-        local_batch_size = batch_size // jax.process_count()
+        raise ValueError(f"Unsupported framework: {framework}")
+    if batch_size < 1 or batch_size % process_count:
+        raise ValueError(
+            f"Global batch_size ({batch_size}) must be positive and divisible by process count ({process_count})."
+        )
+    local_batch_size = batch_size // process_count
 
     logging.info(f"local_batch_size: {local_batch_size}")
     data_loader = TorchDataLoader(
         dataset,
         local_batch_size=local_batch_size,
         sharding=None if framework == "pytorch" else sharding,
-        shuffle=(sampler is None and shuffle),  # Don't shuffle if using sampler
-        sampler=sampler,
+        shuffle=shuffle,
         num_batches=num_batches,
         num_workers=num_workers,
         seed=seed,
@@ -493,6 +548,20 @@ def create_rlds_data_loader(
     return DataLoaderImpl(data_config, data_loader)
 
 
+class _ResumableBatchSampler:
+    """Skip already consumed indices before the workers load or decode any samples."""
+
+    def __init__(self, sampler, batch_size: int):
+        self._batches = torch.utils.data.BatchSampler(sampler, batch_size, drop_last=True)
+        self.start_batch = 0
+
+    def __iter__(self):
+        return itertools.islice(self._batches, self.start_batch, None)
+
+    def __len__(self):
+        return max(0, len(self._batches) - self.start_batch)
+
+
 class TorchDataLoader:
     """Torch data loader implementation."""
 
@@ -524,6 +593,12 @@ class TorchDataLoader:
                 execute in the main process.
             seed: The seed to use for shuffling the data.
         """
+        if framework not in {"jax", "pytorch"}:
+            raise ValueError(f"Unsupported framework: {framework}")
+        if local_batch_size < 1:
+            raise ValueError("local_batch_size must be positive.")
+        if framework == "pytorch" and sharding is not None:
+            raise ValueError("JAX sharding cannot be used with the PyTorch data loader.")
         if framework == "jax" and jax.process_count() > 1:
             if sampler is not None:
                 raise ValueError("A custom sampler cannot be combined with JAX multi-process data loading.")
@@ -531,6 +606,16 @@ class TorchDataLoader:
                 typing.cast(torch.utils.data.Dataset, dataset),
                 num_replicas=jax.process_count(),
                 rank=jax.process_index(),
+                shuffle=shuffle,
+                seed=seed,
+                drop_last=True,
+            )
+            shuffle = False
+        elif framework == "pytorch" and torch.distributed.is_initialized() and sampler is None:
+            sampler = torch.utils.data.distributed.DistributedSampler(
+                typing.cast(torch.utils.data.Dataset, dataset),
+                num_replicas=torch.distributed.get_world_size(),
+                rank=torch.distributed.get_rank(),
                 shuffle=shuffle,
                 seed=seed,
                 drop_last=True,
@@ -549,26 +634,42 @@ class TorchDataLoader:
                 jax.sharding.PartitionSpec("B"),
             )
         self._num_batches = num_batches
+        self._seed = seed
+        self._start_batch = 0
+        self._sampler_generator = torch.Generator()
+        if sampler is None:
+            sampler = (
+                torch.utils.data.RandomSampler(dataset, generator=self._sampler_generator)
+                if shuffle
+                else torch.utils.data.SequentialSampler(dataset)
+            )
         self._sampler = sampler
+        self._batch_sampler = _ResumableBatchSampler(sampler, local_batch_size)
+        self._batches_per_epoch = len(self._batch_sampler)
+        if self._batches_per_epoch == 0:
+            raise ValueError(
+                "The process shard has no complete batch. Reduce global batch_size or add training samples."
+            )
 
         mp_context = None
         if num_workers > 0:
             mp_context = multiprocessing.get_context("spawn")
 
         generator = torch.Generator()
-        process_seed = seed + (jax.process_index() if framework == "jax" else 0)
+        if framework == "jax":
+            process_index = jax.process_index()
+        else:
+            process_index = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+        process_seed = seed + process_index
         generator.manual_seed(process_seed)
         self._data_loader = torch.utils.data.DataLoader(
             typing.cast(torch.utils.data.Dataset, dataset),
-            batch_size=local_batch_size,
-            shuffle=(sampler is None and shuffle),  # Don't shuffle if using sampler
-            sampler=sampler,
+            batch_sampler=self._batch_sampler,
             num_workers=num_workers,
             multiprocessing_context=mp_context,
             persistent_workers=num_workers > 0,
             collate_fn=_collate_fn,
             worker_init_fn=_worker_init_fn,
-            drop_last=True,
             generator=generator,
         )
 
@@ -576,12 +677,27 @@ class TorchDataLoader:
     def torch_loader(self) -> torch.utils.data.DataLoader:
         return self._data_loader
 
+    @property
+    def batches_per_epoch(self) -> int:
+        return self._batches_per_epoch
+
+    def set_start_batch(self, index: int) -> None:
+        """Resume sample ordering at a global microbatch offset, without reading skipped frames.
+
+        Call before creating an iterator. Worker augmentation RNG is not restored.
+        """
+        if index < 0:
+            raise ValueError("start batch must be nonnegative.")
+        self._start_batch = index
+
     def __iter__(self):
         num_items = 0
-        epoch = 0
+        epoch, start_batch = divmod(self._start_batch, self._batches_per_epoch)
         while True:
             if isinstance(self._sampler, torch.utils.data.distributed.DistributedSampler):
                 self._sampler.set_epoch(epoch)
+            self._sampler_generator.manual_seed(self._seed + epoch)
+            self._batch_sampler.start_batch = start_batch
             data_iter = iter(self._data_loader)
             while True:
                 if self._num_batches is not None and num_items >= self._num_batches:
@@ -597,6 +713,7 @@ class TorchDataLoader:
                 else:
                     yield jax.tree.map(torch.as_tensor, batch)
             epoch += 1
+            start_batch = 0
 
 
 def _collate_fn(items):
@@ -665,6 +782,17 @@ class DataLoaderImpl(DataLoader):
 
     def data_config(self) -> _config.DataConfig:
         return self._data_config
+
+    @property
+    def batches_per_epoch(self) -> int:
+        if not isinstance(self._data_loader, TorchDataLoader):
+            raise NotImplementedError("Epoch lengths are only available for indexed datasets.")
+        return self._data_loader.batches_per_epoch
+
+    def set_start_batch(self, index: int) -> None:
+        if not isinstance(self._data_loader, TorchDataLoader):
+            raise NotImplementedError("Data position restoration is only supported for indexed datasets.")
+        self._data_loader.set_start_batch(index)
 
     def __iter__(self):
         for batch in self._data_loader:

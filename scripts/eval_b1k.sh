@@ -63,6 +63,16 @@ PI05_REPO_ID="${PI05_REPO_ID:-behavior-1k/2026-challenge-demos}"
 [[ -d "$PI05_CKPT" ]] || { echo "checkpoint not found: $PI05_CKPT" >&2; exit 1; }
 [[ -d "$PI05_CKPT/assets/$PI05_REPO_ID" ]] || {
     echo "norm stats not found: $PI05_CKPT/assets/$PI05_REPO_ID" >&2; exit 1; }
+if [[ -f "$PI05_CKPT/model.safetensors" ]]; then
+    PI05_ENV="${PI05_ENV:-$REPO_ROOT/openpi/.venv-torch}"
+    export JAX_PLATFORMS=cpu
+else
+    PI05_ENV="${PI05_ENV:-$REPO_ROOT/openpi/.venv}"
+fi
+for name in PI05_CKPT PI05_ENV; do
+    value="${!name}"
+    if [[ "$value" != /* ]]; then printf -v "$name" '%s/%s' "$PWD" "$value"; fi
+done
 
 mkdir -p "$OUTPUT_ROOT/$MODEL"
 echo "prompt mode: $PROMPT_MODE"
@@ -85,7 +95,10 @@ activate_env() {
 start_server() {
     local task="$1"
     cd "$REPO_ROOT/openpi"
-    activate_env .venv/bin/activate
+    activate_env "$PI05_ENV/bin/activate"
+    if [[ -f "$PI05_CKPT/model.safetensors" ]]; then
+        python scripts/install_transformers_patch.py --check
+    fi
     # The startup prompt is the fallback when the evaluator does not send
     # a dynamic oracle prompt; --repo-id must match the training assets.
     CUDA_VISIBLE_DEVICES="$SERVER_GPU" XLA_PYTHON_CLIENT_MEM_FRACTION="$PI05_MEM_FRACTION" \

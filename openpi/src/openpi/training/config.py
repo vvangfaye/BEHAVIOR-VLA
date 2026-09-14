@@ -633,8 +633,11 @@ class TrainConfig:
     # Optional path to a PyTorch checkpoint to load weights from.
     pytorch_weight_path: str | None = None
 
-    # Precision for PyTorch training.
+    # Compute precision for PyTorch autocast. Trainable parameters and AdamW states stay float32.
     pytorch_training_precision: Literal["bfloat16", "float32"] = "bfloat16"
+    # batch_size is the global microbatch; one optimizer update consumes this many microbatches.
+    pytorch_gradient_accumulation_steps: int = 1
+    pytorch_gradient_checkpointing: bool = True
 
     lr_schedule: _optimizer.LRScheduleConfig = dataclasses.field(default_factory=_optimizer.CosineDecaySchedule)
     optimizer: _optimizer.OptimizerConfig = dataclasses.field(default_factory=_optimizer.AdamW)
@@ -1159,6 +1162,18 @@ _CONFIGS = [
     *roboarena_config.get_roboarena_configs(),
     *polaris_config.get_polaris_configs(),
 ]
+
+# Reuse the BEHAVIOR data/model defaults while making the Torch-only differences explicit.
+# A converted base checkpoint must be supplied with --pytorch-weight-path for a new run.
+_CONFIGS.append(
+    dataclasses.replace(
+        next(config for config in _CONFIGS if config.name == "pi05_b1k"),
+        name="pi05_b1k_pytorch",
+        weight_loader=weight_loaders.NoOpWeightLoader(),
+        ema_decay=None,
+        fsdp_devices=1,
+    )
+)
 
 if len({config.name for config in _CONFIGS}) != len(_CONFIGS):
     raise ValueError("Config names must be unique.")

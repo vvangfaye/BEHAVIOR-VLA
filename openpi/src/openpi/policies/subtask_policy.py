@@ -1,6 +1,7 @@
 """Task -> generated subtask -> continuous actions, using the training token format."""
 
 from collections.abc import Sequence
+import contextlib
 import logging
 import math
 import time
@@ -8,6 +9,7 @@ import time
 import jax
 import jax.numpy as jnp
 import numpy as np
+import torch
 
 from openpi import transforms as transforms_lib
 from openpi.models import model as model_lib
@@ -26,8 +28,8 @@ class SubtaskPolicy(Policy):
         subtask_temperature: float = 0.0,
         **kwargs,
     ):
-        if not model.train_subtask_prediction or kwargs.get("is_pytorch", False):
-            raise ValueError("SubtaskPolicy requires a JAX subtask-prediction model.")
+        if not model.train_subtask_prediction:
+            raise ValueError("SubtaskPolicy requires a subtask-prediction model.")
         if not isinstance(subtask_interval, int) or subtask_interval < 1:
             raise ValueError("subtask_interval must be a positive number of action-chunk requests.")
         if not math.isfinite(subtask_temperature) or subtask_temperature < 0:
@@ -39,8 +41,12 @@ class SubtaskPolicy(Policy):
         self._pad = transforms_lib.PadStatesAndActions(model.action_dim)
         self._interval = subtask_interval
         self._temperature = subtask_temperature
-        self._generate = nnx_utils.module_jit(
-            model.generate_subtask, static_argnames=("max_decoding_steps", "temperature", "eos_token_id")
+        self._generate = (
+            model.generate_subtask
+            if self._is_pytorch_model
+            else nnx_utils.module_jit(
+                model.generate_subtask, static_argnames=("max_decoding_steps", "temperature", "eos_token_id")
+            )
         )
         self._metadata = {**self._metadata, "subtask_generation": True, "subtask_interval": subtask_interval}
         self.reset()
@@ -83,18 +89,27 @@ class SubtaskPolicy(Policy):
             if self._cached_tokens is None or self._calls_since_generation >= self._interval:
                 arrays = self._tokenizer.tokenize_subtask_prefix(prompt, state, max_subtask_len=limit)
                 prefix = self._pad(self._pack(inputs, arrays))
-                prefix = model_lib.Observation.from_dict(jax.tree.map(lambda x: jnp.asarray(x)[None], prefix))
-                self._rng, key = jax.random.split(self._rng)
+                if self._is_pytorch_model:
+                    prefix = model_lib.Observation.from_dict(
+                        jax.tree.map(lambda x: torch.as_tensor(np.array(x), device=self._pytorch_device)[None], prefix)
+                    )
+                    key = self._pytorch_device
+                else:
+                    prefix = model_lib.Observation.from_dict(jax.tree.map(lambda x: jnp.asarray(x)[None], prefix))
+                    self._rng, key = jax.random.split(self._rng)
                 generation_start = time.monotonic()
-                result = jax.device_get(
-                    self._generate(
+                with torch.inference_mode() if self._is_pytorch_model else contextlib.nullcontext():
+                    result = self._generate(
                         key,
                         prefix,
                         max_decoding_steps=limit,
                         temperature=self._temperature,
                         eos_token_id=self._tokenizer.eos_id,
                     )
-                )
+                if self._is_pytorch_model:
+                    result = jax.tree.map(lambda x: x.detach().cpu().numpy(), result)
+                else:
+                    result = jax.device_get(result)
                 generation_ms = (time.monotonic() - generation_start) * 1000
                 if not bool(result["valid_prefix"][0]) or not bool(result["has_eos"][0]):
                     self._cached_tokens = None

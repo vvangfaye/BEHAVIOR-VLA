@@ -39,7 +39,7 @@ from ...modeling_outputs import (
 from ...modeling_rope_utils import ROPE_INIT_FUNCTIONS, dynamic_rope_update
 from ...modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
 from ...processing_utils import Unpack
-from ...utils import LossKwargs, auto_docstring, can_return_tuple, logging
+from ...utils import TransformersKwargs as LossKwargs, auto_docstring, can_return_tuple, logging
 from .configuration_gemma import GemmaConfig
 
 
@@ -104,7 +104,7 @@ class GemmaRMSNorm(nn.Module):
         return normed_inputs.to(dtype), gate.to(dtype)
 
     def extra_repr(self):
-        repr_str = f"{tuple(self.weight.shape)}, eps={self.eps}"
+        repr_str = f"{(self.dim,)}, eps={self.eps}"
         if self.dense is not None:
             repr_str += f", adaptive=True, cond_dim={self.cond_dim}"
         return repr_str
@@ -138,11 +138,21 @@ class GemmaRotaryEmbedding(nn.Module):
         self.original_max_seq_len = config.max_position_embeddings
 
         self.config = config
-        self.rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_type]
+        self.rope_init_fn = (
+            self.compute_default_rope_parameters if self.rope_type == "default" else ROPE_INIT_FUNCTIONS[self.rope_type]
+        )
 
         inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
         self.original_inv_freq = self.inv_freq
+
+    @staticmethod
+    def compute_default_rope_parameters(config, device=None, seq_len=None):
+        # OpenPI's config retains the original Gemma rope_theta field. Newer
+        # Transformers no longer registers the unscaled RoPE initializer.
+        dim = config.head_dim
+        inv_freq = 1.0 / (config.rope_theta ** (torch.arange(0, dim, 2, device=device).float() / dim))
+        return inv_freq, 1.0
 
     @torch.no_grad()
     @dynamic_rope_update  # power user: used with advanced RoPE types (e.g. dynamic rope)
@@ -306,8 +316,8 @@ class GemmaAttention(nn.Module):
                 cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
                 key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
             else:
-                key_states = torch.cat([past_key_value[self.layer_idx][0], key_states], dim=2)
-                value_states = torch.cat([past_key_value[self.layer_idx][1], value_states], dim=2)
+                key_states = torch.cat([past_key_value.layers[self.layer_idx].keys, key_states], dim=2)
+                value_states = torch.cat([past_key_value.layers[self.layer_idx].values, value_states], dim=2)
 
         attention_interface: Callable = eager_attention_forward
         if self.config._attn_implementation != "eager":
@@ -458,6 +468,8 @@ class GemmaModel(GemmaPreTrainedModel):
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> BaseModelOutputWithPast:
         """
+        cache_position (`torch.LongTensor` of shape `(sequence_length,)`, *optional*):
+            Physical positions used when appending keys and values to the cache.
         adarms_cond (`torch.Tensor` of shape `(batch_size, cond_dim)`, *optional*):
             Condition for ADARMS.
         """
@@ -493,7 +505,7 @@ class GemmaModel(GemmaPreTrainedModel):
 
         causal_mask = create_causal_mask(
             config=self.config,
-            input_embeds=inputs_embeds,
+            inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
             cache_position=cache_position,
             past_key_values=past_key_values,
@@ -560,7 +572,7 @@ class KwargsForCausalLM(FlashAttentionKwargs, LossKwargs): ...
 
 @auto_docstring
 class GemmaForCausalLM(GemmaPreTrainedModel, GenerationMixin):
-    _tied_weights_keys = ["lm_head.weight"]
+    _tied_weights_keys = {"lm_head.weight": "model.embed_tokens.weight"}
     _tp_plan = {"lm_head": "colwise_rep"}
     _pp_plan = {"lm_head": (["hidden_states"], ["logits"])}
 
@@ -610,6 +622,8 @@ class GemmaForCausalLM(GemmaPreTrainedModel, GenerationMixin):
         **kwargs: Unpack[KwargsForCausalLM],
     ) -> CausalLMOutputWithPast:
         r"""
+        cache_position (`torch.LongTensor` of shape `(sequence_length,)`, *optional*):
+            Physical positions used when appending keys and values to the cache.
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
             Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
             config.vocab_size]` or -100 (see `input_ids` docstring). Tokens with indices set to `-100` are ignored

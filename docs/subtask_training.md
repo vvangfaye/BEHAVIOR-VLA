@@ -182,11 +182,12 @@ cd openpi
 
 `repo-id` 必须对应 checkpoint 的 assets 目录；token 长度配置与训练保持一致。
 普通 action-only checkpoint 没有经过新增的文本监督，不能仅靠开启服务参数就获得可靠的
-subtask 预测。JAX checkpoint 由原有加载流程恢复；PyTorch 暂不支持此功能。
+subtask 预测。JAX checkpoint 由原有加载流程恢复；PyTorch 的联合训练与自动生成
+subtask 推理也已接通，环境、权重转换和启动方法见 [PyTorch 指南](pytorch_training.md)。
 
 - 默认不需要输入真值 subtask。`create_trained_policy` 检测到模型配置中的
   `train_subtask_prediction=True` 时会创建 `SubtaskPolicy`。
-- 语言前缀与训练完全一致。逐 token 解码使用固定容量 KV cache，保留每条样本独立的
+- 语言前缀与训练完全一致。逐 token 解码使用 KV cache，保留每条样本独立的
   位置、有效掩码和 EOS 停止状态。动作端直接使用生成的 token，包含 EOS 和 Action 提示，
   不经过文字解码再编码。语言生成和动作采样各做一次图像编码，未跨阶段复用视觉特征。
 - `subtask_interval=1` 表示每次请求新动作块时重新生成；结合 `action_horizon=16`，通常

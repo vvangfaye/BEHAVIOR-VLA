@@ -8,6 +8,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_ROOT="${ENV_ROOT:-/dev/shm/wangfaye/conda_envs}"
 CONDA="${CONDA:-/opt/conda/bin/conda}"
 PI05_ENV="${PI05_ENV:-$ENV_ROOT/b1k-pi05}"
+OPENPI_ENV_LINK="${OPENPI_ENV_LINK:-$REPO_ROOT/openpi/.venv}"
 PI05_PYTHON="${PI05_PYTHON:-3.11.13}"
 
 # The internal mirror proxies all of PyPI and is ~25x faster than pypi.org from
@@ -114,7 +115,7 @@ for target in "${TARGETS[@]}"; do
             uv pip install --python "$PI05_ENV/bin/python" "torchcodec==0.4.0"
             install_ffmpeg "$PI05_ENV"
             add_activation_support "$PI05_ENV"
-            ln -sfn "$PI05_ENV" "$REPO_ROOT/openpi/.venv"
+            ln -sfn "$PI05_ENV" "$OPENPI_ENV_LINK"
             ;;
     esac
 done

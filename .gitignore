@@ -20,6 +20,7 @@
 /.workspace-git/
 .venv/
 **/.venv
+**/.venv-torch
 venv/
 __pycache__/
 *.py[cod]

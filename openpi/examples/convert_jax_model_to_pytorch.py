@@ -26,8 +26,13 @@ Example:
     python examples/convert_jax_model_to_pytorch.py --checkpoint_dir /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi05_droid --output_path /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi05_droid_pytorch
 """
 
+import dataclasses
 import json
 import os
+
+# Conversion restores host arrays. Do not reserve accelerator memory alongside training.
+os.environ["JAX_PLATFORMS"] = "cpu"
+
 import pathlib
 import shutil
 from typing import Literal
@@ -209,7 +214,7 @@ def slice_paligemma_state_dict(state_dict, config):
             llm_attention_attn_vec_einsum[i]
             .transpose(2, 0, 1)
             .reshape(
-                config.text_config.num_attention_heads * config.text_config.head_dim, config.text_config.hidden_size
+                config.text_config.hidden_size, config.text_config.num_attention_heads * config.text_config.head_dim
             )
         )
         state_dict[f"paligemma_with_expert.paligemma.model.language_model.layers.{i}.self_attn.o_proj.weight"] = (
@@ -270,6 +275,7 @@ def slice_paligemma_state_dict(state_dict, config):
 
 def slice_gemma_state_dict(state_dict, config, *, num_expert, checkpoint_dir, pi05):
     """Convert Gemma JAX parameters to PyTorch format."""
+    del checkpoint_dir  # Architecture is a config property, independent of directory names.
     # Add missing attributes to config if they don't exist
     if not hasattr(config, "vocab_size"):
         config.vocab_size = 257152  # PALIGEMMA_VOCAB_SIZE
@@ -290,7 +296,7 @@ def slice_gemma_state_dict(state_dict, config, *, num_expert, checkpoint_dir, pi
     llm_mlp_linear = state_dict.pop(f"llm/layers/mlp_{num_expert}/linear{suffix}")
 
     # Check if we have Dense layers (for pi05/adaptive normalization) or scale layers (for regular pi0)
-    if "pi05" in checkpoint_dir:
+    if pi05:
         # Pi05 with adaptive normalization
         llm_input_layernorm_bias = state_dict.pop(f"llm/layers/pre_attention_norm_{num_expert}/Dense_0/bias{suffix}")
         llm_post_attention_layernorm_bias = state_dict.pop(f"llm/layers/pre_ffw_norm_{num_expert}/Dense_0/bias{suffix}")
@@ -345,7 +351,7 @@ def slice_gemma_state_dict(state_dict, config, *, num_expert, checkpoint_dir, pi
             i
         ].transpose()
 
-        if "pi05" in checkpoint_dir:
+        if pi05:
             # Pi05 with adaptive normalization - use Dense layer parameters directly
             state_dict[f"paligemma_with_expert.gemma_expert.model.layers.{i}.input_layernorm.dense.bias"] = (
                 llm_input_layernorm_bias[i]
@@ -369,7 +375,7 @@ def slice_gemma_state_dict(state_dict, config, *, num_expert, checkpoint_dir, pi
             )
 
     # Handle final norm layer
-    if "pi05" in checkpoint_dir:
+    if pi05:
         # Pi05 with adaptive normalization - use Dense layer parameters directly
         final_norm_bias = state_dict.pop(f"llm/final_norm_{num_expert}/Dense_0/bias{suffix}")
         final_norm_kernel = state_dict.pop(f"llm/final_norm_{num_expert}/Dense_0/kernel{suffix}")
@@ -427,12 +433,25 @@ def convert_pi0_checkpoint(
 
     Args:
         checkpoint_dir: Path to the JAX checkpoint
-        precision: Model precision (float32, bfloat16, float16)
+        precision: Model precision (float32 or bfloat16)
         output_path: Path to save the converted PyTorch model
         model_config: Model config
     """
     print(f"Converting PI0 checkpoint from {checkpoint_dir} to {output_path}")
     print(f"Model config: {model_config}")
+    if precision not in {"float32", "bfloat16"}:
+        raise ValueError(f"Invalid precision: {precision}; expected float32 or bfloat16.")
+    output_dir = pathlib.Path(output_path)
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise ValueError(f"Output directory must be empty: {output_dir}")
+    if not checkpoint_dir.startswith("gs://"):
+        checkpoint_dir = str(pathlib.Path(checkpoint_dir).expanduser().resolve())
+
+    # Obtain the exact target architecture without allocating another full model.
+    with torch.device("meta"):
+        pi0_model = openpi.models_pytorch.pi0_pytorch.PI0Pytorch(
+            dataclasses.replace(model_config, pytorch_compile_mode=None)
+        )
 
     # Break down orbax ckpts by restoring via JAX to respect dtype
     initial_params = slice_initial_orbax_checkpoint(checkpoint_dir=checkpoint_dir, restore_precision="float32")
@@ -471,36 +490,8 @@ def convert_pi0_checkpoint(
         projection_params[pytorch_weight_key] = torch.from_numpy(np.array(weight)).T
         projection_params[pytorch_bias_key] = torch.from_numpy(np.array(bias))
 
-    # Create configs based on checkpoint path
-    # All models use the same PaliGemma config structure
-    class PaliGemmaConfig:
-        def __init__(self):
-            self.vision_config = type(
-                "obj",
-                (object,),
-                {
-                    "hidden_size": 1152,
-                    "num_hidden_layers": 27,
-                    "num_attention_heads": 16,
-                    "intermediate_size": 4304,
-                    "patch_size": 14,
-                    "projection_dim": 2048,
-                },
-            )()
-            self.text_config = type(
-                "obj",
-                (object,),
-                {
-                    "hidden_size": 2048,
-                    "num_hidden_layers": 18,
-                    "num_attention_heads": 8,
-                    "head_dim": 256,
-                    "intermediate_size": 16384,
-                },
-            )()
-
-    paligemma_config = PaliGemmaConfig()
-    action_expert_config = openpi.models.gemma.get_config("gemma_300m")
+    paligemma_config = pi0_model.paligemma_with_expert.paligemma.config
+    action_expert_config = pi0_model.paligemma_with_expert.gemma_expert.config
 
     # Process PaliGemma weights
     paligemma_params, expert_params = slice_paligemma_state_dict(initial_params["paligemma_params"], paligemma_config)
@@ -510,21 +501,12 @@ def convert_pi0_checkpoint(
         expert_params, action_expert_config, num_expert=1, checkpoint_dir=checkpoint_dir, pi05=model_config.pi05
     )
 
-    # Instantiate model
-    pi0_model = openpi.models_pytorch.pi0_pytorch.PI0Pytorch(model_config)
-
     # Combine all parameters (no prefix needed for our model structure)
     all_params = {**paligemma_params, **gemma_params, **projection_params}
+    del initial_params, paligemma_params, gemma_params, projection_params, expert_params
 
-    # Load state dict
-    pi0_model.load_state_dict(all_params, strict=False)
-
-    if precision == "float32":
-        pi0_model = pi0_model.to(torch.float32)
-    elif precision == "bfloat16":
-        pi0_model = pi0_model.to(torch.bfloat16)
-    else:
-        raise ValueError(f"Invalid precision: {precision}")
+    _load_converted_state(pi0_model, all_params, getattr(torch, precision))
+    del all_params
 
     # Save the converted model using safetensors
     os.makedirs(output_path, exist_ok=True)
@@ -533,7 +515,10 @@ def convert_pi0_checkpoint(
     safetensors.torch.save_model(pi0_model, os.path.join(output_path, "model.safetensors"))
 
     # Copy assets folder if it exists
-    assets_source = pathlib.Path(checkpoint_dir).parent / "assets"
+    assets_source = pathlib.Path(checkpoint_dir) / "assets"
+    if not assets_source.exists():
+        # Some older exports stored assets beside their numbered checkpoints.
+        assets_source = pathlib.Path(checkpoint_dir).parent / "assets"
     if assets_source.exists():
         assets_dest = pathlib.Path(output_path) / "assets"
         if assets_dest.exists():
@@ -546,6 +531,10 @@ def convert_pi0_checkpoint(
         "action_horizon": model_config.action_horizon,
         "paligemma_variant": model_config.paligemma_variant,
         "action_expert_variant": model_config.action_expert_variant,
+        "pi05": model_config.pi05,
+        "max_token_len": model_config.max_token_len,
+        "train_subtask_prediction": model_config.train_subtask_prediction,
+        "max_subtask_len": model_config.max_subtask_len,
         "precision": precision,
     }
     with open(os.path.join(output_path, "config.json"), "w") as f:
@@ -555,11 +544,39 @@ def convert_pi0_checkpoint(
     print(f"Model saved to {output_path}")
 
 
+def _load_converted_state(model, params: dict[str, torch.Tensor], dtype: torch.dtype) -> None:
+    """Require every trained tensor, with explicit treatment of the two language heads."""
+    embedding = "paligemma_with_expert.paligemma.model.language_model.embed_tokens.weight"
+    tied_head = "paligemma_with_expert.paligemma.lm_head.weight"
+    unused_head = "paligemma_with_expert.gemma_expert.lm_head.weight"
+    expected = model.state_dict()
+    allowed_missing = {tied_head, unused_head}
+    missing = set(expected) - set(params) - allowed_missing
+    unexpected = set(params) - set(expected)
+    if missing or unexpected:
+        raise ValueError(f"Checkpoint conversion mismatch: missing={sorted(missing)}, unexpected={sorted(unexpected)}")
+    for key in set(params) & set(expected):
+        if params[key].shape != expected[key].shape:
+            raise ValueError(f"Checkpoint shape mismatch for {key}: {params[key].shape} != {expected[key].shape}")
+    for key in list(params):
+        params[key] = params[key].to(dtype=dtype).contiguous()
+    if tied_head in expected:
+        params[tied_head] = params[embedding]
+    if unused_head in expected and unused_head not in params:
+        # The continuous action expert never uses an LM head; JAX has no corresponding tensor.
+        params[unused_head] = torch.zeros(expected[unused_head].shape, dtype=dtype, device="cpu")
+    model.load_state_dict(params, strict=True, assign=True)
+    if tied_head in expected:
+        model.paligemma_with_expert.paligemma.lm_head.weight = (
+            model.paligemma_with_expert.paligemma.language_model.embed_tokens.weight
+        )
+
+
 def main(
     checkpoint_dir: str,
     config_name: str,
     output_path: str | None = None,
-    precision: Literal["float32", "bfloat16", "float16"] = "bfloat16",
+    precision: Literal["float32", "bfloat16"] = "bfloat16",
     *,
     inspect_only: bool = False,
 ):

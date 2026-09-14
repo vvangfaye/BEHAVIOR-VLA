@@ -134,6 +134,7 @@ class GemmaConfig(PretrainedConfig):
         rope_theta=10000.0,
         attention_bias=False,
         attention_dropout=0.0,
+        use_bidirectional_attention=None,
         use_adarms: bool = False,
         adarms_cond_dim: Optional[int] = None,
         **kwargs,
@@ -154,6 +155,7 @@ class GemmaConfig(PretrainedConfig):
         self.rope_theta = rope_theta
         self.attention_bias = attention_bias
         self.attention_dropout = attention_dropout
+        self.use_bidirectional_attention = use_bidirectional_attention
         self.use_adarms = use_adarms
         self.adarms_cond_dim = adarms_cond_dim
 

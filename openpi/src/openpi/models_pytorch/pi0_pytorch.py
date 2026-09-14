@@ -5,6 +5,7 @@ import torch
 from torch import Tensor
 from torch import nn
 import torch.nn.functional as F  # noqa: N812
+from torch.utils.checkpoint import checkpoint
 
 import openpi.models.gemma as _gemma
 from openpi.models_pytorch.gemma_pytorch import PaliGemmaWithExpertModel
@@ -86,8 +87,12 @@ class PI0Pytorch(nn.Module):
         super().__init__()
         self.config = config
         self.pi05 = config.pi05
-        if config.train_subtask_prediction:
-            raise NotImplementedError("Subtask prediction training currently requires the JAX trainer.")
+        self.action_dim = config.action_dim
+        self.action_horizon = config.action_horizon
+        self.train_subtask_prediction = config.train_subtask_prediction
+        self.subtask_loss_weight = config.subtask_loss_weight
+        self.max_subtask_len = config.max_subtask_len
+        self.subtask_loss_chunk_size = config.subtask_loss_chunk_size
 
         paligemma_config = _gemma.get_config(config.paligemma_variant)
         action_expert_config = _gemma.get_config(config.action_expert_variant)
@@ -151,9 +156,7 @@ class PI0Pytorch(nn.Module):
     def _apply_checkpoint(self, func, *args, **kwargs):
         """Helper method to apply gradient checkpointing if enabled."""
         if self.gradient_checkpointing_enabled and self.training:
-            return torch.utils.checkpoint.checkpoint(
-                func, *args, use_reentrant=False, preserve_rng_state=False, **kwargs
-            )
+            return checkpoint(func, *args, use_reentrant=False, preserve_rng_state=False, **kwargs)
         return func(*args, **kwargs)
 
     def _prepare_attention_masks_4d(self, att_2d_masks):
@@ -187,7 +190,7 @@ class PI0Pytorch(nn.Module):
         return time.to(dtype=torch.float32, device=device)
 
     def embed_prefix(
-        self, images, img_masks, lang_tokens, lang_masks
+        self, images, img_masks, lang_tokens, lang_masks, lang_ar_masks=None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Embed images with SigLIP and language tokens with embedding layer to prepare
         for PaliGemma transformer processing.
@@ -223,7 +226,8 @@ class PI0Pytorch(nn.Module):
         embs.append(lang_emb)
         pad_masks.append(lang_masks)
 
-        # full attention between image and language inputs
+        # Images/task/state remain bidirectional; the subtask and action cue
+        # use the same causal token boundaries as the JAX training format.
         num_lang_embs = lang_emb.shape[1]
         att_masks += [0] * num_lang_embs
 
@@ -233,7 +237,11 @@ class PI0Pytorch(nn.Module):
 
         # Get batch size from the first dimension of the concatenated tensors
         bsize = pad_masks.shape[0]
-        att_masks = att_masks[None, :].expand(bsize, len(att_masks))
+        att_masks = att_masks[None, :].expand(bsize, len(att_masks)).clone()
+        if lang_ar_masks is not None:
+            if lang_ar_masks.shape != lang_masks.shape:
+                raise ValueError("token_ar_mask must have the same shape as tokenized_prompt_mask.")
+            att_masks[:, -num_lang_embs:] = lang_ar_masks.to(dtype=torch.bool)
 
         return embs, pad_masks, att_masks
 
@@ -316,8 +324,15 @@ class PI0Pytorch(nn.Module):
 
         return embs, pad_masks, att_masks, adarms_cond
 
-    def forward(self, observation, actions, noise=None, time=None) -> Tensor:
-        """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)"""
+    def forward(self, observation, actions, noise=None, time=None, *, return_metrics=False):
+        """Return per-action loss, optionally with the action and language metrics.
+
+        Subtask training teacher-forces only the subtask label with next-token
+        CE. Its per-example loss is broadcast over actions so ``loss.mean()``
+        has exactly the same action/CE weighting as the JAX trainer.
+        """
+        if self.train_subtask_prediction and (observation.token_ar_mask is None or observation.token_loss_mask is None):
+            raise ValueError("Subtask training requires token_ar_mask and token_loss_mask from the subtask tokenizer.")
         images, img_masks, lang_tokens, lang_masks, state = self._preprocess_observation(observation, train=True)
 
         if noise is None:
@@ -330,7 +345,9 @@ class PI0Pytorch(nn.Module):
         x_t = time_expanded * noise + (1 - time_expanded) * actions
         u_t = noise - actions
 
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(images, img_masks, lang_tokens, lang_masks)
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
+            images, img_masks, lang_tokens, lang_masks, observation.token_ar_mask
+        )
         suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.embed_suffix(state, x_t, time)
         if (
             self.paligemma_with_expert.paligemma.language_model.layers[0].self_attn.q_proj.weight.dtype
@@ -350,7 +367,7 @@ class PI0Pytorch(nn.Module):
 
         # Apply gradient checkpointing if enabled
         def forward_func(prefix_embs, suffix_embs, att_2d_masks_4d, position_ids, adarms_cond):
-            (_, suffix_out), _ = self.paligemma_with_expert.forward(
+            (prefix_out, suffix_out), _ = self.paligemma_with_expert.forward(
                 attention_mask=att_2d_masks_4d,
                 position_ids=position_ids,
                 past_key_values=None,
@@ -358,11 +375,11 @@ class PI0Pytorch(nn.Module):
                 use_cache=False,
                 adarms_cond=[None, adarms_cond],
             )
-            return suffix_out
+            return prefix_out, suffix_out
 
-        suffix_out = self._apply_checkpoint(
-            forward_func, prefix_embs, suffix_embs, att_2d_masks_4d, position_ids, adarms_cond
-        )
+        # The combined backbone checkpoints its individual layers. Wrapping the
+        # whole backbone again adds a second full recomputation in backward.
+        prefix_out, suffix_out = forward_func(prefix_embs, suffix_embs, att_2d_masks_4d, position_ids, adarms_cond)
 
         suffix_out = suffix_out[:, -self.config.action_horizon :]
         suffix_out = suffix_out.to(dtype=torch.float32)
@@ -373,7 +390,149 @@ class PI0Pytorch(nn.Module):
 
         v_t = self._apply_checkpoint(action_out_proj_func, suffix_out)
 
-        return F.mse_loss(u_t, v_t, reduction="none")
+        action_loss = F.mse_loss(u_t.float(), v_t.float(), reduction="none")
+        metrics = {"action_loss": action_loss.mean()}
+        loss = action_loss
+        if self.train_subtask_prediction:
+            subtask_loss, token_accuracy, counts = self._compute_subtask_metrics(prefix_out, observation)
+            metrics.update(
+                subtask_loss=subtask_loss.mean(),
+                subtask_token_accuracy=(token_accuracy * counts).sum() / counts.sum().clamp_min(1),
+                subtask_tokens=counts.float().mean(),
+            )
+            loss = loss + self.subtask_loss_weight * subtask_loss[:, None, None]
+        return (loss, metrics) if return_metrics else loss
+
+    def _compute_subtask_metrics(self, prefix_out, observation):
+        """Project only label predecessors, rematerializing each small vocab chunk.
+
+        Checkpoint the projection and CE together even when backbone gradient
+        checkpointing is disabled. Otherwise autograd retains all 257k-vocab
+        softmax tensors until backward, defeating chunking's memory bound.
+        """
+        tokens = observation.tokenized_prompt
+        loss_mask = observation.token_loss_mask.bool()
+        if loss_mask.shape != tokens.shape or observation.tokenized_prompt_mask.shape != tokens.shape:
+            raise ValueError("Subtask token masks must match tokenized_prompt.")
+        counts = loss_mask.sum(dim=-1)
+        valid = (counts > 0) & (counts <= self.max_subtask_len) & ~loss_mask[:, 0]
+        valid &= (~loss_mask | observation.tokenized_prompt_mask.bool()).all(dim=-1)
+        if not bool(valid.all()):
+            raise ValueError(
+                "Subtask labels must contain 1..max_subtask_len valid tokens with a preceding input token."
+            )
+
+        positions = torch.arange(tokens.shape[1], device=tokens.device).expand_as(tokens)
+        positions = positions.masked_fill(~loss_mask, tokens.shape[1]).sort(dim=-1).values[:, : self.max_subtask_len]
+        selected_mask = positions < tokens.shape[1]
+        positions = positions.clamp_max(tokens.shape[1] - 1)
+        rows = torch.arange(tokens.shape[0], device=tokens.device)[:, None]
+        text_hidden = prefix_out[:, -tokens.shape[1] :]
+        hidden = text_hidden[rows, (positions - 1).clamp_min(0)]
+        targets = tokens[rows, positions].long()
+
+        def chunk_metrics(chunk_hidden, chunk_targets, chunk_mask):
+            logits = self.paligemma_with_expert.deembed_language_tokens(chunk_hidden).float()
+            nll = F.cross_entropy(logits.flatten(0, 1), chunk_targets.flatten(), reduction="none")
+            nll = nll.reshape_as(chunk_targets)
+            correct = (logits.argmax(dim=-1) == chunk_targets) & chunk_mask
+            return (nll * chunk_mask).sum(dim=-1), correct.sum(dim=-1).float()
+
+        loss_sum = torch.zeros(tokens.shape[0], dtype=torch.float32, device=tokens.device)
+        correct_sum = torch.zeros_like(loss_sum)
+        for start in range(0, hidden.shape[1], self.subtask_loss_chunk_size):
+            stop = start + self.subtask_loss_chunk_size
+            args = hidden[:, start:stop], targets[:, start:stop], selected_mask[:, start:stop]
+            if torch.is_grad_enabled():
+                chunk_loss, chunk_correct = checkpoint(chunk_metrics, *args, use_reentrant=False)
+            else:
+                chunk_loss, chunk_correct = chunk_metrics(*args)
+            loss_sum = loss_sum + chunk_loss
+            correct_sum = correct_sum + chunk_correct
+        return loss_sum / counts, correct_sum / counts, counts
+
+    @torch.no_grad()
+    def generate_subtask(self, device, observation, *, max_decoding_steps=None, temperature=0.0, eos_token_id=1):
+        """Decode a subtask from images and the complete task/state prefix.
+
+        The returned lengths include EOS. Rows that exhaust the token budget
+        retain ``has_eos=False`` so the policy cannot treat truncated text as a
+        completed instruction. The KV cache is local to this generation call.
+        """
+        if not self.train_subtask_prediction:
+            raise ValueError("Subtask generation requires a model configured for subtask prediction.")
+        limit = self.max_subtask_len if max_decoding_steps is None else max_decoding_steps
+        if not isinstance(limit, int) or not 2 <= limit <= self.max_subtask_len:
+            raise ValueError("Require 2 <= max_decoding_steps <= max_subtask_len (including EOS).")
+        if not math.isfinite(temperature) or temperature < 0:
+            raise ValueError("temperature must be finite and nonnegative.")
+        if observation.tokenized_prompt is None or observation.tokenized_prompt_mask is None:
+            raise ValueError("Subtask generation requires a tokenized task/state prefix.")
+
+        images, img_masks, tokens, text_mask, _ = self._preprocess_observation(observation, train=False)
+        text_mask = text_mask.bool()
+        text_lengths = text_mask.sum(dim=-1)
+        valid_prefix = (text_lengths > 0) & (text_lengths + limit <= text_mask.shape[1])
+        valid_prefix &= (
+            text_mask == (torch.arange(text_mask.shape[1], device=tokens.device)[None] < text_lengths[:, None])
+        ).all(dim=-1)
+        if observation.token_ar_mask is not None:
+            valid_prefix &= ~(observation.token_ar_mask != 0).any(dim=-1)
+        if observation.token_loss_mask is not None:
+            valid_prefix &= ~observation.token_loss_mask.bool().any(dim=-1)
+
+        prefix, valid_mask, ar_mask = self.embed_prefix(images, img_masks, tokens, text_mask)
+        self.paligemma_with_expert.paligemma.language_model.config._attn_implementation = "eager"  # noqa: SLF001
+        (hidden, _), cache = self.paligemma_with_expert.forward(
+            attention_mask=self._prepare_attention_masks_4d(make_att_2d_masks(valid_mask, ar_mask)),
+            position_ids=valid_mask.long().cumsum(dim=-1) - 1,
+            inputs_embeds=[prefix, None],
+            use_cache=True,
+        )
+        rows = torch.arange(tokens.shape[0], device=tokens.device)
+        last_positions = prefix.shape[1] - text_mask.shape[1] + text_lengths - 1
+        logits = self.paligemma_with_expert.deembed_language_tokens(hidden[rows, last_positions.clamp_min(0)]).float()
+        if not 0 <= eos_token_id < logits.shape[-1] or eos_token_id in (0, 2):
+            raise ValueError("eos_token_id must be a vocabulary token distinct from PAD/UNK and BOS.")
+        generated = torch.zeros((tokens.shape[0], limit), dtype=torch.long, device=tokens.device)
+        lengths = torch.zeros(tokens.shape[0], dtype=torch.long, device=tokens.device)
+        done = ~valid_prefix
+        has_eos = torch.zeros_like(valid_prefix)
+
+        for index in range(limit):
+            if bool(done.all()):
+                break
+            logits = logits.clone()
+            logits[:, 0] = -torch.inf
+            logits[:, 2] = -torch.inf
+            if index == 0:
+                logits[:, eos_token_id] = -torch.inf
+            if temperature == 0:
+                token = logits.argmax(dim=-1)
+            else:
+                token = torch.multinomial(torch.softmax(logits / temperature, dim=-1), 1).squeeze(-1)
+            active = ~done
+            token = torch.where(active, token, 0)
+            generated[:, index] = token
+            lengths += active.long()
+            has_eos |= active & (token == eos_token_id)
+            done |= has_eos
+            if index + 1 == limit or bool(done.all()):
+                break
+
+            position_ids = valid_mask.sum(dim=-1)[:, None]
+            valid_mask = torch.cat([valid_mask, active[:, None]], dim=-1)
+            embedded = self.paligemma_with_expert.embed_language_tokens(token[:, None])
+            embedded = embedded * math.sqrt(embedded.shape[-1])
+            (hidden, _), cache = self.paligemma_with_expert.forward(
+                attention_mask=self._prepare_attention_masks_4d((valid_mask & active[:, None])[:, None, :]),
+                position_ids=position_ids,
+                inputs_embeds=[embedded, None],
+                past_key_values=cache,
+                use_cache=True,
+            )
+            logits = self.paligemma_with_expert.deembed_language_tokens(hidden[:, 0]).float()
+        return {"tokens": generated, "lengths": lengths, "has_eos": has_eos, "valid_prefix": valid_prefix}
 
     @torch.no_grad()
     def sample_actions(self, device, observation, noise=None, num_steps=10) -> Tensor:
@@ -385,7 +544,9 @@ class PI0Pytorch(nn.Module):
 
         images, img_masks, lang_tokens, lang_masks, state = self._preprocess_observation(observation, train=False)
 
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(images, img_masks, lang_tokens, lang_masks)
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
+            images, img_masks, lang_tokens, lang_masks, observation.token_ar_mask
+        )
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
         prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
 
