@@ -11,16 +11,18 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OPENPI_DIR="$REPO_ROOT/openpi"
 
 SOURCE_DATASET="${SOURCE_DATASET:-/data/oss_bucket_0/wangfaye/embodied/datasets/behavior-1k/behavior-1k_2026-challenge-demos_20260728235542}"
-LOCAL_DATASET="${LOCAL_DATASET:-/var/tmp/behavior-1k/two_tasks_whole_task_s1}"
+LOCAL_DATASET="${LOCAL_DATASET:-/var/tmp/behavior-1k/two_tasks_joint_subtask_s1}"
 ENV_ARCHIVE="${ENV_ARCHIVE:-/data/oss_bucket_0/wangfaye/conda_env/b1k-pi05.tar.gz}"
 ENV_PREFIX="${ENV_PREFIX:-/dev/shm/wangfaye/conda_envs/b1k-pi05}"
 OPENPI_CACHE_ARCHIVE="${OPENPI_CACHE_ARCHIVE:-/data/oss_bucket_0/wangfaye/conda_env/b1k-pi05-openpi-cache.tar}"
 OPENPI_DATA_HOME="${OPENPI_DATA_HOME:-/var/tmp/wangfaye/openpi-cache}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-/data/oss_bucket_0/wangfaye/result/behavior-challenge/pi05_two_tasks}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/data/oss_bucket_0/wangfaye/result/behavior-challenge/pi05_two_tasks_joint_subtask}"
 NORM_STATS_SOURCE="${NORM_STATS_SOURCE:-$SCRIPT_DIR/pi05_two_tasks_norm_stats.json}"
+SUBTASK_SEGMENTS_SOURCE="${SUBTASK_SEGMENTS_SOURCE:-/data/oss_bucket_0/wangfaye/embodied/datasets/behavior-1k/annotations/subtasks/v1/subtask_segments.parquet}"
+SUBTASK_SEGMENTS_SHA256="${SUBTASK_SEGMENTS_SHA256:-870086137b5fac4ff8a701e6e539cdc99ee43d3efacb81028a2ae0b4f78fff2d}"
 
-REPO_ID="${REPO_ID:-b1k_two_tasks_whole_task_s1}"
-EXP_NAME="${EXP_NAME:-pi05_b1k_2tasks_whole_s1_2ep_$(date +%Y%m%d_%H%M%S)}"
+REPO_ID="${REPO_ID:-b1k_two_tasks_joint_subtask_s1}"
+EXP_NAME="${EXP_NAME:-pi05_b1k_2tasks_joint_subtask_s1_117542_$(date +%Y%m%d_%H%M%S)}"
 NUM_GPUS="${NUM_GPUS:-8}"
 CUDA_DEVICES="${CUDA_DEVICES:-0,1,2,3,4,5,6,7}"
 FSDP_DEVICES="${FSDP_DEVICES:-8}"
@@ -31,6 +33,12 @@ SAVE_INTERVAL="${SAVE_INTERVAL:-5000}"
 NORM_MAX_FRAMES="${NORM_MAX_FRAMES:-500000}"
 FRAME_STRIDE="${FRAME_STRIDE:-1}"
 LR_DECAY_STEPS="${LR_DECAY_STEPS:-117542}"
+SUBTASK_EMPTY_LABEL_POLICY="${SUBTASK_EMPTY_LABEL_POLICY:-drop_episode}"
+MAX_TOKEN_LEN="${MAX_TOKEN_LEN:-512}"
+MAX_SUBTASK_LEN="${MAX_SUBTASK_LEN:-64}"
+SUBTASK_LOSS_WEIGHT="${SUBTASK_LOSS_WEIGHT:-1.0}"
+SUBTASK_LOSS_CHUNK_SIZE="${SUBTASK_LOSS_CHUNK_SIZE:-8}"
+WHOLE_TASK_PROB="${WHOLE_TASK_PROB:-0}"
 
 CHUNKS=(chunk-014 chunk-056)
 CAMERAS=(
@@ -47,6 +55,11 @@ require_file "$ENV_ARCHIVE"
 require_file "$OPENPI_CACHE_ARCHIVE"
 require_file "$SOURCE_DATASET/meta/info.json"
 require_file "$NORM_STATS_SOURCE"
+require_file "$SUBTASK_SEGMENTS_SOURCE"
+if [[ "$(sha256sum "$SUBTASK_SEGMENTS_SOURCE" | cut -d' ' -f1)" != "$SUBTASK_SEGMENTS_SHA256" ]]; then
+    echo "Subtask annotation checksum mismatch: $SUBTASK_SEGMENTS_SOURCE" >&2
+    exit 1
+fi
 for chunk in "${CHUNKS[@]}"; do
     require_dir "$SOURCE_DATASET/data/$chunk"
     for camera in "${CAMERAS[@]}"; do
@@ -54,12 +67,13 @@ for chunk in "${CHUNKS[@]}"; do
     done
 done
 
-log "π0.5 Nebula job: $EXP_NAME"
+log "π0.5 joint-subtask Nebula job: $EXP_NAME"
 log "source dataset: $SOURCE_DATASET"
 log "local dataset:  $LOCAL_DATASET"
+log "subtasks:       $SUBTASK_SEGMENTS_SOURCE (sha256=$SUBTASK_SEGMENTS_SHA256)"
 log "model cache:    $OPENPI_CACHE_ARCHIVE -> $OPENPI_DATA_HOME"
 log "output root:    $OUTPUT_ROOT"
-log "training: 400 episodes, stride=$FRAME_STRIDE, steps=$TRAIN_STEPS, batch=$BATCH_SIZE, GPUs=$NUM_GPUS"
+log "training: 400 requested episodes with incomplete-label episodes dropped, stride=$FRAME_STRIDE, steps=$TRAIN_STEPS, batch=$BATCH_SIZE, GPUs=$NUM_GPUS"
 
 if [[ "${NEBULA_WORKER_DRY_RUN:-0}" == "1" ]]; then
     log "worker dry-run complete; no files were changed"
@@ -128,6 +142,12 @@ else
     log "reusing staged dataset at $LOCAL_DATASET"
     "$ENV_PREFIX/bin/python" "$REPO_ROOT/scripts/strip_depth_from_info.py" "$LOCAL_DATASET"
 fi
+log "copying versioned subtask annotations from OSS"
+cp "$SUBTASK_SEGMENTS_SOURCE" "$LOCAL_DATASET/meta/subtask_segments.parquet"
+if [[ "$(sha256sum "$LOCAL_DATASET/meta/subtask_segments.parquet" | cut -d' ' -f1)" != "$SUBTASK_SEGMENTS_SHA256" ]]; then
+    echo "Worker-local subtask annotation checksum mismatch" >&2
+    exit 1
+fi
 
 EPISODES_FILE="$LOCAL_DATASET/meta/pi05_two_tasks_episodes.txt"
 {
@@ -160,10 +180,12 @@ if [[ ! -f "$NORM_STATS_TARGET" ]]; then
     cp "$NORM_STATS_SOURCE" "$NORM_STATS_TARGET"
 fi
 
+SUBTASK_PROMPTS="${SUBTASK_PROMPTS:-$LOCAL_DATASET/meta/subtask_segments.parquet}"
+require_file "$SUBTASK_PROMPTS"
 export OPENPI_DATA_HOME DATASET_ROOT="$LOCAL_DATASET" REPO_ID EPISODES_FILE EXP_NAME
 export NUM_GPUS CUDA_DEVICES FSDP_DEVICES NUM_WORKERS BATCH_SIZE TRAIN_STEPS SAVE_INTERVAL
-export NORM_MAX_FRAMES FRAME_STRIDE LR_DECAY_STEPS
-unset SUBTASK_PROMPTS
+export NORM_MAX_FRAMES FRAME_STRIDE LR_DECAY_STEPS SUBTASK_PROMPTS SUBTASK_EMPTY_LABEL_POLICY
+export MAX_TOKEN_LEN MAX_SUBTASK_LEN SUBTASK_LOSS_WEIGHT SUBTASK_LOSS_CHUNK_SIZE WHOLE_TASK_PROB
 if [[ "${RESUME:-0}" == "1" ]]; then
     export RESUME=1
 else
@@ -173,6 +195,6 @@ fi
 LOG_DIR="$OUTPUT_ROOT/logs"
 LOG_FILE="$LOG_DIR/$EXP_NAME.log"
 mkdir -p "$LOG_DIR"
-log "starting training; log: $LOG_FILE"
-bash "$REPO_ROOT/scripts/train_pi05_b1k.sh" full 2>&1 | tee -a "$LOG_FILE"
-log "training complete; checkpoints: $OUTPUT_ROOT/checkpoints/pi05_b1k/$EXP_NAME"
+log "starting joint-subtask training; log: $LOG_FILE"
+bash "$REPO_ROOT/scripts/train_pi05_subtask_b1k.sh" full 2>&1 | tee -a "$LOG_FILE"
+log "joint-subtask training complete; checkpoints: $OUTPUT_ROOT/checkpoints/pi05_b1k/$EXP_NAME"

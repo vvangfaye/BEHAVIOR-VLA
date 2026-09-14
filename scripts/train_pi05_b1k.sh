@@ -17,6 +17,9 @@ SUBTASK_PROMPTS="${SUBTASK_PROMPTS:-}"
 FRAME_STRIDE="${FRAME_STRIDE:-1}"
 EPISODES_FILE="${EPISODES_FILE:-}"
 SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-0}"
+ASSETS_BASE_DIR="${ASSETS_BASE_DIR:-$OPENPI_DIR/outputs/assets}"
+CHECKPOINT_BASE_DIR="${CHECKPOINT_BASE_DIR:-$OPENPI_DIR/outputs/checkpoints}"
+LOG_INTERVAL="${LOG_INTERVAL:-100}"
 if [[ "$SUBTASK_PREDICTION" != 0 && "$SUBTASK_PREDICTION" != 1 ]]; then
     echo "SUBTASK_PREDICTION must be 0 or 1" >&2
     exit 2
@@ -89,27 +92,32 @@ if [[ "$NUM_GPUS" -ne "$(awk -F, '{print NF}' <<<"$CUDA_DEVICES")" ]]; then
     echo "NUM_GPUS=$NUM_GPUS does not match CUDA_DEVICES=$CUDA_DEVICES" >&2
     exit 2
 fi
-if (( BATCH_SIZE % NUM_GPUS != 0 )); then
-    echo "BATCH_SIZE=$BATCH_SIZE must be divisible by NUM_GPUS=$NUM_GPUS" >&2
+TOTAL_DEVICES="${OPENPI_EXPECTED_GLOBAL_DEVICES:-$NUM_GPUS}"
+if (( BATCH_SIZE % TOTAL_DEVICES != 0 )); then
+    echo "BATCH_SIZE=$BATCH_SIZE must be divisible by total devices=$TOTAL_DEVICES" >&2
     exit 2
 fi
 
 cd "$OPENPI_DIR"
+set +u
 source .venv/bin/activate
+set -u
 
 # openpi shards every batch across all devices jax can see, so the device set
 # must be restricted before the norm-stats step too, not just for training.
 export CUDA_VISIBLE_DEVICES="$CUDA_DEVICES"
 
 if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
-    VALIDATED_EPISODES_FILE="outputs/subtask_preflight/$EXP_NAME.episodes.txt"
+    PREFLIGHT_OUTPUT_DIR="${PREFLIGHT_OUTPUT_DIR:-outputs/subtask_preflight}"
+    mkdir -p "$PREFLIGHT_OUTPUT_DIR"
+    VALIDATED_EPISODES_FILE="$PREFLIGHT_OUTPUT_DIR/$EXP_NAME.episodes.txt"
     PREFLIGHT_ARGS=(
         --dataset-root "$DATASET_ROOT"
         --segments-path "$SUBTASK_PROMPTS"
         --max-token-len "$MAX_TOKEN_LEN"
         --max-subtask-len "$MAX_SUBTASK_LEN"
         --empty-label-policy "$SUBTASK_EMPTY_LABEL_POLICY"
-        --report-file "outputs/subtask_preflight/$EXP_NAME.json"
+        --report-file "$PREFLIGHT_OUTPUT_DIR/$EXP_NAME.json"
         --write-episodes-file "$VALIDATED_EPISODES_FILE"
     )
     if (( ${#EPISODES_INDEX[@]} )); then
@@ -136,7 +144,7 @@ if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
     fi
 fi
 
-NORM_FILE="$OPENPI_DIR/outputs/assets/pi05_b1k/$REPO_ID/norm_stats.json"
+NORM_FILE="$ASSETS_BASE_DIR/pi05_b1k/$REPO_ID/norm_stats.json"
 if [[ ! -f "$NORM_FILE" ]]; then
     echo "Computing normalization statistics..."
     NORM_ARGS=(
@@ -145,6 +153,7 @@ if [[ ! -f "$NORM_FILE" ]]; then
         --repo-id "$REPO_ID"
         --batch-size "$BATCH_SIZE"
         --num-workers "$NUM_WORKERS"
+        --assets-base-dir "$ASSETS_BASE_DIR"
     )
     if [[ -n "$NORM_MAX_FRAMES" ]]; then
         NORM_ARGS+=(--max-frames "$NORM_MAX_FRAMES")
@@ -216,13 +225,16 @@ fi
 
 python scripts/b1k/train_b1k.py pi05_b1k \
     --exp-name "$EXP_NAME" \
+    --assets-base-dir "$ASSETS_BASE_DIR" \
+    --checkpoint-base-dir "$CHECKPOINT_BASE_DIR" \
     --batch-size "$BATCH_SIZE" \
     --num-workers "$NUM_WORKERS" \
     --num-train-steps "$TRAIN_STEPS" \
+    --log-interval "$LOG_INTERVAL" \
     --save-interval "$SAVE_INTERVAL" \
     --no-wandb-enabled \
     --data.repo-id "$REPO_ID" \
     --data.dataset-root "$DATASET_ROOT" \
     "${TRAIN_DATA_ARGS[@]}"
 
-echo "Checkpoint root: $OPENPI_DIR/outputs/checkpoints/pi05_b1k/$EXP_NAME"
+echo "Checkpoint root: $CHECKPOINT_BASE_DIR/pi05_b1k/$EXP_NAME"

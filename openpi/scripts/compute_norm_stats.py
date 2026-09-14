@@ -141,8 +141,11 @@ def main(
     batch_size: int | None = None,
     num_workers: int | None = None,
     episodes_index: list[int] | None = None,
+    assets_base_dir: str | None = None,
 ):
     config = _config.get_config(config_name)
+    if assets_base_dir is not None:
+        config = dataclasses.replace(config, assets_base_dir=assets_base_dir)
     if dataset_root is not None or repo_id is not None:
         base_config = dataclasses.replace(
             config.data.base_config,

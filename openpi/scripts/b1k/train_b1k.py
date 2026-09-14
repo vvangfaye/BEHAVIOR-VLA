@@ -1,6 +1,8 @@
 import dataclasses
 import functools
+import json
 import logging
+import os
 import platform
 from typing import Any
 
@@ -21,6 +23,7 @@ import openpi.shared.nnx_utils as nnx_utils
 import openpi.training.checkpoints as _checkpoints
 import openpi.training.config as _config
 import openpi.training.data_loader as _data_loader
+import openpi.training.distributed as _distributed
 import openpi.training.optimizer as _optimizer
 import openpi.training.sharding as sharding
 import openpi.training.utils as training_utils
@@ -401,7 +404,16 @@ def train_step(
 
 def main(config: _config.TrainConfig):
     init_logging()
-    logging.info(f"Running on: {platform.node()}")
+    distributed_config = _distributed.initialize_from_env()
+    is_primary = jax.process_index() == 0
+    logging.info(
+        "Running on %s as process %d/%d with %d local and %d global devices",
+        platform.node(),
+        jax.process_index(),
+        jax.process_count(),
+        jax.local_device_count(),
+        jax.device_count(),
+    )
 
     if config.batch_size % jax.device_count() != 0:
         raise ValueError(
@@ -414,6 +426,11 @@ def main(config: _config.TrainConfig):
     train_rng, init_rng = jax.random.split(rng)
 
     mesh = sharding.make_mesh(config.fsdp_devices)
+    if distributed_config is not None:
+        expected_mesh = (distributed_config.process_count, config.fsdp_devices)
+        actual_mesh = (mesh.shape[sharding.BATCH_AXIS], mesh.shape[sharding.FSDP_AXIS])
+        if actual_mesh != expected_mesh:
+            raise RuntimeError(f"Distributed mesh mismatch: got {actual_mesh}, expected {expected_mesh}.")
     data_sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec(sharding.DATA_AXIS))
     replicated_sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
 
@@ -423,24 +440,24 @@ def main(config: _config.TrainConfig):
         overwrite=config.overwrite,
         resume=config.resume,
     )
-    init_wandb(config, resuming=resuming, enabled=config.wandb_enabled)
+    init_wandb(config, resuming=resuming, enabled=config.wandb_enabled and is_primary)
 
     data_loader = _data_loader.create_b1k_data_loader(
         config,
         sharding=data_sharding,
         shuffle=True,
-        skip_norm_stats=False
+        skip_norm_stats=False,
     )
     data_iter = iter(data_loader)
     batch = next(data_iter)
     logging.info(f"Initialized data loader:\n{training_utils.array_tree_to_info(batch)}")
 
-    # Log images from first batch to sanity check.
-    images_to_log = [
-        wandb.Image(np.concatenate([np.array(img[i]) for img in batch[0].images.values()], axis=1))
-        for i in range(min(5, len(next(iter(batch[0].images.values())))))
-    ]
-    wandb.log({"camera_views": images_to_log}, step=0)
+    if is_primary and jax.process_count() == 1:
+        images_to_log = [
+            wandb.Image(np.concatenate([np.array(img[i]) for img in batch[0].images.values()], axis=1))
+            for i in range(min(5, len(next(iter(batch[0].images.values())))))
+        ]
+        wandb.log({"camera_views": images_to_log}, step=0)
 
     train_state, train_state_sharding = init_train_state(config, init_rng, mesh, resume=resuming)
     jax.block_until_ready(train_state)
@@ -457,12 +474,13 @@ def main(config: _config.TrainConfig):
     )
 
     start_step = int(train_state.step)
-    pbar = tqdm.tqdm(
-        range(start_step, config.num_train_steps),
-        initial=start_step,
-        total=config.num_train_steps,
-        dynamic_ncols=True,
+    step_range = range(start_step, config.num_train_steps)
+    pbar = (
+        tqdm.tqdm(step_range, initial=start_step, total=config.num_train_steps, dynamic_ncols=True)
+        if is_primary
+        else step_range
     )
+    require_finite_metrics = os.environ.get("OPENPI_REQUIRE_FINITE_METRICS") == "1"
 
     infos = []
     for step in pbar:
@@ -472,15 +490,26 @@ def main(config: _config.TrainConfig):
         if step % config.log_interval == 0:
             stacked_infos = common_utils.stack_forest(infos)
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
-            info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
-            pbar.write(f"Step {step}: {info_str}")
-            wandb.log(reduced_info, step=step)
+            if require_finite_metrics:
+                required = {"loss", "action_loss", "subtask_loss", "grad_norm", "subtask_tokens"}
+                missing = required - reduced_info.keys()
+                if missing:
+                    raise RuntimeError(f"Distributed smoke is missing metrics: {sorted(missing)}")
+                nonfinite = [key for key, value in reduced_info.items() if not np.isfinite(np.asarray(value)).all()]
+                if nonfinite:
+                    raise RuntimeError(f"Distributed smoke produced non-finite metrics: {nonfinite}")
+                if float(reduced_info["subtask_tokens"]) <= 0:
+                    raise RuntimeError("Distributed smoke observed no supervised subtask tokens.")
+            if is_primary:
+                info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
+                pbar.write(f"Step {step}: {info_str}")
+                wandb.log(reduced_info, step=step)
             infos = []
         if config.val_log_interval and step % config.val_log_interval == 0:
             val_loss = compute_validation_loss(
                 config, train_state, mesh, train_state_sharding, replicated_sharding, data_loader
             )
-            if val_loss is not None:
+            if val_loss is not None and is_primary:
                 wandb.log({"val_loss": val_loss}, step=step)
                 logging.info("Validation loss at step %d: %.4f", step, val_loss)
         batch = next(data_iter)
@@ -490,6 +519,35 @@ def main(config: _config.TrainConfig):
 
     logging.info("Waiting for checkpoint manager to finish")
     checkpoint_manager.wait_until_finished()
+
+    if os.environ.get("OPENPI_VERIFY_FINAL_CHECKPOINT") == "1":
+        restored_state = _checkpoints.restore_state(checkpoint_manager, train_state, data_loader)
+        jax.block_until_ready(restored_state)
+        restored_step = int(restored_state.step)
+        if restored_step != config.num_train_steps:
+            raise RuntimeError(
+                f"Restored checkpoint step is {restored_step}, expected {config.num_train_steps}."
+            )
+        from jax.experimental import multihost_utils
+
+        multihost_utils.sync_global_devices("openpi_final_checkpoint_verified")
+        if is_primary and (success_path := os.environ.get("OPENPI_SUCCESS_PATH")):
+            path = epath.Path(success_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "checkpoint_dir": str(config.checkpoint_dir),
+                        "global_devices": jax.device_count(),
+                        "mesh": dict(mesh.shape),
+                        "processes": jax.process_count(),
+                        "restored_step": restored_step,
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+        logging.info("Verified final checkpoint restore at train state step %d", restored_step)
 
 
 if __name__ == "__main__":

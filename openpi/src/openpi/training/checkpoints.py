@@ -8,6 +8,8 @@ from typing import List, Protocol
 
 from etils import epath
 import jax
+from jax.experimental import multihost_utils
+import numpy as np
 import orbax.checkpoint as ocp
 import orbax.checkpoint.future as future
 
@@ -22,20 +24,35 @@ def initialize_checkpoint_dir(
 ) -> tuple[ocp.CheckpointManager, bool]:
     checkpoint_dir = epath.Path(checkpoint_dir).resolve()
     resuming = False
-    if checkpoint_dir.exists():
-        if overwrite:
-            checkpoint_dir.rmtree()
-            checkpoint_dir.mkdir(parents=True, exist_ok=True)
-            logging.info(f"Wiped checkpoint directory {checkpoint_dir}")
-        elif resume:
-            resuming = True
-        else:
-            raise FileExistsError(
-                f"Checkpoint directory {checkpoint_dir} already exists. Use --overwrite or --resume "
-                "to indicate how to handle it."
-            )
+    if jax.process_count() > 1:
+        if overwrite or resume:
+            raise ValueError("Multi-process checkpoint initialization currently requires a new experiment directory.")
+        bootstrap_ok = np.zeros((), dtype=np.int32)
+        if jax.process_index() == 0:
+            try:
+                checkpoint_dir.mkdir(parents=True)
+                bootstrap_ok = np.ones((), dtype=np.int32)
+            except Exception:
+                logging.exception("Rank 0 failed to create checkpoint directory %s", checkpoint_dir)
+        status = int(multihost_utils.broadcast_one_to_all(bootstrap_ok))
+        if status != 1:
+            raise RuntimeError(f"Checkpoint bootstrap failed for {checkpoint_dir}.")
+        multihost_utils.sync_global_devices("openpi_checkpoint_bootstrap")
+    else:
+        if checkpoint_dir.exists():
+            if overwrite:
+                checkpoint_dir.rmtree()
+                checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                logging.info(f"Wiped checkpoint directory {checkpoint_dir}")
+            elif resume:
+                resuming = True
+            else:
+                raise FileExistsError(
+                    f"Checkpoint directory {checkpoint_dir} already exists. Use --overwrite or --resume "
+                    "to indicate how to handle it."
+                )
 
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     mngr = ocp.CheckpointManager(
         checkpoint_dir,

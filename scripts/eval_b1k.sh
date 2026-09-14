@@ -31,6 +31,11 @@ esac
 # Space-separated indices into the selected split's instance list. Empty means
 # the evaluator's default (all 20 public_test instances), which is 20x the work.
 INSTANCE_INDICES="${INSTANCE_INDICES:-}"
+MAX_STEPS="${MAX_STEPS:-}"
+if [[ -n "$MAX_STEPS" && ( ! "$MAX_STEPS" =~ ^[1-9][0-9]*$ ) ]]; then
+    echo "MAX_STEPS must be a positive integer" >&2
+    exit 2
+fi
 if [[ -z "${OUTPUT_ROOT:-}" ]]; then
     if [[ "$PROMPT_MODE" == "oracle_unsatisfied_goal" ]]; then
         OUTPUT_ROOT="$REPO_ROOT/eval_results/oracle_unsatisfied_goal"
@@ -221,6 +226,9 @@ for task in "${TASKS[@]}"; do
     if [[ -n "$INSTANCE_INDICES" ]]; then
         # shellcheck disable=SC2086
         EVAL_ARGS+=(--instance-indices $INSTANCE_INDICES)
+    fi
+    if [[ -n "$MAX_STEPS" ]]; then
+        EVAL_ARGS+=(--max-steps "$MAX_STEPS")
     fi
     # This runs the eval interpreter directly instead of sourcing the env's
     # activation hook, so the hook's graphics environment has to be passed here:

@@ -7,8 +7,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/config.sh"
 cd "$REPO_ROOT"
 
-QUEUE="demand_general"
-QUEUE="${QUEUE:-demand_specific_na175_h20}"
+QUEUE="${QUEUE:-demand_general}"
 
 CLUSTER_FILE="${CLUSTER_FILE:-nebula/cluster.json}"
 ENTRY_FILE="${ENTRY_FILE:-nebula/train_pi05_two_tasks.py}"
@@ -20,16 +19,18 @@ if [[ "$WORKER_COUNT" != "1" ]]; then
     exit 2
 fi
 STAMP="$(date +%Y%m%d_%H%M%S)"
-EXP_NAME="${EXP_NAME:-pi05_b1k_2tasks_whole_s1_2ep_$STAMP}"
-JOB_NAME="${JOB_NAME:-pi05-2tasks-s1-2ep-$STAMP}"
+EXP_NAME="${EXP_NAME:-pi05_b1k_2tasks_joint_subtask_s1_117542_$STAMP}"
+JOB_NAME="${JOB_NAME:-pi05-joint-subtask-s1-$STAMP}"
 
 SOURCE_DATASET="${SOURCE_DATASET:-/data/oss_bucket_0/wangfaye/embodied/datasets/behavior-1k/behavior-1k_2026-challenge-demos_20260728235542}"
-LOCAL_DATASET="${LOCAL_DATASET:-/var/tmp/behavior-1k/two_tasks_whole_task_s1}"
+LOCAL_DATASET="${LOCAL_DATASET:-/var/tmp/behavior-1k/two_tasks_joint_subtask_s1}"
 ENV_ARCHIVE="${ENV_ARCHIVE:-/data/oss_bucket_0/wangfaye/conda_env/b1k-pi05.tar.gz}"
 ENV_PREFIX="${ENV_PREFIX:-/dev/shm/wangfaye/conda_envs/b1k-pi05}"
 OPENPI_CACHE_ARCHIVE="${OPENPI_CACHE_ARCHIVE:-/data/oss_bucket_0/wangfaye/conda_env/b1k-pi05-openpi-cache.tar}"
 OPENPI_DATA_HOME="${OPENPI_DATA_HOME:-/var/tmp/wangfaye/openpi-cache}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-/data/oss_bucket_0/wangfaye/result/behavior-challenge/pi05_two_tasks}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/data/oss_bucket_0/wangfaye/result/behavior-challenge/pi05_two_tasks_joint_subtask}"
+SUBTASK_SEGMENTS_SOURCE="${SUBTASK_SEGMENTS_SOURCE:-/data/oss_bucket_0/wangfaye/embodied/datasets/behavior-1k/annotations/subtasks/v1/subtask_segments.parquet}"
+SUBTASK_SEGMENTS_SHA256="${SUBTASK_SEGMENTS_SHA256:-870086137b5fac4ff8a701e6e539cdc99ee43d3efacb81028a2ae0b4f78fff2d}"
 
 if [[ ! -f "$OPENPI_CACHE_ARCHIVE" ]]; then
     echo "OpenPI cache archive not found: $OPENPI_CACHE_ARCHIVE" >&2
@@ -37,6 +38,14 @@ if [[ ! -f "$OPENPI_CACHE_ARCHIVE" ]]; then
 fi
 if (( $(stat -c %s "$OPENPI_CACHE_ARCHIVE") < 10 * 1024 * 1024 * 1024 )); then
     echo "OpenPI cache archive is unexpectedly small: $OPENPI_CACHE_ARCHIVE" >&2
+    exit 1
+fi
+if [[ ! -f "$SUBTASK_SEGMENTS_SOURCE" ]]; then
+    echo "Subtask annotation file not found: $SUBTASK_SEGMENTS_SOURCE" >&2
+    exit 1
+fi
+if [[ "$(sha256sum "$SUBTASK_SEGMENTS_SOURCE" | cut -d' ' -f1)" != "$SUBTASK_SEGMENTS_SHA256" ]]; then
+    echo "Subtask annotation checksum mismatch: $SUBTASK_SEGMENTS_SOURCE" >&2
     exit 1
 fi
 
@@ -106,7 +115,9 @@ mdl_args=(
     "--env=OPENPI_CACHE_ARCHIVE=$OPENPI_CACHE_ARCHIVE"
     "--env=OPENPI_DATA_HOME=$OPENPI_DATA_HOME"
     "--env=OUTPUT_ROOT=$OUTPUT_ROOT"
-    "--env=REPO_ID=b1k_two_tasks_whole_task_s1"
+    "--env=SUBTASK_SEGMENTS_SOURCE=$SUBTASK_SEGMENTS_SOURCE"
+    "--env=SUBTASK_SEGMENTS_SHA256=$SUBTASK_SEGMENTS_SHA256"
+    "--env=REPO_ID=b1k_two_tasks_joint_subtask_s1"
     "--env=EXP_NAME=$EXP_NAME"
     "--env=NUM_GPUS=8"
     "--env=CUDA_DEVICES=0,1,2,3,4,5,6,7"
@@ -118,6 +129,12 @@ mdl_args=(
     "--env=NORM_MAX_FRAMES=500000"
     "--env=FRAME_STRIDE=1"
     "--env=LR_DECAY_STEPS=117542"
+    "--env=SUBTASK_EMPTY_LABEL_POLICY=drop_episode"
+    "--env=MAX_TOKEN_LEN=512"
+    "--env=MAX_SUBTASK_LEN=64"
+    "--env=SUBTASK_LOSS_WEIGHT=1.0"
+    "--env=SUBTASK_LOSS_CHUNK_SIZE=8"
+    "--env=WHOLE_TASK_PROB=0"
 )
 
 if [[ -n "${GPU_CARD_TYPE:-}" ]]; then
@@ -134,11 +151,12 @@ printf 'QUEUE: %s\n' "$QUEUE"
 printf 'ENTRY_FILE: %s\n' "$ENTRY_FILE"
 printf 'SOURCE_DATASET: %s\n' "$SOURCE_DATASET"
 printf 'LOCAL_DATASET: %s\n' "$LOCAL_DATASET"
+printf 'SUBTASK_SEGMENTS: %s -> worker-local copy (sha256=%s)\n' "$SUBTASK_SEGMENTS_SOURCE" "$SUBTASK_SEGMENTS_SHA256"
 printf 'OPENPI_CACHE: %s -> %s\n' "$OPENPI_CACHE_ARCHIVE" "$OPENPI_DATA_HOME"
 printf 'OUTPUT_ROOT: %s\n' "$OUTPUT_ROOT"
 printf 'BUNDLE_DIR: %s\n' "$BUNDLE_DIR"
 printf 'BUNDLE_SIZE: %s\n' "$BUNDLE_SIZE"
-printf 'TRAINING: 2 tasks, 400 episodes, stride 1, 117542 steps, batch 64, 8 GPUs, no sub-task prompts\n'
+printf 'TRAINING: 2 tasks, 400 requested episodes with incomplete-label episodes dropped, joint task-to-subtask-to-action, stride 1, 117542 steps, batch 64, 8 GPUs\n'
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "DRY_RUN=1: submission skipped."

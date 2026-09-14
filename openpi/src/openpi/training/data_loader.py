@@ -524,8 +524,18 @@ class TorchDataLoader:
                 execute in the main process.
             seed: The seed to use for shuffling the data.
         """
-        if jax.process_count() > 1:
-            raise NotImplementedError("Data loading with multiple processes is not supported.")
+        if framework == "jax" and jax.process_count() > 1:
+            if sampler is not None:
+                raise ValueError("A custom sampler cannot be combined with JAX multi-process data loading.")
+            sampler = torch.utils.data.distributed.DistributedSampler(
+                typing.cast(torch.utils.data.Dataset, dataset),
+                num_replicas=jax.process_count(),
+                rank=jax.process_index(),
+                shuffle=shuffle,
+                seed=seed,
+                drop_last=True,
+            )
+            shuffle = False
 
         if len(dataset) < local_batch_size:
             raise ValueError(f"Local batch size ({local_batch_size}) is larger than the dataset size ({len(dataset)}).")
@@ -539,13 +549,15 @@ class TorchDataLoader:
                 jax.sharding.PartitionSpec("B"),
             )
         self._num_batches = num_batches
+        self._sampler = sampler
 
         mp_context = None
         if num_workers > 0:
             mp_context = multiprocessing.get_context("spawn")
 
         generator = torch.Generator()
-        generator.manual_seed(seed)
+        process_seed = seed + (jax.process_index() if framework == "jax" else 0)
+        generator.manual_seed(process_seed)
         self._data_loader = torch.utils.data.DataLoader(
             typing.cast(torch.utils.data.Dataset, dataset),
             batch_size=local_batch_size,
@@ -566,7 +578,10 @@ class TorchDataLoader:
 
     def __iter__(self):
         num_items = 0
+        epoch = 0
         while True:
+            if isinstance(self._sampler, torch.utils.data.distributed.DistributedSampler):
+                self._sampler.set_epoch(epoch)
             data_iter = iter(self._data_loader)
             while True:
                 if self._num_batches is not None and num_items >= self._num_batches:
@@ -581,6 +596,7 @@ class TorchDataLoader:
                     yield jax.tree.map(lambda x: jax.make_array_from_process_local_data(self._sharding, x), batch)
                 else:
                     yield jax.tree.map(torch.as_tensor, batch)
+            epoch += 1
 
 
 def _collate_fn(items):
