@@ -578,7 +578,7 @@ class RLDSDroidDataConfig(DataConfigFactory):
 class LeRobotDROIDDataConfig(DataConfigFactory):
     """
     Example data config for custom DROID dataset in LeRobot format.
-    To convert your custom DROID dataset (<10s of hours) to LeRobot format, see examples/droid/convert_droid_data_to_lerobot.py
+    To convert your custom DROID dataset (<10s of hours) to LeRobot format, see the DROID conversion example in upstream OpenPI
     """
 
     @override
@@ -955,7 +955,7 @@ _CONFIGS = [
     # Fine-tuning Aloha configs.
     #
     # This is a test config that is used to illustate how train on a custom LeRobot dataset.
-    # For instructions on how to convert and train on your own Aloha dataset see examples/aloha_real/README.md
+    # For instructions on how to convert and train on your own Aloha dataset see the ALOHA guide in upstream OpenPI
     TrainConfig(
         name="pi0_aloha_pen_uncap",
         model=pi0_config.Pi0Config(),
@@ -1085,7 +1085,7 @@ _CONFIGS = [
     TrainConfig(
         # This config is for fine-tuning pi05-DROID on a custom (smaller) DROID dataset.
         # Here, we use LeRobot data format (like for all other fine-tuning examples)
-        # To convert your custom DROID dataset (<10s of hours) to LeRobot format, see examples/droid/convert_droid_data_to_lerobot.py
+        # To convert your custom DROID dataset (<10s of hours) to LeRobot format, see the DROID conversion example in upstream OpenPI
         name="pi05_droid_finetune",
         model=pi0_config.Pi0Config(
             pi05=True,

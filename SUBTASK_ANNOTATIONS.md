@@ -14,8 +14,8 @@
 - 另有两个汇总表：`skill_summary.csv`（技能词表 + 统计）、`skill_type_summary.csv`（技能类型统计）。
 - 共约 **406,341 个技能片段**，**35 种技能**，3 大类型。
 
-> 重要：当前 π0.5 / GR00T 训练与推理**都没用**这些 sub-task，只喂了整任务级 prompt
-> （`prompt_from_task=True`，`tasks.jsonl` 每任务一句话）。见文末"如何接入"。
+> 本文保留标注结构和历史数据统计。当前 π0.5 已支持 subtask 联合训练与在线生成，
+> 请以 [subtask 训练与推理指南](docs/subtask_training.md) 为准。
 
 ---
 
@@ -89,22 +89,6 @@
 
 ---
 
-## 如何接入（sub-task 条件化）
-
-1. 把 `annotations/` 暂存本地。
-2. 遍历 20,000 个 json，按每段 `frame_duration` 把 `skill_description`（+ `manipulating_object_id` 物体名）
-   展开成一列 **per-frame 语言**（每帧对应"当前正在做的子任务"）。
-3. 训练/推理改喂当前 sub-task 而非整任务：
-   - π0.5：openpi 数据管线支持逐帧 `prompt`，改造主要在数据侧（生成 per-frame 语言列）；
-     这与 π0.5 本身的分层设计（高层预测 sub-task 语言、低层动作专家执行）一致。
-   - GR00T：`annotation.human.task_description` 改为逐帧 sub-task 文本。
-4. 推理时若无高层规划器，可先用固定/启发式子任务序列，或再训一个高层 sub-task 预测头。
-
-> 动机：当前把 ~5 分钟、约 10 个子步骤的长程任务当成"整任务→扁平动作"，模型分不清当前处于哪一步，
-> 与评估中观察到的"乱走 + 手臂几乎不动"相互印证（见 `EVAL_FINDINGS.md` / `EVAL_SUMMARY.md`）。
-
----
-
 ## 已实现的管线（2026-08-20）
 
 ### 对齐规则（已用真实数据验证）
@@ -122,7 +106,7 @@
 ### 生成脚本与产物
 
 ```bash
-/dev/shm/wangfaye/conda_envs/b1k-groot/bin/python scripts/gen_subtask_prompts.py \
+openpi/.venv/bin/python scripts/gen_subtask_prompts.py \
     --dataset /var/tmp/behavior-1k/2026-challenge-demos
 ```
 
@@ -141,34 +125,16 @@
 内存——多 dataloader worker 会各建一份直接 OOM。段表版 **1.95 MB / 1.04 秒**（约 340 倍提速），
 每个 worker 都能轻松持有。
 
-### openpi 侧接入
+### 当前训练与推理入口
 
-- 新增 `openpi/src/openpi/transforms.py::PromptFromSubtask`：持有
-  `episode_index -> (starts 数组, texts 列表)`，用 `np.searchsorted` 做区间查找；
-  未命中时**回退整任务 prompt**，训练不会因个别未标注帧崩掉。
-- `create_b1k_dataset` 在 `subtask_prompts_path` 有值时用它替换 `PromptFromLeRobotTask`。
-- 配置与 CLI 开关（已验证存在）：
-  ```
-  --data.subtask-prompts-path {None}|STR     # 段表路径，默认 None = 保持原整任务 prompt
-  --data.frame-stride INT                    # 帧步长采样，默认 1
-  ```
+联合训练保留完整任务作为输入，以 GT subtask 计算文本损失，并训练动作预测。
+推理时由模型先生成 subtask，再生成动作，无需输入 GT subtask。
 
-### 边界验证（episode 0，对应标注 `task-0000/episode_00000010.json`）
+- 数据预检：`bash scripts/train_pi05_subtask_b1k.sh check`。
+- 联合训练：`bash scripts/train_pi05_subtask_b1k.sh full`。
+- 闭环评测：设置 `SUBTASK_PREDICTION=1`，运行 `scripts/eval_b1k.sh`。
+- 联合训练默认以 `drop_episode` 过滤包含空标注的 episode；这与历史上仅替换 prompt、
+  缺标注时回退整任务的条件化训练不同。
 
-| 帧 | 查表结果 |
-| --- | --- |
-| 0, 264 | `move to radio` |
-| 265, 1161 | `pick up from radio to coffee table koagbh` |
-| 1162 | `press radio` |
-| 1434, 1955 | `place on radio to coffee table koagbh` |
-
-与标注段 `[0,265) [265,1162) [1162,1434) [1434,1776)` 逐帧吻合；1776→1955 为尾部继承。
-未知 episode 正确回退到整任务 prompt。
-
-### 待办
-
-1. **GR00T 侧注入**：把段表接到 `annotation.human.task_description`（逐帧改为当前子任务）。
-2. **闭环推理仍缺高层**：`openpi` 中搜不到任何 sub-task/high-level 机制，所以闭环时没有东西
-   产出"当前该做哪个子任务"。需要二选一：训练一个高层子任务预测头，或先用规则/脚本化子任务序列。
-3. 建议先做**开环验证**：用 GT 子任务喂入，量 `left_arm/right_arm` 的开环 L1 能否跑赢 `hold`，
-   再决定是否投入高层头的训练。
+完整参数、checkpoint 配置和标注预检说明见
+[当前指南](docs/subtask_training.md)。

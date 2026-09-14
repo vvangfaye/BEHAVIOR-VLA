@@ -7,19 +7,16 @@
 #
 #   ./scripts/bootstrap.sh                # all stages
 #   ./scripts/bootstrap.sh envs dataset   # only the named stages
-#   HF_TOKEN=hf_xxx ./scripts/bootstrap.sh models
+#   ./scripts/bootstrap.sh models
 #
 # Stages
 #   tools     uv tool install conda-pack (needed by pack_envs.sh)
-#   envs      build the b1k-pi05 / b1k-groot conda envs  (scripts/setup_envs.sh)
+#   envs      build the b1k-pi05 conda environment (scripts/setup_envs.sh)
 #   dataset   stage the 3 RGB cameras + parquet to local disk, strip depth keys,
 #             and regenerate openpi's task prompt registry
-#   models    download GR00T-N1.7-3B + Cosmos-Reason2-2B through the hf mirror
-#   relstats  precompute GR00T's relative-action statistics (parallel)
+#   models    download the π0.5 base checkpoint
 #
-# Not covered on purpose: the OmniGibson/Isaac Sim evaluation environment.
-# Isaac Sim needs a GPU with RT cores and glibc >= 2.33; this host has neither
-# (H20 is Hopper, glibc 2.32), so that stage belongs on the eval machine.
+# Prepare the simulator separately with scripts/setup_eval_env.sh on the eval host.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -29,9 +26,17 @@ SOURCE_DATASET="${SOURCE_DATASET:-/data/oss_bucket_0/wangfaye/embodied/datasets/
 LOCAL_DATASET="${LOCAL_DATASET:-/var/tmp/behavior-1k/2026-challenge-demos}"
 ENV_ROOT="${ENV_ROOT:-/dev/shm/wangfaye/conda_envs}"
 CACHE_ROOT="${PRETRAINED_CACHE_ROOT:-/mnt/workspace/wangfaye/cache}"
+OPENPI_CACHE_ROOT="${OPENPI_CACHE_ROOT:-${OPENPI_DATA_HOME:-$CACHE_ROOT/openpi}}"
 
 STAGES=("$@")
-[[ ${#STAGES[@]} -eq 0 ]] && STAGES=(tools envs dataset models relstats)
+[[ ${#STAGES[@]} -eq 0 ]] && STAGES=(tools envs dataset models)
+
+for stage in "${STAGES[@]}"; do
+    case "$stage" in
+        tools|envs|dataset|models) ;;
+        *) echo "Unknown stage: $stage (expected tools, envs, dataset, models)" >&2; exit 2 ;;
+    esac
+done
 
 has_stage() { local s; for s in "${STAGES[@]}"; do [[ "$s" == "$1" ]] && return 0; done; return 1; }
 log() { echo "[$(date '+%F %T')] $*"; }
@@ -69,34 +74,13 @@ fi
 
 if has_stage models; then
     log "stage: models"
-    if [[ -d "$CACHE_ROOT/huggingface/hub/models--nvidia--Cosmos-Reason2-2B" ]]; then
-        log "  GR00T + Cosmos already cached"
-    else
-        PRETRAINED_CACHE_ROOT="$CACHE_ROOT" ./scripts/download/download_groot_n17.sh
-    fi
-fi
-
-if has_stage relstats; then
-    log "stage: relstats"
-    if [[ -f "$LOCAL_DATASET/meta/relative_stats.json" ]]; then
-        log "  relative_stats.json present"
-    else
-        # r1pro's torso/left_arm/right_arm actions are relative to state, so GR00T
-        # needs these stats. Upstream computes them serially (~13 h) and only
-        # writes at the very end; this version fans out and saves per key.
-        ( cd Isaac-GR00T && HF_HUB_OFFLINE=1 CUDA_VISIBLE_DEVICES="" \
-            "$ENV_ROOT/b1k-groot/bin/python" ../scripts/gen_groot_rel_stats.py \
-                --dataset-path "$LOCAL_DATASET" \
-                --modality-config examples/b1k/r1pro.py \
-                --jobs "${JOBS:-64}" )
-    fi
+    OPENPI_CACHE_ROOT="$OPENPI_CACHE_ROOT" ./scripts/download/download_pi05_base.sh
 fi
 
 log "bootstrap done"
 echo
 echo "next:"
 echo "  train π0.5 : NUM_GPUS=8 CUDA_DEVICES=0,1,2,3,4,5,6,7 BATCH_SIZE=64 FSDP_DEVICES=8 \\"
+echo "               OPENPI_DATA_HOME=$OPENPI_CACHE_ROOT \\"
 echo "               DATASET_ROOT=$LOCAL_DATASET ./scripts/train_pi05_b1k.sh full"
-echo "  train GR00T: NUM_GPUS=8 CUDA_DEVICES=0,1,2,3,4,5,6,7 GLOBAL_BATCH_SIZE=128 \\"
-echo "               DATASET_PATH=$LOCAL_DATASET ./scripts/train_gr00t_b1k.sh full"
 echo "  pack envs  : ./scripts/pack_envs.sh"

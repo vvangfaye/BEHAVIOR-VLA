@@ -2,8 +2,8 @@
 """Aggregate closed-loop eval results written by eval_b1k.sh / eval_sweep.sh.
 
 Usage:
-    python scripts/summarize_closed_loop.py eval_results/g05/g05
-    python scripts/summarize_closed_loop.py eval_results/pi05_270k/pi05 eval_results/g05/g05
+    python scripts/summarize_closed_loop.py eval_results/pi05_subtask/pi05
+    python scripts/summarize_closed_loop.py eval_results/pi05_baseline/pi05 eval_results/pi05_subtask/pi05
     python scripts/summarize_closed_loop.py --paired A B   # only (task, instance) in both
 """
 import argparse

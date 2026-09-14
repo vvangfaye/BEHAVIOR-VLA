@@ -1,7 +1,0 @@
-trainer_state=/mnt/afs/visitor34/code/Isaac-GR00T/outputs/gr00t_b1k_convergence_20260730_044507/checkpoint-200/trainer_state.json
-loss_records=20
-first_window_mean=1.138000
-last_window_mean=1.105040
-relative_improvement=2.90%
-minimum_loss=1.064000
-convergence_check=INCONCLUSIVE

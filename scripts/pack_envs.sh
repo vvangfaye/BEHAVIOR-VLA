@@ -2,7 +2,7 @@
 # Pack the conda environments into relocatable tarballs via conda-pack.
 #
 # Usage:
-#   ./scripts/pack_envs.sh                   # pack b1k-pi05, b1k-eval, b1k-groot
+#   ./scripts/pack_envs.sh                   # pack b1k-pi05, b1k-eval
 #   ./scripts/pack_envs.sh b1k-eval          # pack a single env
 #   FORMAT=tar ./scripts/pack_envs.sh        # skip gzip when the CPU is busy
 #   OUT_DIR=/somewhere ./scripts/pack_envs.sh
@@ -22,8 +22,8 @@
 # are idempotent, and a tarball can predate later dependency fixes; for the eval
 # env it also rewrites the Vulkan/EGL manifests for the current GPU driver.
 #
-# openpi and gr00t are installed in editable mode, so the unpacked env still
-# reads their source from this repository path.
+# OpenPI is installed in editable mode; the unpacked environment still reads
+# its source from this repository path.
 set -euo pipefail
 
 ENV_ROOT="${ENV_ROOT:-/dev/shm/wangfaye/conda_envs}"
@@ -35,7 +35,7 @@ FORMAT="${FORMAT:-tar.gz}"
 
 ENVS=("$@")
 if [[ ${#ENVS[@]} -eq 0 ]]; then
-    ENVS=(b1k-pi05 b1k-eval b1k-groot b1k-g05)
+    ENVS=(b1k-pi05 b1k-eval)
 fi
 
 if ! command -v conda-pack >/dev/null 2>&1; then

@@ -24,6 +24,8 @@ venv/
 __pycache__/
 *.py[cod]
 .cache/
+.pytest_cache/
+.ruff_cache/
 .downloads/
 .hfd/
 .hf-shards/
@@ -35,3 +37,6 @@ __pycache__/
 wandb/
 .DS_Store
 **/.git.backup/
+
+# Generated experiment results; keep reusable code in scripts/.
+/experiments/

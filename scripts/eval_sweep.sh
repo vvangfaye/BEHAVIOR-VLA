@@ -6,7 +6,6 @@
 #   MODEL=pi05 ./scripts/eval_sweep.sh                      # all of scripts/b1k_tasks.txt
 #   MODEL=pi05 WORKERS=2 ./scripts/eval_sweep.sh
 #   MODEL=pi05 TASK_FILE=scripts/b1k_tasks_reduced.txt ./scripts/eval_sweep.sh
-#   MODEL=groot GROOT_CKPT=/path/checkpoint-50000 ./scripts/eval_sweep.sh
 #
 # Each worker owns two GPUs (policy server + simulator) and its own port, and
 # takes a disjoint slice of the task list, so workers never contend for a port,
@@ -19,7 +18,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODEL="${MODEL:?set MODEL=pi05 or MODEL=groot}"
+MODEL="${MODEL:-pi05}"
+[[ "$MODEL" == pi05 ]] || { echo "Only MODEL=pi05 is supported" >&2; exit 2; }
 TASK_FILE="${TASK_FILE:-$REPO_ROOT/scripts/b1k_tasks.txt}"
 WORKERS="${WORKERS:-4}"
 BASE_PORT="${BASE_PORT:-8000}"
@@ -30,10 +30,7 @@ case "$PROMPT_MODE" in
     whole_task|oracle_unsatisfied_goal) ;;
     *) echo "PROMPT_MODE must be whole_task or oracle_unsatisfied_goal" >&2; exit 2 ;;
 esac
-if [[ "$PROMPT_MODE" == "oracle_unsatisfied_goal" && "$MODEL" != "pi05" ]]; then
-    echo "oracle_unsatisfied_goal is currently supported only for MODEL=pi05" >&2
-    exit 2
-fi
+
 # Indices into the split's instance list. 5 of the 20 public_test instances
 # covers every task at a fifth of the cost.
 INSTANCE_INDICES="${INSTANCE_INDICES:-0 1 2 3 4}"
@@ -81,12 +78,7 @@ if (( WORKERS * GPUS_PER_WORKER > GPU_COUNT )); then
 fi
 
 mkdir -p "$LOG_DIR"
-case "$MODEL" in
-    pi05) CHECKPOINT="${PI05_CKPT:-$REPO_ROOT/openpi/outputs/checkpoints/pi05_b1k/pi05_b1k_full_20260803_162620/49999}" ;;
-    groot) CHECKPOINT="${GROOT_CKPT:-unset}" ;;
-    g05) CHECKPOINT="${G05_CKPT:-unset}" ;;
-    *) echo "MODEL must be pi05, groot or g05" >&2; exit 2 ;;
-esac
+CHECKPOINT="${PI05_CKPT:-$REPO_ROOT/openpi/outputs/checkpoints/pi05_b1k/pi05_b1k_full_20260803_162620/49999}"
 echo "sweeping $MODEL over ${#ALL_TASKS[@]} tasks / $TOTAL_ROLLOUTS rollouts with $WORKERS workers"
 echo "checkpoint: $CHECKPOINT"
 echo "prompt mode: $PROMPT_MODE"
