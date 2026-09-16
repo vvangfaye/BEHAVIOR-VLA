@@ -25,19 +25,33 @@ def initialize_checkpoint_dir(
     checkpoint_dir = epath.Path(checkpoint_dir).resolve()
     resuming = False
     if jax.process_count() > 1:
-        if overwrite or resume:
-            raise ValueError("Multi-process checkpoint initialization currently requires a new experiment directory.")
-        bootstrap_ok = np.zeros((), dtype=np.int32)
-        if jax.process_index() == 0:
-            try:
-                checkpoint_dir.mkdir(parents=True)
-                bootstrap_ok = np.ones((), dtype=np.int32)
-            except Exception:
-                logging.exception("Rank 0 failed to create checkpoint directory %s", checkpoint_dir)
-        status = int(multihost_utils.broadcast_one_to_all(bootstrap_ok))
-        if status != 1:
-            raise RuntimeError(f"Checkpoint bootstrap failed for {checkpoint_dir}.")
-        multihost_utils.sync_global_devices("openpi_checkpoint_bootstrap")
+        if overwrite:
+            raise ValueError("Multi-process checkpoint initialization does not support overwrite.")
+        exists = np.asarray(
+            multihost_utils.process_allgather(np.asarray(checkpoint_dir.exists(), dtype=np.int32))
+        ).reshape(-1)
+        if not np.all(exists == exists[0]):
+            raise RuntimeError(f"Processes disagree about checkpoint directory existence: {checkpoint_dir}.")
+        if resume:
+            if not bool(exists[0]):
+                raise FileNotFoundError(f"Cannot resume missing checkpoint directory: {checkpoint_dir}.")
+            resuming = True
+        else:
+            if bool(exists[0]):
+                raise FileExistsError(
+                    f"Checkpoint directory {checkpoint_dir} already exists. Use --resume to continue it."
+                )
+            bootstrap_ok = np.zeros((), dtype=np.int32)
+            if jax.process_index() == 0:
+                try:
+                    checkpoint_dir.mkdir(parents=True)
+                    bootstrap_ok = np.ones((), dtype=np.int32)
+                except Exception:
+                    logging.exception("Rank 0 failed to create checkpoint directory %s", checkpoint_dir)
+            status = int(multihost_utils.broadcast_one_to_all(bootstrap_ok))
+            if status != 1:
+                raise RuntimeError(f"Checkpoint bootstrap failed for {checkpoint_dir}.")
+            multihost_utils.sync_global_devices("openpi_checkpoint_bootstrap")
     else:
         if checkpoint_dir.exists():
             if overwrite:
@@ -69,10 +83,22 @@ def initialize_checkpoint_dir(
         ),
     )
 
+    checkpoint_steps = tuple(mngr.all_steps())
+    if jax.process_count() > 1:
+        latest_step = max(checkpoint_steps, default=-1)
+        latest_steps = np.asarray(
+            multihost_utils.process_allgather(np.asarray(latest_step, dtype=np.int64))
+        ).reshape(-1)
+        if not np.all(latest_steps == latest_steps[0]):
+            raise RuntimeError(
+                f"Processes disagree about the latest checkpoint in {checkpoint_dir}: {latest_steps.tolist()}."
+            )
+
     # Special case: the checkpoint directory exists and the user requests to resume training, but the training run did
-    # not get to the first checkpoint saved. In this case, we don't actually want the train script to try and restore a
-    # checkpoint, since it will fail.
-    if resuming and tuple(mngr.all_steps()) in [(), (0,)]:
+    # not get to the first checkpoint saved. A multi-process retry must fail instead of creating divergent fresh states.
+    if resuming and checkpoint_steps in [(), (0,)]:
+        if jax.process_count() > 1:
+            raise FileNotFoundError(f"No resumable checkpoint found in {checkpoint_dir}.")
         logging.info("Checkpoint directory exists, but does not contain any checkpoints. Aborting resume.")
         resuming = False
 

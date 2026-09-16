@@ -9,16 +9,50 @@ cd "$REPO_ROOT"
 
 QUEUE="${QUEUE:-aios_specific_nm125_l20}"
 GPU_CARD_TYPE="${GPU_CARD_TYPE:-l20}"
-CLUSTER_FILE="nebula/eval_cluster.json"
 ENTRY_FILE="nebula/eval_pi05.py"
-ALGO_NAME="${ALGO_NAME:-pytorch280}"
+ALGO_NAME="${ALGO_NAME:-pytorch2120}"
 AIHUB_MODEL_NAME="${AIHUB_MODEL_NAME:-behavior}"
+AI_HUB_CLI="${AI_HUB_CLI:-ai-hub-cli}"
 EVAL_PROFILE="${EVAL_PROFILE:-smoke}"
 case "$EVAL_PROFILE" in
-    smoke|reduced|full) ;;
-    *) echo "EVAL_PROFILE must be smoke, reduced, or full" >&2; exit 2 ;;
+    smoke|speed|two_tasks|reduced|full) ;;
+    *) echo "EVAL_PROFILE must be smoke, speed, two_tasks, reduced, or full" >&2; exit 2 ;;
 esac
+if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ]]; then
+    CLUSTER_FILE="${CLUSTER_FILE:-nebula/multihost_cluster_4gpu.json}"
+    EVAL_WORKERS="${EVAL_WORKERS:-4}"
+    BASE_PORT="${BASE_PORT:-8000}"
+    PI05_MEM_FRACTION="${PI05_MEM_FRACTION:-0.35}"
+    if [[ "$EVAL_PROFILE" == speed ]]; then
+        WRITE_VIDEO="${WRITE_VIDEO:-0}"
+        SPEED_TASK="${SPEED_TASK:-make_rose_centerpieces}"
+        INSTANCE_INDICES="${INSTANCE_INDICES:-0 1 2 3}"
+        SPEED_EXPECTED_INSTANCE_IDS="${SPEED_EXPECTED_INSTANCE_IDS:-301 302 303 304}"
+        MAX_STEPS="${MAX_STEPS:-100}"
+    else
+        WRITE_VIDEO="${WRITE_VIDEO:-1}"
+        SPEED_TASK=""
+        SPEED_EXPECTED_INSTANCE_IDS=""
+        INSTANCE_INDICES="${INSTANCE_INDICES:-0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19}"
+        NUM_ROLLOUTS="${NUM_ROLLOUTS:-3}"
+        MAX_STEPS="${MAX_STEPS:-}"
+    fi
+else
+    CLUSTER_FILE="${CLUSTER_FILE:-nebula/eval_cluster.json}"
+    EVAL_WORKERS="${EVAL_WORKERS:-1}"
+    BASE_PORT="${BASE_PORT:-8000}"
+    PI05_MEM_FRACTION="${PI05_MEM_FRACTION:-0.85}"
+    WRITE_VIDEO="${WRITE_VIDEO:-1}"
+    SPEED_TASK="${SPEED_TASK:-}"
+    SPEED_EXPECTED_INSTANCE_IDS="${SPEED_EXPECTED_INSTANCE_IDS:-}"
+fi
 CONFIRM_FULL="${CONFIRM_FULL:-0}"
+SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-1}"
+if [[ "$EVAL_PROFILE" == two_tasks ]]; then
+    MAX_FAILOVER_TIMES="${MAX_FAILOVER_TIMES:-3}"
+else
+    MAX_FAILOVER_TIMES="${MAX_FAILOVER_TIMES:-0}"
+fi
 if [[ "$EVAL_PROFILE" == full && "$CONFIRM_FULL" != 1 ]]; then
     echo "Full evaluation requires CONFIRM_FULL=1" >&2
     exit 2
@@ -34,19 +68,81 @@ EVAL_ENV_ARCHIVE="${EVAL_ENV_ARCHIVE:-/data/oss_bucket_0/wangfaye/conda_env/b1k-
 PI05_ENV_ARCHIVE="${PI05_ENV_ARCHIVE:-/data/oss_bucket_0/wangfaye/conda_env/b1k-pi05.tar.gz}"
 OPENPI_CACHE_ARCHIVE="${OPENPI_CACHE_ARCHIVE:-/data/oss_bucket_0/wangfaye/conda_env/b1k-pi05-openpi-cache.tar}"
 ASSET_ROOT="${ASSET_ROOT:-/data/oss_bucket_0/wangfaye/embodied/datasets/behavior-1k/eval-assets/v1}"
-CHECKPOINT_SOURCE="${CHECKPOINT_SOURCE:-/data/oss_bucket_0/wangfaye/result/behavior-challenge/pi05_two_tasks_joint_subtask/checkpoints/pi05_b1k/pi05_b1k_2tasks_joint_subtask_s1_117542_20260910_172411/117541}"
+if [[ "$EVAL_PROFILE" == two_tasks ]]; then
+    DEFAULT_CHECKPOINT_SOURCE="/data/oss_bucket_0/wangfaye/result/behavior-challenge/pi05_two_tasks_joint_subtask/staged_local_pi05_b1k_2tasks_joint_subtask_117541_20260915_151620"
+else
+    DEFAULT_CHECKPOINT_SOURCE="/data/oss_bucket_0/wangfaye/result/behavior-challenge/pi05_two_tasks_joint_subtask/checkpoints/pi05_b1k/pi05_b1k_2tasks_joint_subtask_s1_117542_20260910_172411/117541"
+fi
+CHECKPOINT_SOURCE="${CHECKPOINT_SOURCE:-$DEFAULT_CHECKPOINT_SOURCE}"
 PI05_REPO_ID="${PI05_REPO_ID:-b1k_two_tasks_joint_subtask_s1}"
 INSTANCE_INDICES="${INSTANCE_INDICES:-0 1 2 3 4}"
 NUM_ROLLOUTS="${NUM_ROLLOUTS:-1}"
 MAX_STEPS="${MAX_STEPS:-}"
 NEBULA_WORKER_DRY_RUN="${NEBULA_WORKER_DRY_RUN:-0}"
 KEEP_RUNTIME="${KEEP_RUNTIME:-0}"
+[[ "$EVAL_WORKERS" =~ ^[1-9][0-9]*$ ]] || { echo "EVAL_WORKERS must be a positive integer" >&2; exit 2; }
+[[ "$NUM_ROLLOUTS" =~ ^[1-9][0-9]*$ ]] || { echo "NUM_ROLLOUTS must be a positive integer" >&2; exit 2; }
+[[ "$BASE_PORT" =~ ^[1-9][0-9]*$ ]] || { echo "BASE_PORT must be a positive integer" >&2; exit 2; }
+[[ "$MAX_FAILOVER_TIMES" =~ ^[0-9]+$ ]] || { echo "MAX_FAILOVER_TIMES must be a non-negative integer" >&2; exit 2; }
+[[ "$WRITE_VIDEO" == 0 || "$WRITE_VIDEO" == 1 ]] || { echo "WRITE_VIDEO must be 0 or 1" >&2; exit 2; }
+[[ "$SUBTASK_PREDICTION" == 0 || "$SUBTASK_PREDICTION" == 1 ]] || { echo "SUBTASK_PREDICTION must be 0 or 1" >&2; exit 2; }
+[[ "$PI05_MEM_FRACTION" =~ ^0\.[0-9]+$ ]] || { echo "PI05_MEM_FRACTION must be between 0 and 1" >&2; exit 2; }
+if [[ "$EVAL_PROFILE" == speed ]]; then
+    (( EVAL_WORKERS == 4 )) || { echo "speed profile requires EVAL_WORKERS=4" >&2; exit 2; }
+    (( NUM_ROLLOUTS == 1 )) || { echo "speed profile requires NUM_ROLLOUTS=1" >&2; exit 2; }
+    read -ra speed_indices <<< "$INSTANCE_INDICES"
+    read -ra speed_instance_ids <<< "$SPEED_EXPECTED_INSTANCE_IDS"
+    (( ${#speed_indices[@]} == EVAL_WORKERS && ${#speed_instance_ids[@]} == EVAL_WORKERS )) || {
+        echo "speed profile requires four indices and four expected instance IDs" >&2
+        exit 2
+    }
+    [[ "$(printf '%s\n' "${speed_indices[@]}" | sort -u | grep -c .)" == "$EVAL_WORKERS" ]] || {
+        echo "speed profile instance indices must be unique" >&2
+        exit 2
+    }
+    [[ "$(printf '%s\n' "${speed_instance_ids[@]}" | sort -u | grep -c .)" == "$EVAL_WORKERS" ]] || {
+        echo "speed profile expected instance IDs must be unique" >&2
+        exit 2
+    }
+    [[ "${speed_indices[*]}" == "0 1 2 3" ]] || {
+        echo "speed profile requires INSTANCE_INDICES='0 1 2 3'" >&2
+        exit 2
+    }
+    [[ "${speed_instance_ids[*]}" == "301 302 303 304" ]] || {
+        echo "speed profile requires SPEED_EXPECTED_INSTANCE_IDS='301 302 303 304'" >&2
+        exit 2
+    }
+elif [[ "$EVAL_PROFILE" == two_tasks ]]; then
+    (( EVAL_WORKERS == 4 )) || { echo "two_tasks profile requires EVAL_WORKERS=4" >&2; exit 2; }
+    (( NUM_ROLLOUTS == 3 )) || { echo "two_tasks profile requires NUM_ROLLOUTS=3" >&2; exit 2; }
+    [[ "$WRITE_VIDEO" == 1 ]] || { echo "two_tasks profile requires WRITE_VIDEO=1" >&2; exit 2; }
+    [[ -z "$MAX_STEPS" ]] || { echo "two_tasks profile requires a full task timeout" >&2; exit 2; }
+    read -ra two_task_indices <<< "$INSTANCE_INDICES"
+    (( ${#two_task_indices[@]} == 20 )) || {
+        echo "two_tasks profile requires all 20 public instance indices" >&2
+        exit 2
+    }
+    [[ "${two_task_indices[*]}" == "0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19" ]] || {
+        echo "two_tasks profile requires INSTANCE_INDICES='0 1 ... 19'" >&2
+        exit 2
+    }
+fi
 
 for path in "$EVAL_ENV_ARCHIVE" "$PI05_ENV_ARCHIVE" "$OPENPI_CACHE_ARCHIVE" \
     "$ASSET_ROOT/SHA256SUMS" "$CHECKPOINT_SOURCE/params/_METADATA" \
     "$CHECKPOINT_SOURCE/assets/$PI05_REPO_ID/norm_stats.json"; do
     [[ -s "$path" ]] || { echo "Required input missing or empty: $path" >&2; exit 1; }
 done
+if [[ "$EVAL_PROFILE" == two_tasks ]]; then
+    for path in "$CHECKPOINT_SOURCE/_CHECKPOINT_METADATA" \
+        "$CHECKPOINT_SOURCE/SHA256SUMS.inference" "$CHECKPOINT_SOURCE/_READY"; do
+        [[ -s "$path" ]] || { echo "Staged checkpoint input missing or empty: $path" >&2; exit 1; }
+    done
+    (
+        cd "$CHECKPOINT_SOURCE"
+        sha256sum -c SHA256SUMS.inference
+    )
+fi
 (
     cd "$ASSET_ROOT"
     sha256sum -c SHA256SUMS
@@ -73,6 +169,7 @@ mkdir -p \
     "$BUNDLE_DIR/openpi/scripts/b1k" \
     "$BUNDLE_DIR/BEHAVIOR-1K/OmniGibson" \
     "$BUNDLE_DIR/BEHAVIOR-1K/bddl3" \
+    "$BUNDLE_DIR/BEHAVIOR-1K/docs/assets" \
     "$BUNDLE_DIR/BEHAVIOR-1K/joylo" \
     "$BUNDLE_DIR/scripts" \
     "$BUNDLE_DIR/nebula"
@@ -80,6 +177,7 @@ cp -a "$REPO_ROOT/openpi/src" "$BUNDLE_DIR/openpi/"
 cp -a "$REPO_ROOT/openpi/packages/openpi-client/src" "$BUNDLE_DIR/openpi/packages/openpi-client/"
 cp -a "$REPO_ROOT/openpi/scripts/b1k/serve_b1k.py" "$BUNDLE_DIR/openpi/scripts/b1k/"
 cp -a "$REPO_ROOT/BEHAVIOR-1K/OmniGibson/omnigibson" "$BUNDLE_DIR/BEHAVIOR-1K/OmniGibson/"
+cp -a "$REPO_ROOT/BEHAVIOR-1K/docs/assets/OmniGibson_logo.png" "$BUNDLE_DIR/BEHAVIOR-1K/docs/assets/"
 cp -a "$REPO_ROOT/BEHAVIOR-1K/bddl3/bddl" "$BUNDLE_DIR/BEHAVIOR-1K/bddl3/"
 cp -a "$REPO_ROOT/BEHAVIOR-1K/joylo/gello" "$BUNDLE_DIR/BEHAVIOR-1K/joylo/"
 cp -a \
@@ -88,11 +186,11 @@ cp -a \
     "$REPO_ROOT/scripts/b1k_tasks_reduced.txt" \
     "$BUNDLE_DIR/scripts/"
 cp -a \
-    "$REPO_ROOT/nebula/eval_cluster.json" \
     "$REPO_ROOT/nebula/eval_pi05.py" \
     "$REPO_ROOT/nebula/eval_pi05_worker.sh" \
     "$REPO_ROOT/nebula/summarize_pi05_eval.py" \
     "$BUNDLE_DIR/nebula/"
+cp -a "$REPO_ROOT/$CLUSTER_FILE" "$BUNDLE_DIR/$CLUSTER_FILE"
 find "$BUNDLE_DIR" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$BUNDLE_DIR" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 
@@ -110,6 +208,13 @@ write_setting() { printf 'export %s=%q\n' "$1" "$2"; }
     write_setting INSTANCE_INDICES "$INSTANCE_INDICES"
     write_setting NUM_ROLLOUTS "$NUM_ROLLOUTS"
     write_setting MAX_STEPS "$MAX_STEPS"
+    write_setting EVAL_WORKERS "$EVAL_WORKERS"
+    write_setting BASE_PORT "$BASE_PORT"
+    write_setting PI05_MEM_FRACTION "$PI05_MEM_FRACTION"
+    write_setting WRITE_VIDEO "$WRITE_VIDEO"
+    write_setting SUBTASK_PREDICTION "$SUBTASK_PREDICTION"
+    write_setting SPEED_TASK "$SPEED_TASK"
+    write_setting SPEED_EXPECTED_INSTANCE_IDS "$SPEED_EXPECTED_INSTANCE_IDS"
     write_setting PERSISTENT_OUTPUT "$PERSISTENT_OUTPUT"
     write_setting NEBULA_WORKER_DRY_RUN "$NEBULA_WORKER_DRY_RUN"
     write_setting KEEP_RUNTIME "$KEEP_RUNTIME"
@@ -123,20 +228,51 @@ printf 'JOB_NAME: %s\n' "$JOB_NAME"
 printf 'RUN_ID: %s\n' "$RUN_ID"
 printf 'QUEUE: %s (%s)\n' "$QUEUE" "$GPU_CARD_TYPE"
 printf 'PROFILE: %s\n' "$EVAL_PROFILE"
+printf 'CLUSTER: %s\n' "$CLUSTER_FILE"
+printf 'SUBTASK_PREDICTION: %s\n' "$SUBTASK_PREDICTION"
+printf 'MAX_FAILOVER_TIMES: %s\n' "$MAX_FAILOVER_TIMES"
 printf 'CHECKPOINT: %s\n' "$CHECKPOINT_SOURCE"
 printf 'EVAL_ENV: %s\n' "$EVAL_ENV_ARCHIVE"
 printf 'ASSETS: %s\n' "$ASSET_ROOT"
 printf 'OUTPUT: %s\n' "$PERSISTENT_OUTPUT"
 printf 'BUNDLE: %s (%s)\n' "$BUNDLE_DIR" "$BUNDLE_SIZE"
-printf 'GPU MAP: policy=0 simulator=1\n'
+if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ]]; then
+    TWO_TASK_SHARDS=("0 4 8 12 16" "1 5 9 13 17" "2 6 10 14 18" "3 7 11 15 19")
+    for (( worker = 0; worker < EVAL_WORKERS; worker++ )); do
+        if [[ "$EVAL_PROFILE" == two_tasks ]]; then
+            printf 'WORKER %d: tasks=carrying_in_groceries,make_rose_centerpieces indices=[%s] rollouts=30 gpu=%d port=%d\n' \
+                "$worker" "${TWO_TASK_SHARDS[worker]}" "$worker" "$((BASE_PORT + worker))"
+        else
+            printf 'WORKER %d: policy=%d simulator=%d port=%d\n' \
+                "$worker" "$worker" "$worker" "$((BASE_PORT + worker))"
+        fi
+    done
+else
+    printf 'GPU MAP: policy=0 simulator=1\n'
+fi
 
 if [[ "${DRY_RUN:-0}" == 1 ]]; then
     echo "DRY_RUN=1: submission skipped."
     exit 0
 fi
 
+command -v "$AI_HUB_CLI" >/dev/null 2>&1 || {
+    echo "AIHub CLI not found: $AI_HUB_CLI" >&2
+    exit 1
+}
+RECEIPT_ROOT="${RECEIPT_ROOT:-$OUTPUT_BASE/.submission_receipts}"
+umask 077
+mkdir -p "$RECEIPT_ROOT"
+RECEIPT_PATH="$RECEIPT_ROOT/$RUN_ID.json"
+CLI_OUTPUT_PATH="$RECEIPT_ROOT/$RUN_ID.stdout.log"
+[[ ! -e "$RECEIPT_PATH" && ! -e "$CLI_OUTPUT_PATH" ]] || {
+    echo "Submission receipt already exists for run: $RUN_ID" >&2
+    exit 1
+}
+
 cd "$BUNDLE_DIR"
-ai-hub-cli train mdl \
+set +e
+"$AI_HUB_CLI" train mdl \
     "--token=$AI_HUB_TOKEN" \
     "--namespace=$AI_HUB_NAMESPACE" \
     "--name=$AIHUB_MODEL_NAME" \
@@ -152,5 +288,48 @@ ai-hub-cli train mdl \
     "--algo_name=$ALGO_NAME" \
     "--gpu_card_type=$GPU_CARD_TYPE" \
     "--oss_appendable=true" \
+    "--max_failover_times=$MAX_FAILOVER_TIMES" \
     "--debug_mode" \
-    "--ignore=__pycache__,*.pyc,*.pyo"
+    "--ignore=__pycache__,*.pyc,*.pyo" 2>&1 | tee "$CLI_OUTPUT_PATH"
+submit_status=${PIPESTATUS[0]}
+set -e
+python3 - "$CLI_OUTPUT_PATH" "$RECEIPT_PATH" "$RUN_ID" "$JOB_NAME" \
+    "$EVAL_PROFILE" "$PERSISTENT_OUTPUT" "$submit_status" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+output_path, receipt_path, run_id, job_name, profile, persistent_output, exit_code = sys.argv[1:]
+text = Path(output_path).read_text(errors="replace")
+identifiers = set()
+urls = set(re.findall(r"https?://[^\s<>\"']+", text))
+for line in text.splitlines():
+    try:
+        value = json.loads(line)
+    except json.JSONDecodeError:
+        value = None
+    if isinstance(value, dict):
+        for key in ("job_id", "jobId", "task_id", "taskId", "instance_id", "instanceId"):
+            if value.get(key) is not None:
+                identifiers.add(str(value[key]))
+    for match in re.finditer(
+        r"(?i)\b(?:job|task|instance)[_ -]?id\s*[:=]\s*([A-Za-z0-9][A-Za-z0-9._:-]*)",
+        line,
+    ):
+        identifiers.add(match.group(1))
+receipt = {
+    "run_id": run_id,
+    "job_name": job_name,
+    "profile": profile,
+    "persistent_output": persistent_output,
+    "exit_code": int(exit_code),
+    "job_identifiers": sorted(identifiers),
+    "urls": sorted(urls),
+    "stdout_stderr": output_path,
+}
+Path(receipt_path).write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+PY
+printf 'Submission receipt: %s\n' "$RECEIPT_PATH"
+printf 'Submission output: %s\n' "$CLI_OUTPUT_PATH"
+exit "$submit_status"

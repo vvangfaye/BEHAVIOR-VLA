@@ -448,6 +448,28 @@ def main(config: _config.TrainConfig):
         shuffle=True,
         skip_norm_stats=False,
     )
+    expected_batches = os.environ.get("OPENPI_EXPECTED_BATCHES_PER_EPOCH")
+    if expected_batches is not None and data_loader.batches_per_epoch != int(expected_batches):
+        raise RuntimeError(
+            f"Data loader has {data_loader.batches_per_epoch} batches per epoch, expected {expected_batches}."
+        )
+    expected_epochs = os.environ.get("OPENPI_TRAIN_EPOCHS")
+    if expected_epochs is not None:
+        expected_steps = int(expected_epochs) * data_loader.batches_per_epoch
+        if config.num_train_steps != expected_steps:
+            raise RuntimeError(f"Training has {config.num_train_steps} steps, expected {expected_steps} for exact epochs.")
+
+    train_state, train_state_sharding = init_train_state(config, init_rng, mesh, resume=resuming)
+    jax.block_until_ready(train_state)
+    logging.info(f"Initialized train state:\n{training_utils.array_tree_to_info(train_state.params)}")
+
+    if resuming:
+        train_state = _checkpoints.restore_state(checkpoint_manager, train_state, data_loader)
+        jax.block_until_ready(train_state)
+
+    start_step = int(train_state.step)
+    if resuming:
+        data_loader.set_start_batch(start_step)
     data_iter = iter(data_loader)
     batch = next(data_iter)
     logging.info(f"Initialized data loader:\n{training_utils.array_tree_to_info(batch)}")
@@ -459,13 +481,6 @@ def main(config: _config.TrainConfig):
         ]
         wandb.log({"camera_views": images_to_log}, step=0)
 
-    train_state, train_state_sharding = init_train_state(config, init_rng, mesh, resume=resuming)
-    jax.block_until_ready(train_state)
-    logging.info(f"Initialized train state:\n{training_utils.array_tree_to_info(train_state.params)}")
-
-    if resuming:
-        train_state = _checkpoints.restore_state(checkpoint_manager, train_state, data_loader)
-
     ptrain_step = jax.jit(
         functools.partial(train_step, config),
         in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
@@ -473,7 +488,6 @@ def main(config: _config.TrainConfig):
         donate_argnums=(1,),
     )
 
-    start_step = int(train_state.step)
     step_range = range(start_step, config.num_train_steps)
     pbar = (
         tqdm.tqdm(step_range, initial=start_step, total=config.num_train_steps, dynamic_ncols=True)
@@ -537,7 +551,10 @@ def main(config: _config.TrainConfig):
             path.write_text(
                 json.dumps(
                     {
+                        "batches_per_epoch": data_loader.batches_per_epoch,
                         "checkpoint_dir": str(config.checkpoint_dir),
+                        "contract_sha256": os.environ.get("OPENPI_TRAINING_CONTRACT_SHA256"),
+                        "epochs": int(expected_epochs) if expected_epochs is not None else None,
                         "global_devices": jax.device_count(),
                         "mesh": dict(mesh.shape),
                         "processes": jax.process_count(),

@@ -1,7 +1,9 @@
 """Check BEHAVIOR subtask coverage and token budgets without loading videos or model weights."""
 
 import argparse
+import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Literal
 
@@ -13,17 +15,40 @@ from openpi.models.tokenizer import PaligemmaTokenizer
 from openpi.training.subtask_data import SubtaskFromSegments
 
 
-def episode_lengths(root: Path) -> dict[int, int]:
+def episode_metadata(root: Path) -> tuple[dict[int, int], dict[int, int]]:
     lengths = {}
+    task_indices = {}
     for path in sorted((root / "meta" / "episodes").glob("chunk-*/*.parquet")):
-        for row in pq.read_table(path, columns=["episode_index", "length"]).to_pylist():
+        schema_names = pq.read_schema(path).names
+        columns = ["episode_index", "length"]
+        if "task_index" in schema_names:
+            columns.append("task_index")
+        for row in pq.read_table(path, columns=columns).to_pylist():
             ep, length = int(row["episode_index"]), int(row["length"])
             if ep in lengths:
                 raise ValueError(f"Duplicate episode_index={ep} in episode metadata.")
             lengths[ep] = length
+            if "task_index" in row:
+                task_indices[ep] = int(row["task_index"])
     if not lengths:
         raise ValueError(f"No LeRobot v3 episode metadata found under {root / 'meta' / 'episodes'}.")
-    return lengths
+    return lengths, task_indices
+
+
+def episode_lengths(root: Path) -> dict[int, int]:
+    return episode_metadata(root)[0]
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _episode_list_sha256(episodes: list[int]) -> str:
+    return hashlib.sha256("".join(f"{episode}\n" for episode in episodes).encode()).hexdigest()
 
 
 def task_texts(root: Path) -> set[str]:
@@ -58,13 +83,19 @@ def check_dataset(
     max_token_len: int = 512,
     max_subtask_len: int = 64,
     empty_label_policy: Literal["error", "drop_episode"] = "error",
+    frame_stride: int = 1,
+    global_batch_size: int | None = None,
+    process_count: int = 1,
+    epochs: int | None = None,
+    expected_tasks: int | None = None,
 ) -> dict:
-    lengths = episode_lengths(dataset_root)
+    lengths, task_indices = episode_metadata(dataset_root)
     if episodes_index is not None:
         unknown = set(episodes_index) - lengths.keys()
         if unknown:
             raise ValueError(f"Unknown selected episode ids: {sorted(unknown)[:10]}")
         lengths = {ep: lengths[ep] for ep in episodes_index}
+        task_indices = {ep: task_indices[ep] for ep in episodes_index if ep in task_indices}
     requested_lengths = lengths.copy()
     labels = SubtaskFromSegments.from_parquet(
         segments_path, episodes_index=list(lengths), empty_label_policy=empty_label_policy
@@ -74,7 +105,27 @@ def check_dataset(
         raise ValueError(
             f"No episodes remain after dropping {len(labels.dropped_episodes)} episodes with empty subtask labels."
         )
+    if frame_stride < 1:
+        raise ValueError("frame_stride must be positive.")
+    if process_count < 1:
+        raise ValueError("process_count must be positive.")
+    if epochs is not None and epochs < 1:
+        raise ValueError("epochs must be positive.")
+    if global_batch_size is None and epochs is not None:
+        raise ValueError("global_batch_size is required when epochs is set.")
+    if global_batch_size is not None:
+        if global_batch_size < 1 or global_batch_size % process_count:
+            raise ValueError("global_batch_size must be positive and divisible by process_count.")
+
     labels.validate_coverage(lengths)
+    selected_episodes = list(lengths)
+    retained_task_indices = sorted({task_indices[ep] for ep in selected_episodes if ep in task_indices})
+    if expected_tasks is not None:
+        if len(task_indices) != len(requested_lengths):
+            raise ValueError("Episode metadata must include task_index when expected_tasks is set.")
+        if len(retained_task_indices) != expected_tasks:
+            raise ValueError(f"Expected {expected_tasks} retained tasks, found {len(retained_task_indices)}.")
+
     instructions = task_texts(dataset_root)
     vocabulary = {text for ep in lengths for text in labels.segments[ep][2]}
     robot_config = ROBOT_REGISTRY[robot]
@@ -84,20 +135,49 @@ def check_dataset(
     state = np.ones(state_dim, dtype=np.float32)
     tokenizer = PaligemmaTokenizer(max_token_len)
     longest_task = max(instructions, key=lambda text: tokenizer.subtask_token_lengths(text, "x", state)[0])
-    longest_label = max(vocabulary, key=lambda text: tokenizer.subtask_token_lengths("x", text)[1])
+    longest_label = max(vocabulary, key=lambda text: tokenizer.subtask_token_lengths("x", text, state)[1])
     prefix_len, label_len, cue_len = tokenizer.subtask_token_lengths(longest_task, longest_label, state)
     # Calls the same strict validation used in the training data transform.
     tokenizer.tokenize_subtask_training(longest_task, longest_label, state, max_subtask_len=max_subtask_len)
     # The same checkpoint must have room for the configured generation budget,
     # even when the longest label observed during training is shorter.
     tokenizer.tokenize_subtask_prefix(longest_task, state, max_subtask_len=max_subtask_len)
+
+    frames = sum(lengths.values())
+    strided_samples = math.ceil(frames / frame_stride)
+    contract = {
+        "annotation_sha256": _sha256(segments_path),
+        "episode_list_sha256": _episode_list_sha256(selected_episodes),
+        "frame_stride": frame_stride,
+        "process_count": process_count,
+        "retained_episodes": len(selected_episodes),
+        "retained_frames": frames,
+        "retained_tasks": len(retained_task_indices),
+        "strided_samples": strided_samples,
+    }
+    if global_batch_size is not None:
+        local_batch_size = global_batch_size // process_count
+        samples_per_process = strided_samples // process_count
+        batches_per_epoch = samples_per_process // local_batch_size
+        contract.update(
+            global_batch_size=global_batch_size,
+            local_batch_size=local_batch_size,
+            samples_per_process=samples_per_process,
+            batches_per_epoch=batches_per_epoch,
+            dropped_samples_per_epoch=strided_samples - batches_per_epoch * global_batch_size,
+        )
+        if epochs is not None:
+            contract.update(epochs=epochs, train_steps=epochs * batches_per_epoch)
+    contract_sha256 = hashlib.sha256(json.dumps(contract, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
     return {
         "dataset_root": str(dataset_root.resolve()),
         "segments_path": str(segments_path.resolve()),
         "empty_label_policy": empty_label_policy,
         "requested_episodes": len(requested_lengths),
         "requested_frames": sum(requested_lengths.values()),
-        "selected_episode_indices": list(lengths),
+        "selected_episode_indices": selected_episodes,
+        "selected_episode_indices_sha256": contract["episode_list_sha256"],
         "dropped_episode_indices": sorted(labels.dropped_episodes),
         "dropped_episode_frames": sum(requested_lengths[ep] for ep in labels.dropped_episodes),
         "empty_label_segments": sum(len(intervals) for intervals in labels.dropped_episodes.values()),
@@ -106,7 +186,9 @@ def check_dataset(
             for ep, intervals in sorted(labels.dropped_episodes.items())
         ],
         "episodes": len(lengths),
-        "frames": sum(lengths.values()),
+        "frames": frames,
+        "retained_task_indices": retained_task_indices,
+        "tasks": len(retained_task_indices),
         "segments": sum(len(labels.segments[ep][0]) for ep in lengths),
         "unique_subtasks": len(vocabulary),
         "state_dim": state_dim,
@@ -117,6 +199,8 @@ def check_dataset(
         "generation_sequence_budget": prefix_len + max_subtask_len + cue_len,
         "max_token_len": max_token_len,
         "max_subtask_len": max_subtask_len,
+        "training_contract": contract,
+        "training_contract_sha256": contract_sha256,
         "status": "passed",
     }
 
@@ -130,6 +214,11 @@ def main():
     parser.add_argument("--max-token-len", type=int, default=512)
     parser.add_argument("--max-subtask-len", type=int, default=64)
     parser.add_argument("--empty-label-policy", choices=("error", "drop_episode"), default="error")
+    parser.add_argument("--frame-stride", type=int, default=1)
+    parser.add_argument("--global-batch-size", type=int)
+    parser.add_argument("--process-count", type=int, default=1)
+    parser.add_argument("--epochs", type=int)
+    parser.add_argument("--expected-tasks", type=int)
     parser.add_argument("--report-file", type=Path)
     parser.add_argument(
         "--write-episodes-file", type=Path, help="Write the validated original episode IDs for training."
@@ -143,6 +232,11 @@ def main():
         max_token_len=args.max_token_len,
         max_subtask_len=args.max_subtask_len,
         empty_label_policy=args.empty_label_policy,
+        frame_stride=args.frame_stride,
+        global_batch_size=args.global_batch_size,
+        process_count=args.process_count,
+        epochs=args.epochs,
+        expected_tasks=args.expected_tasks,
     )
     text = json.dumps(report, ensure_ascii=False, indent=2)
     if args.report_file:

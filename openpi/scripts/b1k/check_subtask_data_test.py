@@ -134,6 +134,63 @@ def test_cli_writes_exact_validated_ids_for_training(tmp_path, monkeypatch, toke
     labels.validate_coverage({42: 10})
 
 
+def test_training_contract_matches_distributed_drop_last(tmp_path, monkeypatch, tokenizer):
+    segments = _dataset_with_empty_labels(tmp_path)
+    episode_file = next((tmp_path / "meta" / "episodes").glob("chunk-*/*.parquet"))
+    table = pq.read_table(episode_file)
+    pq.write_table(table.append_column("task_index", pa.array([0, 0, 1])), episode_file)
+    tokenizer._max_len = 512
+    monkeypatch.setattr(check_subtask_data, "PaligemmaTokenizer", lambda max_len: tokenizer)
+
+    report = check_subtask_data.check_dataset(
+        tmp_path,
+        segments,
+        empty_label_policy="drop_episode",
+        frame_stride=1,
+        global_batch_size=4,
+        process_count=2,
+        epochs=2,
+        expected_tasks=1,
+    )
+
+    assert report["selected_episode_indices"] == [42]
+    assert report["tasks"] == 1
+    assert report["selected_episode_indices_sha256"] == check_subtask_data._episode_list_sha256([42])
+    assert report["training_contract"] == {
+        "annotation_sha256": check_subtask_data._sha256(segments),
+        "episode_list_sha256": check_subtask_data._episode_list_sha256([42]),
+        "frame_stride": 1,
+        "process_count": 2,
+        "retained_episodes": 1,
+        "retained_frames": 10,
+        "retained_tasks": 1,
+        "strided_samples": 10,
+        "global_batch_size": 4,
+        "local_batch_size": 2,
+        "samples_per_process": 5,
+        "batches_per_epoch": 2,
+        "dropped_samples_per_epoch": 2,
+        "epochs": 2,
+        "train_steps": 4,
+    }
+    assert len(report["training_contract_sha256"]) == 64
+
+
+def test_training_contract_rejects_invalid_topology(tmp_path, monkeypatch, tokenizer):
+    segments = _dataset_with_empty_labels(tmp_path)
+    tokenizer._max_len = 512
+    monkeypatch.setattr(check_subtask_data, "PaligemmaTokenizer", lambda max_len: tokenizer)
+    with pytest.raises(ValueError, match="divisible by process_count"):
+        check_subtask_data.check_dataset(
+            tmp_path,
+            segments,
+            episodes_index=[42],
+            global_batch_size=3,
+            process_count=2,
+            epochs=2,
+        )
+
+
 @pytest.mark.parametrize(("mode", "policy"), [("full", "drop_episode"), ("check", "drop_episode"), ("full", "error")])
 def test_launcher_propagates_preflight_subset_to_norm_stats_and_trainer(tmp_path, tokenizer, mode, policy):
     """Run the real shell + preflight; record heavy norm/train invocations instead of running them."""

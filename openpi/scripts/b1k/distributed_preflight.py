@@ -13,9 +13,20 @@ from openpi.training import sharding
 
 
 def main() -> None:
+    expected_process_count = int(os.environ.get("PROCESS_COUNT", "1"))
+    expected_local_devices = int(os.environ.get("EXPECTED_LOCAL_DEVICES", "8"))
+    expected_global_devices = int(os.environ.get("EXPECTED_GLOBAL_DEVICES", str(expected_local_devices)))
     config = distributed.initialize_from_env()
-    if config is None:
-        raise RuntimeError("Distributed preflight requires OPENPI_PROCESS_COUNT.")
+    if config is None and expected_process_count != 1:
+        raise RuntimeError("Multi-worker preflight requires OPENPI_PROCESS_COUNT.")
+    if jax.process_count() != expected_process_count:
+        raise RuntimeError(f"Process count mismatch: got {jax.process_count()}, expected {expected_process_count}.")
+    if jax.local_device_count() != expected_local_devices:
+        raise RuntimeError(f"Local device mismatch: got {jax.local_device_count()}, expected {expected_local_devices}.")
+    if jax.device_count() != expected_global_devices:
+        raise RuntimeError(f"Global device mismatch: got {jax.device_count()}, expected {expected_global_devices}.")
+    if any(device.platform != "gpu" for device in jax.local_devices()):
+        raise RuntimeError(f"Preflight requires GPUs, got local devices {jax.local_devices()}.")
 
     fsdp_devices = int(os.environ.get("FSDP_DEVICES", "8"))
     expected_global_batch = int(os.environ.get("BATCH_SIZE", "64"))
@@ -42,15 +53,20 @@ def main() -> None:
         drop_last=True,
     )
     local_indices = np.asarray(list(sampler), dtype=np.int32)
-    gathered = np.asarray(multihost_utils.process_allgather(local_indices, tiled=False))
+    if jax.process_count() == 1:
+        gathered = local_indices[np.newaxis, :]
+    else:
+        gathered = np.asarray(multihost_utils.process_allgather(local_indices, tiled=False))
     flattened = gathered.reshape(-1)
     if len(flattened) != expected_global_batch or sorted(flattened.tolist()) != dataset:
         raise RuntimeError(f"Distributed sampler is incomplete or overlapping: {gathered.tolist()}")
 
     report = {
-        "coordinator": config.coordinator_address,
+        "available_local_bytes": int(os.environ["OPENPI_AVAILABLE_LOCAL_BYTES"]),
+        "coordinator": config.coordinator_address if config is not None else None,
         "global_batch": expected_global_batch,
         "global_devices": jax.device_count(),
+        "gpu_names": os.environ["OPENPI_GPU_NAMES"].split(";"),
         "local_batch": len(local_indices),
         "local_devices": jax.local_device_count(),
         "mesh": dict(mesh.shape),

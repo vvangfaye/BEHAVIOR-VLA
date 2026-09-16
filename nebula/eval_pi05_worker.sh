@@ -18,11 +18,23 @@ check_free_gb() {
 }
 
 case "$EVAL_PROFILE" in
-    smoke|reduced|full) ;;
-    *) fail "EVAL_PROFILE must be smoke, reduced, or full" ;;
+    smoke|speed|two_tasks|reduced|full) ;;
+    *) fail "EVAL_PROFILE must be smoke, speed, two_tasks, reduced, or full" ;;
 esac
 if [[ "$EVAL_PROFILE" == full && "$CONFIRM_FULL" != 1 ]]; then
     fail "full evaluation requires CONFIRM_FULL=1"
+fi
+[[ "$EVAL_WORKERS" =~ ^[1-9][0-9]*$ ]] || fail "EVAL_WORKERS must be a positive integer"
+[[ "$BASE_PORT" =~ ^[1-9][0-9]*$ ]] || fail "BASE_PORT must be a positive integer"
+[[ "$WRITE_VIDEO" == 0 || "$WRITE_VIDEO" == 1 ]] || fail "WRITE_VIDEO must be 0 or 1"
+[[ "$SUBTASK_PREDICTION" == 0 || "$SUBTASK_PREDICTION" == 1 ]] || fail "SUBTASK_PREDICTION must be 0 or 1"
+if [[ ( "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ) && "$EVAL_WORKERS" != 4 ]]; then
+    fail "$EVAL_PROFILE profile requires EVAL_WORKERS=4"
+fi
+if [[ "$EVAL_PROFILE" == two_tasks ]]; then
+    [[ "$NUM_ROLLOUTS" == 3 ]] || fail "two_tasks profile requires NUM_ROLLOUTS=3"
+    [[ "$WRITE_VIDEO" == 1 ]] || fail "two_tasks profile requires WRITE_VIDEO=1"
+    [[ -z "$MAX_STEPS" ]] || fail "two_tasks profile requires a full task timeout"
 fi
 
 GLIBC_VERSION="$(ldd --version 2>&1 | sed -n '1{s/.* //;p;}')"
@@ -43,15 +55,28 @@ for path in "$EVAL_ENV_ARCHIVE" "$PI05_ENV_ARCHIVE" "$OPENPI_CACHE_ARCHIVE" \
     "$CHECKPOINT_SOURCE/assets/$PI05_REPO_ID/norm_stats.json"; do
     require_file "$path"
 done
+if [[ "$EVAL_PROFILE" == two_tasks ]]; then
+    require_file "$CHECKPOINT_SOURCE/_CHECKPOINT_METADATA"
+    require_file "$CHECKPOINT_SOURCE/SHA256SUMS.inference"
+    require_file "$CHECKPOINT_SOURCE/_READY"
+    (
+        cd "$CHECKPOINT_SOURCE"
+        sha256sum -c SHA256SUMS.inference
+    )
+fi
 (
     cd "$ASSET_ROOT"
     sha256sum -c SHA256SUMS
 )
 
 mapfile -t GPU_ROWS < <(nvidia-smi --query-gpu=index,name,driver_version --format=csv,noheader)
-(( ${#GPU_ROWS[@]} >= 2 )) || fail "closed-loop evaluation requires at least two GPUs"
+REQUIRED_GPUS=2
+[[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ]] && REQUIRED_GPUS="$EVAL_WORKERS"
+(( ${#GPU_ROWS[@]} >= REQUIRED_GPUS )) || fail "closed-loop evaluation requires at least $REQUIRED_GPUS GPUs"
 printf '%s\n' "${GPU_ROWS[@]}"
-[[ "${GPU_ROWS[0]}" == *L20* && "${GPU_ROWS[1]}" == *L20* ]] || fail "the first two GPUs must be L20"
+for (( gpu = 0; gpu < REQUIRED_GPUS; gpu++ )); do
+    [[ "${GPU_ROWS[gpu]}" == *L20* ]] || fail "GPU $gpu must be L20"
+done
 DRIVER="$(cut -d',' -f3 <<< "${GPU_ROWS[0]}" | tr -d ' ')"
 case "$DRIVER" in
     535.*) fail "NVIDIA driver $DRIVER is incompatible with the archived RTX shader cache" ;;
@@ -85,10 +110,31 @@ LOCAL_ASSETS="$RUNTIME_ROOT/asset-archives"
 mkdir -p "$RUNTIME_ROOT" "$ENV_ROOT" "$PERSISTENT_OUTPUT"
 exec > >(tee -a "$PERSISTENT_OUTPUT/staging.log") 2>&1
 
-EVAL_PID=""
+EVAL_PIDS=()
+stop_eval_processes() {
+    local pid second active
+    for pid in "${EVAL_PIDS[@]}"; do
+        kill -TERM -- "-$pid" 2>/dev/null || true
+    done
+    for (( second = 0; second < 20; second++ )); do
+        active=0
+        for pid in "${EVAL_PIDS[@]}"; do
+            kill -0 -- "-$pid" 2>/dev/null && active=1
+        done
+        (( active == 0 )) && break
+        sleep 1
+    done
+    for pid in "${EVAL_PIDS[@]}"; do
+        kill -0 -- "-$pid" 2>/dev/null && kill -KILL -- "-$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    done
+    EVAL_PIDS=()
+}
 cleanup() {
     local status=$? preserve_ok=1
     set +e
+    stop_eval_processes
+    rm -f "$PERSISTENT_OUTPUT/_RUNNING" || preserve_ok=0
     if (( status != 0 )); then
         if [[ -d "$LOCAL_RESULTS" ]]; then
             cp -a "$LOCAL_RESULTS/." "$PERSISTENT_OUTPUT/" 2>/dev/null || preserve_ok=0
@@ -103,10 +149,7 @@ cleanup() {
 }
 handle_signal() {
     local status="$1"
-    if [[ -n "$EVAL_PID" ]] && kill -0 "$EVAL_PID" 2>/dev/null; then
-        kill -TERM -- "-$EVAL_PID" 2>/dev/null || true
-        wait "$EVAL_PID" 2>/dev/null || true
-    fi
+    stop_eval_processes
     exit "$status"
 }
 trap cleanup EXIT
@@ -150,6 +193,13 @@ if [[ -f "$CHECKPOINT_SOURCE/_CHECKPOINT_METADATA" ]]; then
 fi
 require_file "$LOCAL_CHECKPOINT/params/_METADATA"
 require_file "$LOCAL_CHECKPOINT/assets/$PI05_REPO_ID/norm_stats.json"
+if [[ "$EVAL_PROFILE" == two_tasks ]]; then
+    cp "$CHECKPOINT_SOURCE/SHA256SUMS.inference" "$LOCAL_CHECKPOINT/"
+    (
+        cd "$LOCAL_CHECKPOINT"
+        sha256sum -c SHA256SUMS.inference
+    )
+fi
 
 log "copying and extracting simulator assets"
 mkdir -p "$LOCAL_ASSETS" "$OMNIGIBSON_DATA_PATH"
@@ -210,6 +260,26 @@ case "$EVAL_PROFILE" in
         TASK_SPECS=("turning_on_radio|0")
         MAX_STEPS_VALUE="${MAX_STEPS:-100}"
         ;;
+    speed)
+        TASK_FILE=""
+        TASK_SPECS=()
+        read -ra speed_indices <<< "$INSTANCE_INDICES"
+        (( ${#speed_indices[@]} == EVAL_WORKERS )) || fail "speed profile requires one instance index per worker"
+        for index in "${speed_indices[@]}"; do
+            TASK_SPECS+=("$SPEED_TASK|$index")
+        done
+        MAX_STEPS_VALUE="${MAX_STEPS:-100}"
+        ;;
+    two_tasks)
+        TASK_FILE=""
+        TASK_SPECS=(
+            "carrying_in_groceries make_rose_centerpieces|0 4 8 12 16"
+            "carrying_in_groceries make_rose_centerpieces|1 5 9 13 17"
+            "carrying_in_groceries make_rose_centerpieces|2 6 10 14 18"
+            "carrying_in_groceries make_rose_centerpieces|3 7 11 15 19"
+        )
+        MAX_STEPS_VALUE=""
+        ;;
     reduced)
         TASK_FILE="$REPO_ROOT/scripts/b1k_tasks_reduced.txt"
         TASK_SPECS=()
@@ -238,65 +308,261 @@ fi
 
 EXPECTED_ROLLOUTS=0
 for spec in "${TASK_SPECS[@]}"; do
+    tasks="${spec%%|*}"
     indices="${spec#*|}"
+    read -ra task_array <<< "$tasks"
     read -ra index_array <<< "$indices"
-    EXPECTED_ROLLOUTS=$((EXPECTED_ROLLOUTS + ${#index_array[@]} * NUM_ROLLOUTS))
+    EXPECTED_ROLLOUTS=$((EXPECTED_ROLLOUTS + ${#task_array[@]} * ${#index_array[@]} * NUM_ROLLOUTS))
 done
 
 mkdir -p "$LOCAL_RESULTS" "$PERSISTENT_OUTPUT/status"
 "$PI05_ENV/bin/python" - "$PERSISTENT_OUTPUT/manifest.json" <<PY
 import json, pathlib
+profile = "$EVAL_PROFILE"
+indices = [int(value) for value in "$INSTANCE_INDICES".split()]
+expected_ids = [int(value) for value in "$SPEED_EXPECTED_INSTANCE_IDS".split()]
+if profile == "speed":
+    workers = [
+        {
+            "worker": worker,
+            "server_gpu": worker,
+            "eval_gpu": worker,
+            "port": $BASE_PORT + worker,
+            "tasks": ["$SPEED_TASK"],
+            "instance_indices": [indices[worker]],
+            "expected_instance_ids": [expected_ids[worker]],
+            "expected_rollouts": 1,
+        }
+        for worker in range($EVAL_WORKERS)
+    ]
+elif profile == "two_tasks":
+    shards = ([0, 4, 8, 12, 16], [1, 5, 9, 13, 17], [2, 6, 10, 14, 18], [3, 7, 11, 15, 19])
+    workers = [
+        {
+            "worker": worker,
+            "server_gpu": worker,
+            "eval_gpu": worker,
+            "port": $BASE_PORT + worker,
+            "tasks": ["carrying_in_groceries", "make_rose_centerpieces"],
+            "instance_indices": list(shards[worker]),
+            "expected_instance_ids": [301 + index for index in shards[worker]],
+            "expected_rollouts": 30,
+        }
+        for worker in range($EVAL_WORKERS)
+    ]
+else:
+    workers = [{"worker": 0, "server_gpu": 0, "eval_gpu": 1, "port": $BASE_PORT}]
 path = pathlib.Path("$PERSISTENT_OUTPUT/manifest.json")
 path.write_text(json.dumps({
     "run_id": "$RUN_ID",
-    "profile": "$EVAL_PROFILE",
+    "profile": profile,
+    "mode": "public_test",
+    "prompt_mode": "whole_task",
     "checkpoint": "$CHECKPOINT_SOURCE",
     "repo_id": "$PI05_REPO_ID",
-    "subtask_prediction": True,
-    "subtask_interval": 1,
-    "subtask_temperature": 0.0,
-    "instance_indices": "$INSTANCE_INDICES",
+    "subtask_prediction": bool($SUBTASK_PREDICTION),
+    "subtask_interval": (1 if bool($SUBTASK_PREDICTION) else None),
+    "subtask_temperature": (0.0 if bool($SUBTASK_PREDICTION) else None),
+    "tasks": (["carrying_in_groceries", "make_rose_centerpieces"] if profile == "two_tasks" else None),
+    "instance_indices": indices,
     "num_rollouts": $NUM_ROLLOUTS,
-    "max_steps": "${MAX_STEPS_VALUE}",
+    "max_steps": (int("${MAX_STEPS_VALUE}") if "${MAX_STEPS_VALUE}" else None),
     "expected_rollouts": $EXPECTED_ROLLOUTS,
+    "expected_videos": ($EXPECTED_ROLLOUTS if bool($WRITE_VIDEO) else 0),
+    "require_subtask_events": profile == "two_tasks" and bool($SUBTASK_PREDICTION),
     "driver": "$DRIVER",
-    "server_gpu": 0,
-    "eval_gpu": 1,
+    "pi05_mem_fraction": $PI05_MEM_FRACTION,
+    "write_video": bool($WRITE_VIDEO),
+    "workers": workers,
     "code_commit": "$CODE_COMMIT",
     "code_dirty": "$CODE_DIRTY",
 }, indent=2, sort_keys=True) + "\n")
 PY
+touch "$PERSISTENT_OUTPUT/_RUNNING"
 
 status=0
-for spec in "${TASK_SPECS[@]}"; do
-    task="${spec%%|*}"
-    indices="${spec#*|}"
-    log "evaluating $task on public indices [$indices]"
-    set +e
-    setsid env MODEL=pi05 PI05_CKPT="$LOCAL_CHECKPOINT" PI05_REPO_ID="$PI05_REPO_ID" \
-        SUBTASK_PREDICTION=1 MAX_TOKEN_LEN=512 MAX_SUBTASK_LEN=64 \
-        SUBTASK_INTERVAL=1 SUBTASK_TEMPERATURE=0 PROMPT_MODE=whole_task \
-        SERVER_GPU=0 EVAL_GPU=1 PORT=8000 EVAL_ENV="$EVAL_ENV" \
-        EVAL_RUNTIME_ROOT="$RUNTIME_ROOT/omnigibson-runtime" \
-        OPENPI_DATA_HOME="$OPENPI_DATA_HOME" OMNIGIBSON_DATA_PATH="$OMNIGIBSON_DATA_PATH" \
-        OMNIGIBSON_DISABLE_TORCH_COMPILE=1 \
-        OUTPUT_ROOT="$LOCAL_RESULTS" INSTANCE_INDICES="$indices" NUM_ROLLOUTS="$NUM_ROLLOUTS" \
-        MAX_STEPS="$MAX_STEPS_VALUE" "$REPO_ROOT/scripts/eval_b1k.sh" "$task" &
-    EVAL_PID=$!
-    wait "$EVAL_PID"
-    task_status=$?
-    EVAL_PID=""
-    set -e
-    cp -a "$LOCAL_RESULTS/." "$PERSISTENT_OUTPUT/"
-    printf '{"task":"%s","exit_code":%d}\n' "$task" "$task_status" > "$PERSISTENT_OUTPUT/status/$task.json"
-    (( task_status == 0 )) || status=1
-done
+EVAL_WALL_TIME=""
+if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ]]; then
+    PARALLEL_START="$(date +%s)"
+    WORKER_PIDS=()
+    WORKER_TASKS=()
+    WORKER_INDICES=()
+    read -ra speed_expected_ids <<< "$SPEED_EXPECTED_INSTANCE_IDS"
+    for worker in "${!TASK_SPECS[@]}"; do
+        spec="${TASK_SPECS[worker]}"
+        tasks="${spec%%|*}"
+        indices="${spec#*|}"
+        read -ra task_array <<< "$tasks"
+        port="$((BASE_PORT + worker))"
+        shard_root="$LOCAL_RESULTS/shards/worker_$worker"
+        worker_log="$shard_root/worker.log"
+        runtime_root="$RUNTIME_ROOT/omnigibson-runtime/worker_$worker"
+        mkdir -p "$shard_root" "$runtime_root"
+        log "launching $EVAL_PROFILE worker=$worker tasks=[$tasks] indices=[$indices] gpu=$worker port=$port"
+        setsid env MODEL=pi05 PI05_CKPT="$LOCAL_CHECKPOINT" PI05_REPO_ID="$PI05_REPO_ID" \
+            SUBTASK_PREDICTION="$SUBTASK_PREDICTION" MAX_TOKEN_LEN=512 MAX_SUBTASK_LEN=64 \
+            SUBTASK_INTERVAL=1 SUBTASK_TEMPERATURE=0 PROMPT_MODE=whole_task MODE=public_test \
+            SERVER_GPU="$worker" EVAL_GPU="$worker" PORT="$port" EVAL_ENV="$EVAL_ENV" \
+            EVAL_RUNTIME_ROOT="$runtime_root" PI05_MEM_FRACTION="$PI05_MEM_FRACTION" \
+            OPENPI_DATA_HOME="$OPENPI_DATA_HOME" OMNIGIBSON_DATA_PATH="$OMNIGIBSON_DATA_PATH" \
+            OMNIGIBSON_DISABLE_TORCH_COMPILE=1 WRITE_VIDEO="$WRITE_VIDEO" \
+            OUTPUT_ROOT="$shard_root" INSTANCE_INDICES="$indices" NUM_ROLLOUTS="$NUM_ROLLOUTS" \
+            MAX_STEPS="$MAX_STEPS_VALUE" bash "$REPO_ROOT/scripts/eval_b1k.sh" "${task_array[@]}" \
+            > "$worker_log" 2>&1 &
+        WORKER_PIDS+=("$!")
+        WORKER_TASKS+=("$tasks")
+        WORKER_INDICES+=("$indices")
+        EVAL_PIDS+=("$!")
+    done
 
+    set +e
+    for worker in "${!WORKER_PIDS[@]}"; do
+        wait "${WORKER_PIDS[worker]}"
+        worker_status=$?
+        if [[ "$EVAL_PROFILE" == speed ]]; then
+            printf '{"worker":%d,"task":"%s","instance_index":%d,"expected_instance_id":%d,"gpu":%d,"port":%d,"exit_code":%d}\n' \
+                "$worker" "$SPEED_TASK" "${speed_indices[worker]}" "${speed_expected_ids[worker]}" \
+                "$worker" "$((BASE_PORT + worker))" "$worker_status" \
+                > "$PERSISTENT_OUTPUT/status/worker-$worker.json"
+        else
+            "$PI05_ENV/bin/python" - "$PERSISTENT_OUTPUT/status/worker-$worker.json" \
+                "$LOCAL_RESULTS/shards/worker_$worker" "$worker" "${WORKER_TASKS[worker]}" \
+                "${WORKER_INDICES[worker]}" "$((BASE_PORT + worker))" "$worker_status" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+output, shard_root, worker, tasks, indices, port, exit_code = sys.argv[1:]
+root = Path(shard_root)
+results = []
+for path in root.rglob("json/*.json"):
+    try:
+        results.append(json.loads(path.read_text()))
+    except Exception:
+        pass
+status = {
+    "worker": int(worker),
+    "tasks": tasks.split(),
+    "instance_indices": [int(value) for value in indices.split()],
+    "gpu": int(worker),
+    "port": int(port),
+    "expected_rollouts": 30,
+    "completed_rollouts": len(results),
+    "completed_videos": sum(1 for path in root.rglob("videos/*.mp4") if path.stat().st_size > 0),
+    "rollouts_with_subtask_events": sum(bool(result.get("subtask_events")) for result in results),
+    "exit_code": int(exit_code),
+}
+Path(output).write_text(json.dumps(status, indent=2, sort_keys=True) + "\n")
+PY
+        fi
+        (( worker_status == 0 )) || status=1
+    done
+    set -e
+    EVAL_PIDS=()
+    EVAL_WALL_TIME=$(( $(date +%s) - PARALLEL_START ))
+    (( EVAL_WALL_TIME > 0 )) || EVAL_WALL_TIME=1
+    printf '{"workers":%d,"wall_time_seconds":%d}\n' "$EVAL_WORKERS" "$EVAL_WALL_TIME" \
+        > "$LOCAL_RESULTS/parallel_metrics.json"
+    cp -a "$LOCAL_RESULTS/." "$PERSISTENT_OUTPUT/"
+else
+    for spec in "${TASK_SPECS[@]}"; do
+        task="${spec%%|*}"
+        indices="${spec#*|}"
+        log "evaluating $task on public indices [$indices]"
+        set +e
+        setsid env MODEL=pi05 PI05_CKPT="$LOCAL_CHECKPOINT" PI05_REPO_ID="$PI05_REPO_ID" \
+            SUBTASK_PREDICTION="$SUBTASK_PREDICTION" MAX_TOKEN_LEN=512 MAX_SUBTASK_LEN=64 \
+            SUBTASK_INTERVAL=1 SUBTASK_TEMPERATURE=0 PROMPT_MODE=whole_task MODE=public_test \
+            SERVER_GPU=0 EVAL_GPU=1 PORT="$BASE_PORT" EVAL_ENV="$EVAL_ENV" \
+            EVAL_RUNTIME_ROOT="$RUNTIME_ROOT/omnigibson-runtime" PI05_MEM_FRACTION="$PI05_MEM_FRACTION" \
+            OPENPI_DATA_HOME="$OPENPI_DATA_HOME" OMNIGIBSON_DATA_PATH="$OMNIGIBSON_DATA_PATH" \
+            OMNIGIBSON_DISABLE_TORCH_COMPILE=1 WRITE_VIDEO="$WRITE_VIDEO" \
+            OUTPUT_ROOT="$LOCAL_RESULTS" INSTANCE_INDICES="$indices" NUM_ROLLOUTS="$NUM_ROLLOUTS" \
+            MAX_STEPS="$MAX_STEPS_VALUE" bash "$REPO_ROOT/scripts/eval_b1k.sh" "$task" &
+        EVAL_PIDS=("$!")
+        wait "${EVAL_PIDS[0]}"
+        task_status=$?
+        EVAL_PIDS=()
+        set -e
+        cp -a "$LOCAL_RESULTS/." "$PERSISTENT_OUTPUT/"
+        printf '{"task":"%s","exit_code":%d}\n' "$task" "$task_status" > "$PERSISTENT_OUTPUT/status/$task.json"
+        (( task_status == 0 )) || status=1
+    done
+fi
+
+if [[ "$EVAL_PROFILE" == speed ]]; then
+    if ! "$PI05_ENV/bin/python" - "$LOCAL_RESULTS" "$SPEED_TASK" "$SPEED_EXPECTED_INSTANCE_IDS" "$EVAL_WORKERS" <<'PY'
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+task = sys.argv[2]
+expected_ids = [int(value) for value in sys.argv[3].split()]
+workers = int(sys.argv[4])
+observed = []
+for worker in range(workers):
+    paths = list((root / "shards" / f"worker_{worker}" / "pi05" / task / "json").glob("*.json"))
+    if len(paths) != 1:
+        raise RuntimeError(f"worker {worker} produced {len(paths)} rollout JSON files")
+    result = json.loads(paths[0].read_text())
+    key = (result["task"], int(result["instance_id"]), int(result["rollout_id"]))
+    expected = (task, expected_ids[worker], 0)
+    if key != expected:
+        raise RuntimeError(f"worker {worker} produced {key}, expected {expected}")
+    observed.append(key)
+if len(set(observed)) != workers:
+    raise RuntimeError(f"speed workers produced duplicate rollouts: {observed}")
+print(json.dumps({"validated_rollouts": [list(key) for key in observed]}, sort_keys=True))
+PY
+    then
+        status=1
+    fi
+fi
+if [[ "$SUBTASK_PREDICTION" == 1 && ( "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ) ]]; then
+    for (( worker = 0; worker < EVAL_WORKERS; worker++ )); do
+        server_log="$LOCAL_RESULTS/shards/worker_$worker/pi05/server_$((BASE_PORT + worker)).log"
+        if ! grep -q 'Generated subtask:' "$server_log"; then
+            log "$EVAL_PROFILE worker $worker server log contains no generated subtask"
+            status=1
+        fi
+    done
+fi
+
+SUMMARY_ARGS=(
+    --results-root "$LOCAL_RESULTS"
+    --output "$LOCAL_RESULTS/summary.json"
+    --run-id "$RUN_ID"
+    --profile "$EVAL_PROFILE"
+    --checkpoint "$CHECKPOINT_SOURCE"
+    --expected-rollouts "$EXPECTED_ROLLOUTS"
+    --require-complete
+)
+if [[ -n "$EVAL_WALL_TIME" ]]; then
+    SUMMARY_ARGS+=(--wall-time-seconds "$EVAL_WALL_TIME")
+fi
+if [[ "$EVAL_PROFILE" == speed ]]; then
+    SUMMARY_ARGS+=(
+        --expected-task "$SPEED_TASK"
+        --expected-instance-ids "$SPEED_EXPECTED_INSTANCE_IDS"
+        --expected-workers "$EVAL_WORKERS"
+        --status-root "$PERSISTENT_OUTPUT/status"
+    )
+elif [[ "$EVAL_PROFILE" == two_tasks ]]; then
+    SUMMARY_ARGS+=(
+        --expected-tasks "carrying_in_groceries make_rose_centerpieces"
+        --expected-instance-ids "301 302 303 304 305 306 307 308 309 310 311 312 313 314 315 316 317 318 319 320"
+        --expected-rollout-ids "0 1 2"
+        --expected-workers "$EVAL_WORKERS"
+        --status-root "$PERSISTENT_OUTPUT/status"
+        --require-videos
+    )
+    if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
+        SUMMARY_ARGS+=(--require-subtask-events)
+    fi
+fi
 set +e
-"$PI05_ENV/bin/python" "$SCRIPT_DIR/summarize_pi05_eval.py" \
-    --results-root "$LOCAL_RESULTS" --output "$LOCAL_RESULTS/summary.json" \
-    --run-id "$RUN_ID" --profile "$EVAL_PROFILE" --checkpoint "$CHECKPOINT_SOURCE" \
-    --expected-rollouts "$EXPECTED_ROLLOUTS" --require-complete
+"$PI05_ENV/bin/python" "$SCRIPT_DIR/summarize_pi05_eval.py" "${SUMMARY_ARGS[@]}"
 summary_status=$?
 set -e
 cp "$LOCAL_RESULTS/summary.json" "$PERSISTENT_OUTPUT/summary.json"
@@ -307,8 +573,10 @@ if [[ "$EVAL_PROFILE" == smoke ]]; then
         || fail "smoke produced no nonempty rollout JSON"
     [[ -n "$(find "$LOCAL_RESULTS/pi05" -path '*/videos/*.mp4' -type f -size +0c -print -quit)" ]] \
         || fail "smoke produced no nonempty video"
-    grep -q 'Generated subtask:' "$LOCAL_RESULTS/pi05/server_8000.log" \
-        || fail "smoke server log contains no generated subtask"
+    if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
+        grep -q 'Generated subtask:' "$LOCAL_RESULTS/pi05/server_$BASE_PORT.log" \
+            || fail "smoke server log contains no generated subtask"
+    fi
 fi
 
 if (( status == 0 )); then

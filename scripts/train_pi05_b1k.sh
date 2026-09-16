@@ -20,6 +20,13 @@ SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-0}"
 ASSETS_BASE_DIR="${ASSETS_BASE_DIR:-$OPENPI_DIR/outputs/assets}"
 CHECKPOINT_BASE_DIR="${CHECKPOINT_BASE_DIR:-$OPENPI_DIR/outputs/checkpoints}"
 LOG_INTERVAL="${LOG_INTERVAL:-100}"
+KEEP_PERIOD="${KEEP_PERIOD:-}"
+TRAIN_EPOCHS="${TRAIN_EPOCHS:-}"
+EXPECTED_TASKS="${EXPECTED_TASKS:-}"
+EXPECTED_RETAINED_EPISODES="${EXPECTED_RETAINED_EPISODES:-}"
+EXPECTED_RETAINED_FRAMES="${EXPECTED_RETAINED_FRAMES:-}"
+EXPECTED_BATCHES_PER_EPOCH="${EXPECTED_BATCHES_PER_EPOCH:-}"
+EXPECTED_TRAIN_STEPS="${EXPECTED_TRAIN_STEPS:-}"
 if [[ "$SUBTASK_PREDICTION" != 0 && "$SUBTASK_PREDICTION" != 1 ]]; then
     echo "SUBTASK_PREDICTION must be 0 or 1" >&2
     exit 2
@@ -111,15 +118,27 @@ if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
     PREFLIGHT_OUTPUT_DIR="${PREFLIGHT_OUTPUT_DIR:-outputs/subtask_preflight}"
     mkdir -p "$PREFLIGHT_OUTPUT_DIR"
     VALIDATED_EPISODES_FILE="$PREFLIGHT_OUTPUT_DIR/$EXP_NAME.episodes.txt"
+    PREFLIGHT_REPORT_FILE="$PREFLIGHT_OUTPUT_DIR/$EXP_NAME.json"
     PREFLIGHT_ARGS=(
         --dataset-root "$DATASET_ROOT"
         --segments-path "$SUBTASK_PROMPTS"
         --max-token-len "$MAX_TOKEN_LEN"
         --max-subtask-len "$MAX_SUBTASK_LEN"
         --empty-label-policy "$SUBTASK_EMPTY_LABEL_POLICY"
-        --report-file "$PREFLIGHT_OUTPUT_DIR/$EXP_NAME.json"
+        --frame-stride "$FRAME_STRIDE"
+        --report-file "$PREFLIGHT_REPORT_FILE"
         --write-episodes-file "$VALIDATED_EPISODES_FILE"
     )
+    if [[ -n "$TRAIN_EPOCHS" ]]; then
+        PREFLIGHT_ARGS+=(
+            --global-batch-size "$BATCH_SIZE"
+            --process-count "${OPENPI_PROCESS_COUNT:-1}"
+            --epochs "$TRAIN_EPOCHS"
+        )
+    fi
+    if [[ -n "$EXPECTED_TASKS" ]]; then
+        PREFLIGHT_ARGS+=(--expected-tasks "$EXPECTED_TASKS")
+    fi
     if (( ${#EPISODES_INDEX[@]} )); then
         PREFLIGHT_ARGS+=(--episodes-index "${EPISODES_INDEX[@]}")
     fi
@@ -139,6 +158,42 @@ if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
         exit 2
     fi
     echo "Subtask preflight retained ${#EPISODES_INDEX[@]} episodes: $VALIDATED_EPISODES_FILE"
+    if [[ -n "$TRAIN_EPOCHS" ]]; then
+        read -r CONTRACT_EPISODES CONTRACT_FRAMES CONTRACT_BATCHES CONTRACT_STEPS CONTRACT_SHA < <(
+            python - "$PREFLIGHT_REPORT_FILE" <<'PY'
+import json
+import sys
+
+report = json.load(open(sys.argv[1]))
+contract = report["training_contract"]
+print(
+    contract["retained_episodes"],
+    contract["retained_frames"],
+    contract["batches_per_epoch"],
+    contract["train_steps"],
+    report["training_contract_sha256"],
+)
+PY
+        )
+        for actual_expected in \
+            "$CONTRACT_EPISODES:${EXPECTED_RETAINED_EPISODES:-$CONTRACT_EPISODES}:retained episodes" \
+            "$CONTRACT_FRAMES:${EXPECTED_RETAINED_FRAMES:-$CONTRACT_FRAMES}:retained frames" \
+            "$CONTRACT_BATCHES:${EXPECTED_BATCHES_PER_EPOCH:-$CONTRACT_BATCHES}:batches per epoch" \
+            "$CONTRACT_STEPS:${EXPECTED_TRAIN_STEPS:-$CONTRACT_STEPS}:train steps"; do
+            IFS=: read -r actual expected label <<< "$actual_expected"
+            [[ "$actual" == "$expected" ]] || {
+                echo "Training contract mismatch for $label: got $actual, expected $expected" >&2
+                exit 2
+            }
+        done
+        [[ "$TRAIN_STEPS" == "$CONTRACT_STEPS" ]] || {
+            echo "TRAIN_STEPS=$TRAIN_STEPS does not match contract train_steps=$CONTRACT_STEPS" >&2
+            exit 2
+        }
+        export OPENPI_EXPECTED_BATCHES_PER_EPOCH="$CONTRACT_BATCHES"
+        export OPENPI_TRAIN_EPOCHS="$TRAIN_EPOCHS"
+        export OPENPI_TRAINING_CONTRACT_SHA256="$CONTRACT_SHA"
+    fi
     if [[ "${PREFLIGHT_ONLY:-0}" == 1 ]]; then
         exit 0
     fi
@@ -202,7 +257,14 @@ fi
 # --num-train-steps, so a longer run silently spends everything past 30k at the
 # 2.5e-6 floor. Set LR_DECAY_STEPS to the real run length to stretch the cosine.
 if [[ -n "${LR_DECAY_STEPS:-}" ]]; then
+    if [[ -n "$TRAIN_EPOCHS" && "$LR_DECAY_STEPS" != "$TRAIN_STEPS" ]]; then
+        echo "LR_DECAY_STEPS=$LR_DECAY_STEPS must equal exact-epoch TRAIN_STEPS=$TRAIN_STEPS" >&2
+        exit 2
+    fi
     TRAIN_DATA_ARGS+=(--lr-schedule.decay-steps "$LR_DECAY_STEPS")
+fi
+if [[ -n "$KEEP_PERIOD" ]]; then
+    TRAIN_DATA_ARGS+=(--keep-period "$KEEP_PERIOD")
 fi
 if [[ -n "${LR_PEAK:-}" ]]; then
     TRAIN_DATA_ARGS+=(--lr-schedule.peak-lr "$LR_PEAK")

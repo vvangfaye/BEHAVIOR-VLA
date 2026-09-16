@@ -26,6 +26,12 @@ if [[ -n "$MAX_STEPS" && ( ! "$MAX_STEPS" =~ ^[1-9][0-9]*$ ) ]]; then
     echo "MAX_STEPS must be a positive integer" >&2
     exit 2
 fi
+WRITE_VIDEO="${WRITE_VIDEO:-1}"
+case "$WRITE_VIDEO" in
+    0) VIDEO_ARG="--no-write-video" ;;
+    1) VIDEO_ARG="--write-video" ;;
+    *) echo "WRITE_VIDEO must be 0 or 1" >&2; exit 2 ;;
+esac
 if [[ -z "${OUTPUT_ROOT:-}" ]]; then
     if [[ "$PROMPT_MODE" == "oracle_unsatisfied_goal" ]]; then
         OUTPUT_ROOT="$REPO_ROOT/eval_results/oracle_unsatisfied_goal"
@@ -33,6 +39,7 @@ if [[ -z "${OUTPUT_ROOT:-}" ]]; then
         OUTPUT_ROOT="$REPO_ROOT/eval_results"
     fi
 fi
+EVAL_START_EPOCH="$(date +%s)"
 OMNIGIBSON_DATA_PATH="${OMNIGIBSON_DATA_PATH:-$REPO_ROOT/BEHAVIOR-1K/omnigibson-data}"
 SERVER_GPU="${SERVER_GPU:-0}"
 EVAL_GPU="${EVAL_GPU:-1}"
@@ -101,8 +108,8 @@ start_server() {
     fi
     # The startup prompt is the fallback when the evaluator does not send
     # a dynamic oracle prompt; --repo-id must match the training assets.
-    CUDA_VISIBLE_DEVICES="$SERVER_GPU" XLA_PYTHON_CLIENT_MEM_FRACTION="$PI05_MEM_FRACTION" \
-    HF_HUB_OFFLINE=1 \
+    CUDA_VISIBLE_DEVICES="$SERVER_GPU" XLA_PYTHON_CLIENT_PREALLOCATE=true \
+    XLA_PYTHON_CLIENT_MEM_FRACTION="$PI05_MEM_FRACTION" HF_HUB_OFFLINE=1 \
     python scripts/b1k/serve_b1k.py \
         --robot b1k/R1Pro \
         --task "b1k/$task" \
@@ -120,8 +127,16 @@ start_server() {
 stop_server() {
     [[ -n "${SERVER_PID:-}" ]] || return 0
     kill -TERM "$SERVER_PID" 2>/dev/null || true
-    for _ in $(seq 1 20); do kill -0 "$SERVER_PID" 2>/dev/null || { SERVER_PID=""; return 0; }; sleep 1; done
+    for _ in $(seq 1 20); do
+        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+            wait "$SERVER_PID" 2>/dev/null || true
+            SERVER_PID=""
+            return 0
+        fi
+        sleep 1
+    done
     kill -KILL "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
     SERVER_PID=""
 }
 trap stop_server EXIT
@@ -196,7 +211,7 @@ for task in "${TASKS[@]}"; do
             --num-rollouts "$NUM_ROLLOUTS" \
             "${EVAL_ARGS[@]}" \
             --output-dir "$out" \
-            --write-video 2>&1 | tee "$out/eval.log"
+            "$VIDEO_ARG" 2>&1 | tee "$out/eval.log"
     pipeline_status=("${PIPESTATUS[@]}")
     set -e
     stop_server
@@ -207,5 +222,10 @@ for task in "${TASKS[@]}"; do
     fi
 done
 
+EVAL_ELAPSED_SECONDS=$(( $(date +%s) - EVAL_START_EPOCH ))
+(( EVAL_ELAPSED_SECONDS > 0 )) || EVAL_ELAPSED_SECONDS=1
+printf '{"port":%d,"server_gpu":%d,"eval_gpu":%d,"elapsed_seconds":%d,"exit_code":%d}\n' \
+    "$PORT" "$SERVER_GPU" "$EVAL_GPU" "$EVAL_ELAPSED_SECONDS" "$status" \
+    > "$OUTPUT_ROOT/$MODEL/eval_metrics_$PORT.json"
 echo "results under $OUTPUT_ROOT/$MODEL"
 exit "$status"
