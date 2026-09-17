@@ -62,18 +62,22 @@ COORDINATOR_ADDRESS="$COORDINATOR_IP:$COORDINATOR_PORT"
 log "assigned process_id=$PROCESS_ID/$PROCESS_COUNT coordinator=$COORDINATOR_ADDRESS"
 
 case "$DATASET_PROFILE" in
-    two_tasks|full100) ;;
+    two_tasks|two_tasks_subtask_only|full100) ;;
     *) fail "unknown dataset profile: $DATASET_PROFILE" ;;
 esac
-if [[ "$DATASET_PROFILE" == "full100" ]]; then
+if [[ "$DATASET_PROFILE" == "full100" || "$DATASET_PROFILE" == "two_tasks_subtask_only" ]]; then
     mapfile -t GPU_NAME_LIST < <(nvidia-smi --query-gpu=name --format=csv,noheader)
     (( ${#GPU_NAME_LIST[@]} == EXPECTED_LOCAL_DEVICES )) \
-        || fail "full100 requires exactly $EXPECTED_LOCAL_DEVICES GPUs, saw ${#GPU_NAME_LIST[@]}"
+        || fail "$DATASET_PROFILE requires exactly $EXPECTED_LOCAL_DEVICES GPUs, saw ${#GPU_NAME_LIST[@]}"
     for gpu_name in "${GPU_NAME_LIST[@]}"; do
-        case "$gpu_name" in
-            *H200*|"NVIDIA L20Z") ;;
-            *) fail "full100 requires H200 GPUs or the NVIDIA L20Z platform alias, saw: $gpu_name" ;;
-        esac
+        if [[ "$DATASET_PROFILE" == "full100" ]]; then
+            case "$gpu_name" in
+                *H200*|"NVIDIA L20Z") ;;
+                *) fail "full100 requires H200 GPUs or the NVIDIA L20Z platform alias, saw: $gpu_name" ;;
+            esac
+        elif [[ ! "$gpu_name" =~ ^NVIDIA[[:space:]]+H20([^0-9]|$) ]]; then
+            fail "two_tasks_subtask_only requires H20 GPUs, saw: $gpu_name"
+        fi
     done
 fi
 
@@ -381,13 +385,12 @@ download_file "subtask annotations" "$SUBTASK_SEGMENTS_OSS_URI" "$LOCAL_DATASET/
 [[ "$(sha256sum "$LOCAL_DATASET/meta/subtask_segments.parquet" | cut -d' ' -f1)" == "$SUBTASK_SEGMENTS_SHA256" ]] \
     || fail "subtask annotation checksum mismatch"
 
-if [[ "$DATASET_PROFILE" == "full100" ]]; then
-    CONTRACT_REPORT="$RANK_ROOT/full100_contract.json"
-    EPISODES_FILE="$RANK_ROOT/full100_episodes.txt"
+if [[ "$DATASET_PROFILE" == "full100" || "$DATASET_PROFILE" == "two_tasks_subtask_only" ]]; then
+    CONTRACT_REPORT="$RANK_ROOT/${DATASET_PROFILE}_contract.json"
+    EPISODES_FILE="$RANK_ROOT/${DATASET_PROFILE}_episodes.txt"
     CONTRACT_ARGS=(
         --dataset-root "$LOCAL_DATASET"
         --segments-path "$LOCAL_DATASET/meta/subtask_segments.parquet"
-        --max-token-len 512
         --max-subtask-len 64
         --empty-label-policy drop_episode
         --frame-stride "$FRAME_STRIDE"
@@ -396,21 +399,39 @@ if [[ "$DATASET_PROFILE" == "full100" ]]; then
         --report-file "$CONTRACT_REPORT"
         --write-episodes-file "$EPISODES_FILE"
     )
-    if [[ "$MODE" == "smoke" ]]; then
+    if [[ "$DATASET_PROFILE" == "two_tasks_subtask_only" ]]; then
+        REQUESTED_EPISODES=()
+        while IFS= read -r episode; do REQUESTED_EPISODES+=("$episode"); done < <(
+            { seq 2800 2999; seq 11200 11399; }
+        )
+        read -r -a EXPECTED_TASK_INDEX_ARRAY <<< "$EXPECTED_TASK_INDICES"
+        CONTRACT_ARGS+=(
+            --episodes-index "${REQUESTED_EPISODES[@]}"
+            --expected-tasks "$EXPECTED_TASKS"
+            --expected-task-indices "${EXPECTED_TASK_INDEX_ARRAY[@]}"
+            --max-token-len 200
+            --action-horizon 32
+            --strict-subtask-action-chunks
+            --conditioning-mode subtask_only
+        )
+        if [[ "$MODE" != "smoke" ]]; then
+            CONTRACT_ARGS+=(--epochs "$TRAIN_EPOCHS")
+        fi
+    elif [[ "$MODE" == "smoke" ]]; then
         SMOKE_EPISODES=()
         while IFS= read -r episode; do SMOKE_EPISODES+=("$episode"); done < <(
             { seq 2800 2999; seq 11200 11399; }
         )
-        CONTRACT_ARGS+=(--episodes-index "${SMOKE_EPISODES[@]}" --expected-tasks 2)
+        CONTRACT_ARGS+=(--episodes-index "${SMOKE_EPISODES[@]}" --expected-tasks 2 --max-token-len 512)
     else
-        CONTRACT_ARGS+=(--epochs "$TRAIN_EPOCHS" --expected-tasks "$EXPECTED_TASKS")
+        CONTRACT_ARGS+=(--epochs "$TRAIN_EPOCHS" --expected-tasks "$EXPECTED_TASKS" --max-token-len 512)
     fi
     "$ENV_PREFIX/bin/python" "$OPENPI_DIR/scripts/b1k/check_subtask_data.py" "${CONTRACT_ARGS[@]}"
     require_file "$CONTRACT_REPORT"
     require_file "$EPISODES_FILE"
 
     IFS='|' read -r CONTRACT_SHA ANNOTATION_SHA EPISODE_LIST_SHA RETAINED_EPISODES RETAINED_FRAMES \
-        RETAINED_TASKS BATCHES_PER_EPOCH CONTRACT_TRAIN_STEPS < <(
+        RETAINED_TASKS TRAINING_SAMPLES BATCHES_PER_EPOCH CONTRACT_TRAIN_STEPS < <(
         "$ENV_PREFIX/bin/python" - "$CONTRACT_REPORT" <<'PY'
 import json
 import sys
@@ -424,6 +445,7 @@ values = [
     contract["retained_episodes"],
     contract["retained_frames"],
     contract["retained_tasks"],
+    contract["strided_samples"],
     contract.get("batches_per_epoch", ""),
     contract.get("train_steps", ""),
 ]
@@ -434,7 +456,26 @@ PY
         || fail "contract annotation hash mismatch: $ANNOTATION_SHA"
     [[ "$(sha256sum "$EPISODES_FILE" | cut -d' ' -f1)" == "$EPISODE_LIST_SHA" ]] \
         || fail "contract episode file hash mismatch"
-    if [[ "$MODE" != "smoke" ]]; then
+    if [[ "$DATASET_PROFILE" == "two_tasks_subtask_only" ]]; then
+        [[ "$RETAINED_EPISODES" == "$EXPECTED_RETAINED_EPISODES" ]] \
+            || fail "retained episodes mismatch: $RETAINED_EPISODES != $EXPECTED_RETAINED_EPISODES"
+        [[ "$RETAINED_FRAMES" == "$EXPECTED_RETAINED_FRAMES" ]] \
+            || fail "retained frames mismatch: $RETAINED_FRAMES != $EXPECTED_RETAINED_FRAMES"
+        [[ "$RETAINED_TASKS" == "$EXPECTED_TASKS" ]] \
+            || fail "retained tasks mismatch: $RETAINED_TASKS != $EXPECTED_TASKS"
+        [[ "$TRAINING_SAMPLES" == "$EXPECTED_TRAINING_SAMPLES" ]] \
+            || fail "training samples mismatch: $TRAINING_SAMPLES != $EXPECTED_TRAINING_SAMPLES"
+        [[ "$BATCHES_PER_EPOCH" == "$EXPECTED_BATCHES_PER_EPOCH" ]] \
+            || fail "batches per epoch mismatch: $BATCHES_PER_EPOCH != $EXPECTED_BATCHES_PER_EPOCH"
+        [[ "$EPISODE_LIST_SHA" == "$EXPECTED_EPISODE_LIST_SHA256" ]] \
+            || fail "episode-list hash mismatch: $EPISODE_LIST_SHA != $EXPECTED_EPISODE_LIST_SHA256"
+        if [[ "$MODE" != "smoke" ]]; then
+            [[ "$CONTRACT_TRAIN_STEPS" == "$EXPECTED_TRAIN_STEPS" ]] \
+                || fail "contract train steps mismatch: $CONTRACT_TRAIN_STEPS != $EXPECTED_TRAIN_STEPS"
+            [[ "$CONTRACT_SHA" == "$EXPECTED_CONTRACT_SHA256" ]] \
+                || fail "contract hash mismatch: $CONTRACT_SHA != $EXPECTED_CONTRACT_SHA256"
+        fi
+    elif [[ "$MODE" != "smoke" ]]; then
         [[ "$RETAINED_EPISODES" == "$EXPECTED_RETAINED_EPISODES" ]] \
             || fail "retained episodes mismatch: $RETAINED_EPISODES != $EXPECTED_RETAINED_EPISODES"
         [[ "$RETAINED_FRAMES" == "$EXPECTED_RETAINED_FRAMES" ]] \
@@ -479,14 +520,14 @@ PY
         publish_file "$CONTRACT_REPORT" "$CONTRACT_DIR/report.json"
         publish_file "$EPISODES_FILE" "$CONTRACT_DIR/episodes.txt"
     fi
-    log "full100 contract verified across $PROCESS_COUNT ranks: $CONTRACT_SHA"
+    log "$DATASET_PROFILE contract verified across $PROCESS_COUNT ranks: $CONTRACT_SHA"
 
     if [[ "$MODE" == "preflight" ]]; then
         printf 'ok\n' > "$CONTRACT_DIR/rank-$PROCESS_ID.preflight-ok"
-        wait_for_files "$CONTRACT_DIR" 'rank-*.preflight-ok' "$PROCESS_COUNT" "full100 preflight rendezvous"
+        wait_for_files "$CONTRACT_DIR" 'rank-*.preflight-ok' "$PROCESS_COUNT" "$DATASET_PROFILE preflight rendezvous"
         if (( PROCESS_ID == 0 )); then
             "$ENV_PREFIX/bin/python" - "$OUTPUT_ROOT/_PREFLIGHT_OK.json" "$CONTRACT_SHA" "$AVAILABLE_BYTES" \
-                "$PROCESS_COUNT" "$EXPECTED_LOCAL_DEVICES" <<'PY'
+                "$PROCESS_COUNT" "$EXPECTED_LOCAL_DEVICES" "$OPENPI_GPU_NAMES" <<'PY'
 import json
 from pathlib import Path
 import sys
@@ -495,13 +536,14 @@ path = Path(sys.argv[1])
 path.write_text(json.dumps({
     "available_local_bytes_rank0": int(sys.argv[3]),
     "contract_sha256": sys.argv[2],
+    "gpu_names": sys.argv[6].split(";"),
     "local_devices": int(sys.argv[5]),
     "processes": int(sys.argv[4]),
     "status": "passed",
 }, sort_keys=True) + "\n")
 PY
         fi
-        log "full100 preflight complete for rank $PROCESS_ID"
+        log "$DATASET_PROFILE preflight complete for rank $PROCESS_ID"
         exit 0
     fi
 else
@@ -568,7 +610,7 @@ path.write_text(json.dumps({
 PY
 
 mkdir -p "$ASSETS_BASE_DIR/pi05_b1k/$REPO_ID"
-if [[ "$DATASET_PROFILE" == "full100" ]]; then
+if [[ "$DATASET_PROFILE" == "full100" || "$DATASET_PROFILE" == "two_tasks_subtask_only" ]]; then
     SHARED_NORM_DIR="$OUTPUT_ROOT/norm/$REPO_ID"
     SHARED_NORM_FILE="$SHARED_NORM_DIR/norm_stats.json"
     SHARED_NORM_PROVENANCE="$SHARED_NORM_DIR/provenance.json"
@@ -579,17 +621,28 @@ if [[ "$DATASET_PROFILE" == "full100" ]]; then
             fail "incomplete shared norm stats exist without $SHARED_NORM_READY"
         fi
         mapfile -t NORM_EPISODES < "$EPISODES_FILE"
-        log "computing full100 normalization statistics from at most $NORM_MAX_FRAMES frames"
+        log "computing $DATASET_PROFILE normalization statistics from at most $NORM_MAX_FRAMES frames"
         cd "$OPENPI_DIR"
-        run_with_heartbeat "normalization statistics" "$ENV_PREFIX/bin/python" scripts/compute_norm_stats.py \
-            --config-name pi05_b1k \
-            --dataset-root "$LOCAL_DATASET" \
-            --repo-id "$REPO_ID" \
-            --batch-size "$BATCH_SIZE" \
-            --num-workers "$NUM_WORKERS" \
-            --max-frames "$NORM_MAX_FRAMES" \
-            --episodes-index "${NORM_EPISODES[@]}" \
+        NORM_ARGS=(
+            --config-name pi05_b1k
+            --dataset-root "$LOCAL_DATASET"
+            --repo-id "$REPO_ID"
+            --batch-size "$BATCH_SIZE"
+            --num-workers "$NUM_WORKERS"
+            --max-frames "$NORM_MAX_FRAMES"
+            --episodes-index "${NORM_EPISODES[@]}"
             --assets-base-dir "$ASSETS_BASE_DIR"
+        )
+        if [[ "$DATASET_PROFILE" == "two_tasks_subtask_only" ]]; then
+            NORM_ARGS+=(
+                --frame-stride "$FRAME_STRIDE"
+                --subtask-prompts-path "$LOCAL_DATASET/meta/subtask_segments.parquet"
+                --strict-subtask-action-chunks
+                --action-horizon 32
+            )
+        fi
+        run_with_heartbeat "normalization statistics" \
+            "$ENV_PREFIX/bin/python" scripts/compute_norm_stats.py "${NORM_ARGS[@]}"
         LOCAL_NORM_FILE="$ASSETS_BASE_DIR/pi05_b1k/$REPO_ID/norm_stats.json"
         require_file "$LOCAL_NORM_FILE"
         NORM_SHA="$(sha256sum "$LOCAL_NORM_FILE" | cut -d' ' -f1)"
@@ -654,6 +707,17 @@ TRAIN_EXPECTED_TASKS="$EXPECTED_TASKS"
 if [[ "$DATASET_PROFILE" == "full100" && "$MODE" == "smoke" ]]; then
     TRAIN_EXPECTED_TASKS=2
 fi
+if [[ "$DATASET_PROFILE" == "two_tasks_subtask_only" ]]; then
+    TRAIN_SCRIPT="$REPO_ROOT/scripts/train_pi05_b1k.sh"
+    TRAIN_SUBTASK_PREDICTION=0
+    TRAIN_STRICT_SUBTASK_ACTION_CHUNKS=1
+    TRAIN_MAX_TOKEN_LEN=200
+else
+    TRAIN_SCRIPT="$REPO_ROOT/scripts/train_pi05_subtask_b1k.sh"
+    TRAIN_SUBTASK_PREDICTION=1
+    TRAIN_STRICT_SUBTASK_ACTION_CHUNKS=0
+    TRAIN_MAX_TOKEN_LEN=512
+fi
 
 log "starting multi-host $MODE; log: $RANK_LOG"
 
@@ -674,23 +738,27 @@ run_with_heartbeat "multi-host training" env \
     TRAIN_EPOCHS="$TRAIN_EPOCHS" \
     TRAIN_STEPS="$TRAIN_STEPS" \
     EXPECTED_TASKS="$TRAIN_EXPECTED_TASKS" \
+    EXPECTED_TASK_INDICES="$EXPECTED_TASK_INDICES" \
     EXPECTED_RETAINED_EPISODES="$EXPECTED_RETAINED_EPISODES" \
     EXPECTED_RETAINED_FRAMES="$EXPECTED_RETAINED_FRAMES" \
+    EXPECTED_TRAINING_SAMPLES="$EXPECTED_TRAINING_SAMPLES" \
     EXPECTED_BATCHES_PER_EPOCH="$EXPECTED_BATCHES_PER_EPOCH" \
     EXPECTED_TRAIN_STEPS="$EXPECTED_TRAIN_STEPS" \
     SAVE_INTERVAL="$SAVE_INTERVAL" \
     KEEP_PERIOD="$KEEP_PERIOD" \
     LOG_INTERVAL="$LOG_INTERVAL" \
     FRAME_STRIDE="$FRAME_STRIDE" \
+    ACTION_HORIZON=32 \
     LR_DECAY_STEPS="$LR_DECAY_STEPS_VALUE" \
     RESUME="$RESUME" \
-    SUBTASK_PREDICTION=1 \
+    SUBTASK_PREDICTION="$TRAIN_SUBTASK_PREDICTION" \
+    STRICT_SUBTASK_ACTION_CHUNKS="$TRAIN_STRICT_SUBTASK_ACTION_CHUNKS" \
     WHOLE_TASK_PROB=0 \
-    MAX_TOKEN_LEN=512 \
+    MAX_TOKEN_LEN="$TRAIN_MAX_TOKEN_LEN" \
     MAX_SUBTASK_LEN=64 \
     SUBTASK_LOSS_WEIGHT=1.0 \
     SUBTASK_LOSS_CHUNK_SIZE=8 \
     SUBTASK_EMPTY_LABEL_POLICY=drop_episode \
     SUBTASK_PROMPTS="$LOCAL_DATASET/meta/subtask_segments.parquet" \
     NORM_MAX_FRAMES="$NORM_MAX_FRAMES" \
-    bash "$REPO_ROOT/scripts/train_pi05_subtask_b1k.sh" full
+    bash "$TRAIN_SCRIPT" full

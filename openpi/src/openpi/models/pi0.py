@@ -64,11 +64,34 @@ def posemb_sincos(
     return jnp.concatenate([jnp.sin(sinusoid_input), jnp.cos(sinusoid_input)], axis=-1)
 
 
+def reduce_action_loss(
+    action_loss: at.Array, action_loss_mask: at.Array | None
+) -> tuple[at.Array, dict[str, at.Array]]:
+    """Mask invalid timesteps while giving every sample equal weight under an outer mean."""
+    if action_loss_mask is None:
+        return action_loss, {"action_loss": jnp.mean(action_loss)}
+    if action_loss_mask.shape != action_loss.shape:
+        raise ValueError(
+            f"action_loss_mask must match per-timestep action loss shape {action_loss.shape}, "
+            f"got {action_loss_mask.shape}."
+        )
+    mask = action_loss_mask.astype(jnp.bool_)
+    valid_steps = jnp.sum(mask, axis=-1)
+    scale = action_loss.shape[-1] / jnp.maximum(valid_steps, 1)
+    normalized = jnp.where(mask, action_loss * scale[..., None], 0.0)
+    normalized = jnp.where((valid_steps > 0)[..., None], normalized, jnp.nan)
+    return normalized, {
+        "action_loss": jnp.mean(normalized),
+        "valid_action_fraction": jnp.mean(mask.astype(jnp.float32)),
+    }
+
+
 class Pi0(_model.BaseModel):
     def __init__(self, config: pi0_config.Pi0Config, rngs: nnx.Rngs):
         super().__init__(config.action_dim, config.action_horizon, config.max_token_len)
         self.pi05 = config.pi05
         self.train_subtask_prediction = config.train_subtask_prediction
+        self.train_subtask_executor = config.train_subtask_executor
         self.subtask_loss_weight = config.subtask_loss_weight
         self.max_subtask_len = config.max_subtask_len
         self.subtask_loss_chunk_size = config.subtask_loss_chunk_size
@@ -206,6 +229,8 @@ class Pi0(_model.BaseModel):
     ) -> tuple[at.Array, dict[str, at.Array]]:
         if self.train_subtask_prediction and (observation.token_ar_mask is None or observation.token_loss_mask is None):
             raise ValueError("Subtask training requires token_ar_mask and token_loss_mask from the subtask tokenizer.")
+        if self.train_subtask_executor and observation.action_loss_mask is None:
+            raise ValueError("Pure subtask executor training requires action_loss_mask.")
         preprocess_rng, noise_rng, time_rng = jax.random.split(rng, 3)
         observation = _model.preprocess_observation(preprocess_rng, observation, train=train)
 
@@ -215,6 +240,10 @@ class Pi0(_model.BaseModel):
         time_expanded = time[..., None, None]
         x_t = time_expanded * noise + (1 - time_expanded) * actions
         u_t = noise - actions
+        if observation.action_loss_mask is not None:
+            valid_targets = observation.action_loss_mask.astype(jnp.bool_)[..., None]
+            x_t = jnp.where(valid_targets, x_t, noise)
+            u_t = jnp.where(valid_targets, u_t, 0.0)
 
         # one big forward pass of prefix + suffix at once
         prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
@@ -222,14 +251,18 @@ class Pi0(_model.BaseModel):
         input_mask = jnp.concatenate([prefix_mask, suffix_mask], axis=1)
         ar_mask = jnp.concatenate([prefix_ar_mask, jnp.broadcast_to(suffix_ar_mask, suffix_mask.shape)], axis=1)
         attn_mask = make_attn_mask(input_mask, ar_mask)
+        if observation.action_loss_mask is not None:
+            attn_mask = attn_mask.at[:, :, -self.action_horizon :].set(
+                attn_mask[:, :, -self.action_horizon :] & observation.action_loss_mask.astype(jnp.bool_)[:, None, :]
+            )
         positions = jnp.cumsum(input_mask, axis=1) - 1
         (prefix_out, suffix_out), _ = self.PaliGemma.llm(
             [prefix_tokens, suffix_tokens], mask=attn_mask, positions=positions, adarms_cond=[None, adarms_cond]
         )
         v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
 
-        action_loss = jnp.mean(jnp.square(v_t - u_t), axis=-1)
-        metrics = {"action_loss": jnp.mean(action_loss)}
+        per_timestep_action_loss = jnp.mean(jnp.square(v_t - u_t), axis=-1)
+        action_loss, metrics = reduce_action_loss(per_timestep_action_loss, observation.action_loss_mask)
         if not self.train_subtask_prediction:
             return action_loss, metrics
         subtask_loss, token_accuracy, counts = self._compute_subtask_metrics(prefix_out, observation)

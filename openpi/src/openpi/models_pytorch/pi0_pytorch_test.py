@@ -76,6 +76,7 @@ def make_model(module, *, subtask=True):
     model.config = types.SimpleNamespace(action_dim=3, action_horizon=2)
     model.pi05 = True
     model.train_subtask_prediction = subtask
+    model.train_subtask_executor = False
     model.max_subtask_len = 4
     model.subtask_loss_chunk_size = 2
     model.subtask_loss_weight = 0.7
@@ -164,6 +165,31 @@ def test_invalid_labels_fail_before_silent_zero_loss(model_module, invalid):
         model._compute_subtask_metrics(torch.randn(2, 9, 8), obs)
 
 
+def test_masked_action_reduction_and_no_mask_regression(model_module):
+    elementwise = torch.tensor(
+        [
+            [[1.0, 3.0], [5.0, 7.0], [100.0, 200.0]],
+            [[2.0, 4.0], [50.0, 60.0], [70.0, 80.0]],
+        ]
+    )
+    mask = torch.tensor([[True, True, False], [True, False, False]])
+    masked, metrics = model_module.reduce_action_loss(elementwise, mask)
+
+    expected = torch.tensor(
+        [
+            [[1.5, 4.5], [7.5, 10.5], [0.0, 0.0]],
+            [[6.0, 12.0], [0.0, 0.0], [0.0, 0.0]],
+        ]
+    )
+    torch.testing.assert_close(masked, expected)
+    torch.testing.assert_close(metrics["action_loss"], torch.tensor(3.5))
+    torch.testing.assert_close(metrics["valid_action_fraction"], torch.tensor(0.5))
+    unmasked, unmasked_metrics = model_module.reduce_action_loss(elementwise, None)
+    torch.testing.assert_close(unmasked, elementwise)
+    torch.testing.assert_close(unmasked_metrics["action_loss"], elementwise.mean())
+    assert set(unmasked_metrics) == {"action_loss"}
+
+
 def test_joint_forward_weights_losses_and_backpropagates(model_module):
     torch.manual_seed(8)
     model = make_model(model_module)
@@ -187,6 +213,45 @@ def test_joint_forward_weights_losses_and_backpropagates(model_module):
     assert ordinary.shape == (2, 2, 3)
     torch.testing.assert_close(ordinary.mean(), metrics["action_loss"])
     assert set(ordinary_metrics) == {"action_loss"}
+
+
+def test_executor_forward_reports_masked_action_metrics(model_module):
+    torch.manual_seed(9)
+    model = make_model(model_module, subtask=False)
+    model.train_subtask_executor = True
+    obs = make_observation()
+    obs.token_ar_mask = None
+    obs.token_loss_mask = None
+    obs.action_loss_mask = torch.tensor([[True, False], [True, True]])
+    losses, metrics = model(obs, torch.randn(2, 2, 3), return_metrics=True)
+
+    assert losses.shape == (2, 2, 3)
+    torch.testing.assert_close(losses[0, 1], torch.zeros(3))
+    assert torch.count_nonzero(losses[1]) > 0
+    assert set(metrics) == {"action_loss", "valid_action_fraction"}
+    torch.testing.assert_close(metrics["valid_action_fraction"], torch.tensor(0.75))
+
+
+def test_executor_valid_loss_is_independent_of_masked_future_targets(model_module):
+    torch.manual_seed(10)
+    model = make_model(model_module, subtask=False)
+    model.train_subtask_executor = True
+    obs = make_observation()
+    obs.token_ar_mask = None
+    obs.token_loss_mask = None
+    obs.action_loss_mask = torch.tensor([[True, False], [True, False]])
+    actions = torch.randn(2, 2, 3)
+    changed_actions = actions.clone()
+    changed_actions[:, 1] += 1000.0
+    noise = torch.randn_like(actions)
+    time = torch.tensor([0.2, 0.6])
+
+    original = model(obs, actions, noise=noise, time=time)
+    changed = model(obs, changed_actions, noise=noise, time=time)
+
+    torch.testing.assert_close(original[:, 0], changed[:, 0])
+    torch.testing.assert_close(original[:, 1], torch.zeros_like(original[:, 1]))
+    torch.testing.assert_close(changed[:, 1], torch.zeros_like(changed[:, 1]))
 
 
 def test_checkpoint_keeps_embedding_gradients_with_integer_inputs(model_module):

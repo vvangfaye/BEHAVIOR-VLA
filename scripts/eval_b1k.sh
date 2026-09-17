@@ -14,6 +14,8 @@ PORT="${PORT:-8000}"
 NUM_ROLLOUTS="${NUM_ROLLOUTS:-1}"
 MODE="${MODE:-public_test}"
 PROMPT_MODE="${PROMPT_MODE:-whole_task}"
+EXTERNAL_SUBTASK_SET="${EXTERNAL_SUBTASK+x}"
+EXTERNAL_SUBTASK="${EXTERNAL_SUBTASK:-}"
 case "$PROMPT_MODE" in
     whole_task|oracle_unsatisfied_goal) ;;
     *) echo "PROMPT_MODE must be whole_task or oracle_unsatisfied_goal" >&2; exit 2 ;;
@@ -47,6 +49,19 @@ PI05_MEM_FRACTION="${PI05_MEM_FRACTION:-0.85}"
 SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-0}"
 if [[ "$SUBTASK_PREDICTION" != 0 && "$SUBTASK_PREDICTION" != 1 ]]; then
     echo "SUBTASK_PREDICTION must be 0 or 1" >&2; exit 2
+fi
+EXTERNAL_SUBTASK_ARGS=()
+if [[ -n "$EXTERNAL_SUBTASK_SET" ]]; then
+    if [[ ! "$EXTERNAL_SUBTASK" =~ [^[:space:]] ]]; then
+        echo "EXTERNAL_SUBTASK must be a non-empty, non-whitespace string" >&2; exit 2
+    fi
+    if [[ "$SUBTASK_PREDICTION" != 1 ]]; then
+        echo "EXTERNAL_SUBTASK requires SUBTASK_PREDICTION=1" >&2; exit 2
+    fi
+    if [[ "$PROMPT_MODE" != whole_task ]]; then
+        echo "EXTERNAL_SUBTASK requires PROMPT_MODE=whole_task" >&2; exit 2
+    fi
+    EXTERNAL_SUBTASK_ARGS=(--external-subtask "$EXTERNAL_SUBTASK")
 fi
 SUBTASK_SERVER_ARGS=()
 if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
@@ -175,7 +190,7 @@ for task in "${TASKS[@]}"; do
         continue
     fi
     cd "$REPO_ROOT/BEHAVIOR-1K"
-    EVAL_ARGS=()
+    EVAL_ARGS=("${EXTERNAL_SUBTASK_ARGS[@]}")
     if [[ -n "$INSTANCE_INDICES" ]]; then
         # shellcheck disable=SC2086
         EVAL_ARGS+=(--instance-indices $INSTANCE_INDICES)

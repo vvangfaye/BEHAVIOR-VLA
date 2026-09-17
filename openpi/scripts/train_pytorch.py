@@ -41,6 +41,16 @@ if TYPE_CHECKING:
 
 
 _CHECKPOINT_FILES = ("model.safetensors", "optimizer.pt", "metadata.json", "rng.pt")
+_RESUME_COMPATIBLE_DEFAULTS = {
+    "model": ((("train_subtask_executor",), False),),
+    "data": (
+        (("subtask_executor_max_samples_per_segment",), None),
+        (("strict_subtask_action_chunks",), False),
+        (("base_config", "subtask_executor"), False),
+        (("base_config", "subtask_executor_max_samples_per_segment"), None),
+        (("base_config", "strict_subtask_action_chunks"), False),
+    ),
+}
 
 
 def init_logging():
@@ -275,6 +285,28 @@ def _config_summary(config):
     return json.loads(json.dumps(fields, default=encode))
 
 
+def _add_resume_compatible_defaults(section, saved, current):
+    migrated = json.loads(json.dumps(saved))
+    for path, default in _RESUME_COMPATIBLE_DEFAULTS.get(section, ()):
+        saved_parent = migrated
+        current_parent = current
+        for key in path[:-1]:
+            if not isinstance(saved_parent, dict) or not isinstance(current_parent, dict):
+                break
+            saved_parent = saved_parent.get(key)
+            current_parent = current_parent.get(key)
+        else:
+            key = path[-1]
+            if (
+                isinstance(saved_parent, dict)
+                and isinstance(current_parent, dict)
+                and key not in saved_parent
+                and current_parent.get(key) == default
+            ):
+                saved_parent[key] = default
+    return migrated
+
+
 def save_checkpoint(model, optimizer, global_step, config, is_main=None, data_config=None):
     """Collect per-rank RNG, then atomically publish a complete, inference-ready checkpoint.
 
@@ -343,7 +375,8 @@ def load_checkpoint(model, optimizer, checkpoint_dir, device, config=None):
         saved_config = metadata["config"]
         current_config = _config_summary(config)
         for name in ("model", "data", "optimizer", "lr_schedule", "seed", "pytorch_training_precision"):
-            if name in saved_config and saved_config[name] != current_config.get(name):
+            saved_section = _add_resume_compatible_defaults(name, saved_config.get(name), current_config.get(name))
+            if name in saved_config and saved_section != current_config.get(name):
                 raise ValueError(
                     f"Resume configuration changed {name}; use a new experiment for a new fine-tuning run."
                 )

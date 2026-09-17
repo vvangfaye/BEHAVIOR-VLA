@@ -82,6 +82,24 @@ def make_att_2d_masks(pad_masks, att_masks):
     return att_2d_masks & pad_2d_masks
 
 
+def reduce_action_loss(action_loss: Tensor, action_loss_mask: Tensor | None) -> tuple[Tensor, dict[str, Tensor]]:
+    """Mask invalid timesteps while giving every sample equal weight under an outer mean."""
+    if action_loss_mask is None:
+        return action_loss, {"action_loss": action_loss.mean()}
+    if action_loss_mask.shape != action_loss.shape[:-1]:
+        raise ValueError(f"action_loss_mask must have shape {action_loss.shape[:-1]}, got {action_loss_mask.shape}.")
+    mask = action_loss_mask.bool()
+    valid_steps = mask.sum(dim=-1)
+    if not bool((valid_steps > 0).all()):
+        raise ValueError("Each executor sample must contain at least one valid action timestep.")
+    scale = action_loss.shape[-2] / valid_steps
+    normalized = torch.where(mask[..., None], action_loss * scale[:, None, None], 0.0)
+    return normalized, {
+        "action_loss": normalized.mean(),
+        "valid_action_fraction": mask.float().mean(),
+    }
+
+
 class PI0Pytorch(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -90,6 +108,7 @@ class PI0Pytorch(nn.Module):
         self.action_dim = config.action_dim
         self.action_horizon = config.action_horizon
         self.train_subtask_prediction = config.train_subtask_prediction
+        self.train_subtask_executor = getattr(config, "train_subtask_executor", False)
         self.subtask_loss_weight = config.subtask_loss_weight
         self.max_subtask_len = config.max_subtask_len
         self.subtask_loss_chunk_size = config.subtask_loss_chunk_size
@@ -333,6 +352,9 @@ class PI0Pytorch(nn.Module):
         """
         if self.train_subtask_prediction and (observation.token_ar_mask is None or observation.token_loss_mask is None):
             raise ValueError("Subtask training requires token_ar_mask and token_loss_mask from the subtask tokenizer.")
+        action_loss_mask = getattr(observation, "action_loss_mask", None)
+        if self.train_subtask_executor and action_loss_mask is None:
+            raise ValueError("Pure subtask executor training requires action_loss_mask.")
         images, img_masks, lang_tokens, lang_masks, state = self._preprocess_observation(observation, train=True)
 
         if noise is None:
@@ -344,6 +366,10 @@ class PI0Pytorch(nn.Module):
         time_expanded = time[:, None, None]
         x_t = time_expanded * noise + (1 - time_expanded) * actions
         u_t = noise - actions
+        if action_loss_mask is not None:
+            valid_targets = action_loss_mask.bool()[..., None]
+            x_t = torch.where(valid_targets, x_t, noise)
+            u_t = torch.where(valid_targets, u_t, 0.0)
 
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
             images, img_masks, lang_tokens, lang_masks, observation.token_ar_mask
@@ -360,6 +386,10 @@ class PI0Pytorch(nn.Module):
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
 
         att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
+        if action_loss_mask is not None:
+            action_key_mask = torch.ones_like(pad_masks)
+            action_key_mask[:, -self.config.action_horizon :] = action_loss_mask.bool()
+            att_2d_masks = att_2d_masks & action_key_mask[:, None, :]
         position_ids = torch.cumsum(pad_masks, dim=1) - 1
 
         # Prepare attention masks
@@ -390,8 +420,8 @@ class PI0Pytorch(nn.Module):
 
         v_t = self._apply_checkpoint(action_out_proj_func, suffix_out)
 
-        action_loss = F.mse_loss(u_t.float(), v_t.float(), reduction="none")
-        metrics = {"action_loss": action_loss.mean()}
+        elementwise_action_loss = F.mse_loss(u_t.float(), v_t.float(), reduction="none")
+        action_loss, metrics = reduce_action_loss(elementwise_action_loss, action_loss_mask)
         loss = action_loss
         if self.train_subtask_prediction:
             subtask_loss, token_accuracy, counts = self._compute_subtask_metrics(prefix_out, observation)

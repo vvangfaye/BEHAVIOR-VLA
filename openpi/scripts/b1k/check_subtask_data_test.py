@@ -62,6 +62,8 @@ def _dataset_with_empty_labels(tmp_path):
                 "start": [0, 0, 5, 0],
                 "end": [576, 5, 10, 5],
                 "subtask": ["", "move to radio", "press radio", " \t"],
+                "is_annotated": [True, True, True, True],
+                "provenance": ["annotated", "annotated", "annotated", "annotated"],
             }
         ),
         segments,
@@ -191,6 +193,131 @@ def test_training_contract_rejects_invalid_topology(tmp_path, monkeypatch, token
         )
 
 
+def test_strict_action_only_contract_drops_boundary_crossing_anchors(tmp_path, monkeypatch, tokenizer):
+    segments = _dataset_with_empty_labels(tmp_path)
+    episode_file = next((tmp_path / "meta" / "episodes").glob("chunk-*/*.parquet"))
+    table = pq.read_table(episode_file)
+    pq.write_table(table.append_column("task_index", pa.array([0, 0, 1])), episode_file)
+    tokenizer._max_len = 512
+    monkeypatch.setattr(check_subtask_data, "PaligemmaTokenizer", lambda max_len: tokenizer)
+
+    report = check_subtask_data.check_dataset(
+        tmp_path,
+        segments,
+        episodes_index=[42],
+        frame_stride=1,
+        global_batch_size=4,
+        process_count=1,
+        epochs=3,
+        expected_tasks=1,
+        expected_task_indices=[0],
+        action_horizon=3,
+        strict_subtask_action_chunks=True,
+        conditioning_mode="subtask_only",
+    )
+
+    assert report["max_prompt_tokens"] < report["max_token_len"]
+    assert "max_label_tokens_including_eos" not in report
+    assert report["training_contract"] == {
+        "annotation_sha256": check_subtask_data._sha256(segments),
+        "episode_list_sha256": check_subtask_data._episode_list_sha256([42]),
+        "frame_stride": 1,
+        "process_count": 1,
+        "retained_episodes": 1,
+        "retained_frames": 10,
+        "retained_tasks": 1,
+        "strided_samples": 6,
+        "action_horizon": 3,
+        "boundary_rejected_anchors": 4,
+        "conditioning_mode": "subtask_only",
+        "eligible_action_anchors": 6,
+        "retained_task_indices": [0],
+        "strict_subtask_action_chunks": True,
+        "annotated_segments": 2,
+        "imputed_segments": 0,
+        "annotated_frames": 10,
+        "imputed_frames": 0,
+        "global_batch_size": 4,
+        "local_batch_size": 4,
+        "samples_per_process": 6,
+        "batches_per_epoch": 1,
+        "dropped_samples_per_epoch": 2,
+        "epochs": 3,
+        "train_steps": 3,
+    }
+    assert "annotation_role_column" not in report["training_contract"]
+    assert "provenance_column" not in report["training_contract"]
+    assert "provenance_counts" not in report["training_contract"]
+
+
+def test_executor_contract_reports_capped_samples_roles_and_valid_steps(tmp_path, monkeypatch, tokenizer):
+    segments = _dataset_with_empty_labels(tmp_path)
+    episode_file = next((tmp_path / "meta" / "episodes").glob("chunk-*/*.parquet"))
+    table = pq.read_table(episode_file)
+    pq.write_table(table.append_column("task_index", pa.array([0, 0, 1])), episode_file)
+    tokenizer._max_len = 512
+    monkeypatch.setattr(check_subtask_data, "PaligemmaTokenizer", lambda max_len: tokenizer)
+
+    report = check_subtask_data.check_dataset(
+        tmp_path,
+        segments,
+        episodes_index=[42],
+        frame_stride=1,
+        global_batch_size=4,
+        process_count=1,
+        epochs=3,
+        expected_tasks=1,
+        expected_task_indices=[0],
+        action_horizon=3,
+        subtask_executor=True,
+        max_samples_per_segment=3,
+        conditioning_mode="subtask_only",
+    )
+
+    assert report["max_prompt_tokens"] < report["max_token_len"]
+    assert "max_label_tokens_including_eos" not in report
+    assert report["training_contract"] == {
+        "annotation_sha256": check_subtask_data._sha256(segments),
+        "episode_list_sha256": check_subtask_data._episode_list_sha256([42]),
+        "frame_stride": 1,
+        "process_count": 1,
+        "retained_episodes": 1,
+        "retained_frames": 10,
+        "retained_tasks": 1,
+        "strided_samples": 6,
+        "annotated_segments": 2,
+        "imputed_segments": 0,
+        "annotated_frames": 10,
+        "imputed_frames": 0,
+        "action_horizon": 3,
+        "annotation_role_column": "is_annotated",
+        "capped_sample_count": 6,
+        "conditioning_mode": "subtask_only",
+        "eligible_action_anchors": 10,
+        "max_samples_per_segment": 3,
+        "provenance_column": "provenance",
+        "provenance_counts": {"segments": {"annotated": 2}, "frames": {"annotated": 10}},
+        "retained_task_indices": [0],
+        "subtask_executor": True,
+        "valid_action_step_distribution": {1: 2, 3: 4},
+        "global_batch_size": 4,
+        "local_batch_size": 4,
+        "samples_per_process": 6,
+        "batches_per_epoch": 1,
+        "dropped_samples_per_epoch": 2,
+        "epochs": 3,
+        "train_steps": 3,
+    }
+    with pytest.raises(ValueError, match="Expected retained task indices"):
+        check_subtask_data.check_dataset(
+            tmp_path,
+            segments,
+            episodes_index=[42],
+            expected_task_indices=[1],
+            conditioning_mode="subtask_only",
+        )
+
+
 @pytest.mark.parametrize(("mode", "policy"), [("full", "drop_episode"), ("check", "drop_episode"), ("full", "error")])
 def test_launcher_propagates_preflight_subset_to_norm_stats_and_trainer(tmp_path, tokenizer, mode, policy):
     """Run the real shell + preflight; record heavy norm/train invocations instead of running them."""
@@ -267,3 +394,184 @@ def test_launcher_propagates_preflight_subset_to_norm_stats_and_trainer(tmp_path
         index = command.index(flag)
         assert command[index + 1] == "42"
         assert index + 2 == len(command) or command[index + 2].startswith("--")
+
+
+def test_executor_launcher_propagates_masked_dataset_contract(tmp_path, tokenizer):
+    segments = _dataset_with_empty_labels(tmp_path)
+    episode_file = next((tmp_path / "meta" / "episodes").glob("chunk-*/*.parquet"))
+    table = pq.read_table(episode_file)
+    pq.write_table(table.append_column("task_index", pa.array([0, 0, 1])), episode_file)
+    (tmp_path / "meta" / "info.json").write_text("{}")
+    requested = tmp_path / "requested.txt"
+    requested.write_text("42\n99\n")
+    fake_openpi = tmp_path / "openpi"
+    bin_dir = fake_openpi / ".venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "python").symlink_to(sys.executable)
+    (bin_dir / "activate").write_text(f"export PATH={shlex.quote(str(bin_dir))}:$PATH\n")
+    scripts = fake_openpi / "scripts"
+    (scripts / "b1k").mkdir(parents=True)
+    real_preflight = Path(check_subtask_data.__file__).resolve()
+    (scripts / "b1k" / "check_subtask_data.py").write_text(
+        "from pathlib import Path\nimport runpy\nimport openpi.shared.download as download\n"
+        f"download.maybe_download = lambda *args, **kwargs: Path({str(tmp_path / 'sp.model')!r})\n"
+        f"runpy.run_path({str(real_preflight)!r}, run_name='__main__')\n"
+    )
+    calls = tmp_path / "calls.jsonl"
+    norm_recorder = (
+        "import json, pathlib, sys\n"
+        f"with open({str(calls)!r}, 'a') as out: out.write(json.dumps(sys.argv) + '\\n')\n"
+        "args = sys.argv\n"
+        "assets = pathlib.Path(args[args.index('--assets-base-dir') + 1])\n"
+        "repo = args[args.index('--repo-id') + 1]\n"
+        "path = assets / 'pi05_b1k' / repo / 'norm_stats.json'\n"
+        "path.parent.mkdir(parents=True, exist_ok=True)\n"
+        "path.write_text('{}')\n"
+    )
+    train_recorder = (
+        f"import json, sys\nwith open({str(calls)!r}, 'a') as out: out.write(json.dumps(sys.argv) + '\\n')\n"
+    )
+    (scripts / "compute_norm_stats.py").write_text(norm_recorder)
+    (scripts / "b1k" / "train_b1k.py").write_text(train_recorder)
+    repo = real_preflight.parents[3]
+    env = {
+        **os.environ,
+        "CODE_ROOT": str(repo),
+        "OPENPI_DIR": str(fake_openpi),
+        "DATASET_ROOT": str(tmp_path),
+        "EPISODES_FILE": str(requested),
+        "EXP_NAME": "masked_executor",
+        "REPO_ID": "masked/executor",
+        "NUM_GPUS": "1",
+        "CUDA_DEVICES": "0",
+        "BATCH_SIZE": "2",
+        "NUM_WORKERS": "0",
+        "SUBTASK_PREDICTION": "0",
+        "SUBTASK_EXECUTOR": "1",
+        "SUBTASK_PROMPTS": str(segments),
+        "SUBTASK_EMPTY_LABEL_POLICY": "drop_episode",
+        "WHOLE_TASK_PROB": "0",
+        "MAX_TOKEN_LEN": "200",
+        "MAX_SAMPLES_PER_SEGMENT": "3",
+        "ACTION_HORIZON": "3",
+        "TRAIN_EPOCHS": "2",
+        "TRAIN_STEPS": "6",
+        "LR_DECAY_STEPS": "6",
+        "EXPECTED_TASKS": "1",
+        "EXPECTED_TASK_INDICES": "0",
+        "EXPECTED_RETAINED_EPISODES": "1",
+        "EXPECTED_RETAINED_FRAMES": "10",
+        "EXPECTED_TRAINING_SAMPLES": "6",
+        "EXPECTED_BATCHES_PER_EPOCH": "3",
+        "EXPECTED_TRAIN_STEPS": "6",
+        "PYTHONPATH": os.pathsep.join(str(Path(path or ".").resolve()) for path in sys.path),
+        "JAX_PLATFORMS": "cpu",
+    }
+
+    result = subprocess.run(
+        ["bash", str(repo / "scripts" / "train_pi05_b1k.sh"), "full"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    commands = [json.loads(line) for line in calls.read_text().splitlines()]
+    assert len(commands) == 2
+    norm_command, train_command = commands
+    assert norm_command[norm_command.index("--episodes-index") + 1] == "42"
+    assert "--model.train-subtask-executor" in train_command
+    assert train_command[train_command.index("--model.action-horizon") + 1] == "3"
+    assert train_command[train_command.index("--data.subtask-executor-max-samples-per-segment") + 1] == "3"
+    assert train_command[train_command.index("--data.episodes-index") + 1] == "42"
+    assert "--model.train-subtask-prediction" not in train_command
+    assert "--overwrite" not in train_command
+
+
+def test_action_only_launcher_propagates_strict_dataset_contract(tmp_path, tokenizer):
+    segments = _dataset_with_empty_labels(tmp_path)
+    episode_file = next((tmp_path / "meta" / "episodes").glob("chunk-*/*.parquet"))
+    table = pq.read_table(episode_file)
+    pq.write_table(table.append_column("task_index", pa.array([0, 0, 1])), episode_file)
+    (tmp_path / "meta" / "info.json").write_text("{}")
+    requested = tmp_path / "requested.txt"
+    requested.write_text("42\n99\n")
+    fake_openpi = tmp_path / "openpi"
+    bin_dir = fake_openpi / ".venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "python").symlink_to(sys.executable)
+    (bin_dir / "activate").write_text(f"export PATH={shlex.quote(str(bin_dir))}:$PATH\n")
+    scripts = fake_openpi / "scripts"
+    (scripts / "b1k").mkdir(parents=True)
+    real_preflight = Path(check_subtask_data.__file__).resolve()
+    (scripts / "b1k" / "check_subtask_data.py").write_text(
+        "from pathlib import Path\nimport runpy\nimport openpi.shared.download as download\n"
+        f"download.maybe_download = lambda *args, **kwargs: Path({str(tmp_path / 'sp.model')!r})\n"
+        f"runpy.run_path({str(real_preflight)!r}, run_name='__main__')\n"
+    )
+    calls = tmp_path / "calls.jsonl"
+    recorder = (
+        f"import json, sys\nwith open({str(calls)!r}, 'a') as out:\n    out.write(json.dumps(sys.argv) + '\\n')\n"
+    )
+    (scripts / "compute_norm_stats.py").write_text(recorder)
+    (scripts / "b1k" / "train_b1k.py").write_text(recorder)
+    repo = real_preflight.parents[3]
+    env = {
+        **os.environ,
+        "CODE_ROOT": str(repo),
+        "OPENPI_DIR": str(fake_openpi),
+        "DATASET_ROOT": str(tmp_path),
+        "EPISODES_FILE": str(requested),
+        "EXP_NAME": "strict_action_only",
+        "REPO_ID": "strict/action-only",
+        "NUM_GPUS": "1",
+        "CUDA_DEVICES": "0",
+        "BATCH_SIZE": "2",
+        "NUM_WORKERS": "0",
+        "SUBTASK_PREDICTION": "0",
+        "SUBTASK_EXECUTOR": "0",
+        "STRICT_SUBTASK_ACTION_CHUNKS": "1",
+        "SUBTASK_PROMPTS": str(segments),
+        "SUBTASK_EMPTY_LABEL_POLICY": "drop_episode",
+        "WHOLE_TASK_PROB": "0",
+        "MAX_TOKEN_LEN": "512",
+        "ACTION_HORIZON": "3",
+        "TRAIN_EPOCHS": "2",
+        "TRAIN_STEPS": "6",
+        "LR_DECAY_STEPS": "6",
+        "EXPECTED_TASKS": "1",
+        "EXPECTED_TASK_INDICES": "0",
+        "EXPECTED_RETAINED_EPISODES": "1",
+        "EXPECTED_RETAINED_FRAMES": "10",
+        "EXPECTED_TRAINING_SAMPLES": "6",
+        "EXPECTED_BATCHES_PER_EPOCH": "3",
+        "EXPECTED_TRAIN_STEPS": "6",
+        "PYTHONPATH": os.pathsep.join(str(Path(path or ".").resolve()) for path in sys.path),
+        "JAX_PLATFORMS": "cpu",
+    }
+
+    result = subprocess.run(
+        ["bash", str(repo / "scripts" / "train_pi05_b1k.sh"), "full"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    commands = [json.loads(line) for line in calls.read_text().splitlines()]
+    assert len(commands) == 2
+    norm_command, train_command = commands
+    assert "--strict-subtask-action-chunks" in norm_command
+    assert norm_command[norm_command.index("--frame-stride") + 1] == "1"
+    assert norm_command[norm_command.index("--action-horizon") + 1] == "3"
+    assert norm_command[norm_command.index("--subtask-prompts-path") + 1] == str(segments)
+    assert "--data.strict-subtask-action-chunks" in train_command
+    assert train_command[train_command.index("--model.action-horizon") + 1] == "3"
+    assert train_command[train_command.index("--data.episodes-index") + 1] == "42"
+    assert "--model.train-subtask-prediction" not in train_command
+    assert "--model.train-subtask-executor" not in train_command
+    assert "--overwrite" not in train_command

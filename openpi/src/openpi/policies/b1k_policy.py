@@ -4,8 +4,8 @@ import einops
 import numpy as np
 
 from openpi import transforms
-from openpi.models import model as _model
 from openpi.configs.robots.base_config import RobotConfig
+from openpi.models import model as _model
 
 
 def make_b1k_example() -> dict:
@@ -100,6 +100,8 @@ class B1KInputs(transforms.DataTransformFn):
             inputs["prompt"] = data["prompt"]
         if "subtask" in data:
             inputs["subtask"] = data["subtask"]
+        if "action_loss_mask" in data:
+            inputs["action_loss_mask"] = np.asarray(data["action_loss_mask"], dtype=np.bool_)
 
         return inputs
 

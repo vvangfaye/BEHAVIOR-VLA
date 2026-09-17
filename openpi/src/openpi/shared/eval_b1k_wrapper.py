@@ -1,11 +1,11 @@
 import logging
 
 import numpy as np
-import torch
 from openpi_client.base_policy import BasePolicy
 from openpi_client.image_tools import resize_with_pad
-from openpi.configs.robots import ROBOT_REGISTRY
+import torch
 
+from openpi.configs.robots import ROBOT_REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ class B1KPolicyWrapper:
         self._last_prompt = None
         self._last_subtask = None
         self.last_subtasks = {}
+        self.last_subtask_sources = {}
 
     def _clear_action_buffers(self):
         self.batch_size = None
@@ -55,6 +56,7 @@ class B1KPolicyWrapper:
         self.num_active_sequences = None
         self.step_counter = None
         self.last_subtasks = {}
+        self.last_subtask_sources = {}
 
     def _resolve_prompt(self, obs: dict) -> str:
         prompt = obs.get("prompt")
@@ -70,8 +72,15 @@ class B1KPolicyWrapper:
 
     def _infer(self, obs, index):
         result = self.policy.infer(obs)
+        index = int(index)
         if "subtask" in result:
-            self.last_subtasks[int(index)] = result["subtask"]
+            self.last_subtasks[index] = result["subtask"]
+        else:
+            self.last_subtasks.pop(index, None)
+        if "subtask_source" in result:
+            self.last_subtask_sources[index] = result["subtask_source"]
+        else:
+            self.last_subtask_sources.pop(index, None)
         return result
 
     def _ensure_batch_initialized(self, batch_size: int, action_dim: int = None):

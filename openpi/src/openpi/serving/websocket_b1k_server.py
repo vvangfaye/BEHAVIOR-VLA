@@ -1,16 +1,17 @@
 import asyncio
+from copy import deepcopy
 import functools
 import http
 import logging
-import msgpack
-import numpy as np
 import time
 import traceback
-import torch
-import websockets.asyncio.server as _server
-import websockets
-from copy import deepcopy
 from typing import Any, Optional
+
+import msgpack
+import numpy as np
+import torch
+import websockets
+import websockets.asyncio.server as _server
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -77,7 +78,11 @@ class WebsocketPolicyServer:
                     "action": action.cpu().numpy(),
                 }
                 if subtasks := getattr(self._policy, "last_subtasks", None):
-                    action["subtasks"] = [subtasks[i] for i in sorted(subtasks)]
+                    subtask_indices = sorted(subtasks)
+                    action["subtasks"] = [subtasks[i] for i in subtask_indices]
+                    subtask_sources = getattr(self._policy, "last_subtask_sources", None)
+                    if subtask_sources and all(i in subtask_sources for i in subtask_indices):
+                        action["subtask_sources"] = [subtask_sources[i] for i in subtask_indices]
                 action["server_timing"] = {
                     "infer_ms": infer_time * 1000,
                 }

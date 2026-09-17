@@ -133,6 +133,7 @@ def create_b1k_dataloader(
     )
     return data_loader, num_batches
 
+
 def main(
     config_name: str,
     max_frames: int | None = None,
@@ -142,25 +143,54 @@ def main(
     num_workers: int | None = None,
     episodes_index: list[int] | None = None,
     assets_base_dir: str | None = None,
+    frame_stride: int | None = None,
+    subtask_prompts_path: str | None = None,
+    action_horizon: int | None = None,
+    *,
+    strict_subtask_action_chunks: bool = False,
 ):
     config = _config.get_config(config_name)
+    if action_horizon is not None:
+        config = dataclasses.replace(config, model=dataclasses.replace(config.model, action_horizon=action_horizon))
     if assets_base_dir is not None:
         config = dataclasses.replace(config, assets_base_dir=assets_base_dir)
     if dataset_root is not None or repo_id is not None:
         base_config = dataclasses.replace(
             config.data.base_config,
             dataset_root=dataset_root or config.data.base_config.dataset_root,
-            episodes_index=episodes_index or config.data.base_config.episodes_index,
+            episodes_index=(episodes_index if episodes_index is not None else config.data.base_config.episodes_index),
         )
         data_config_factory = dataclasses.replace(
             config.data,
             repo_id=repo_id or config.data.repo_id,
             base_config=base_config,
+            frame_stride=frame_stride if frame_stride is not None else config.data.frame_stride,
+            subtask_prompts_path=(
+                subtask_prompts_path if subtask_prompts_path is not None else config.data.subtask_prompts_path
+            ),
+            strict_subtask_action_chunks=strict_subtask_action_chunks,
         )
         config = dataclasses.replace(config, data=data_config_factory)
-    elif episodes_index is not None:
-        base_config = dataclasses.replace(config.data.base_config, episodes_index=episodes_index)
-        config = dataclasses.replace(config, data=dataclasses.replace(config.data, base_config=base_config))
+    elif (
+        episodes_index is not None
+        or frame_stride is not None
+        or subtask_prompts_path is not None
+        or strict_subtask_action_chunks
+    ):
+        base_config = dataclasses.replace(
+            config.data.base_config,
+            episodes_index=(episodes_index if episodes_index is not None else config.data.base_config.episodes_index),
+        )
+        data_config_factory = dataclasses.replace(
+            config.data,
+            base_config=base_config,
+            frame_stride=frame_stride if frame_stride is not None else config.data.frame_stride,
+            subtask_prompts_path=(
+                subtask_prompts_path if subtask_prompts_path is not None else config.data.subtask_prompts_path
+            ),
+            strict_subtask_action_chunks=strict_subtask_action_chunks,
+        )
+        config = dataclasses.replace(config, data=data_config_factory)
     if batch_size is not None:
         config = dataclasses.replace(config, batch_size=batch_size)
     if num_workers is not None:

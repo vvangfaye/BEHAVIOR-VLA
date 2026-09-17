@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 from flax import nnx
 import jax
+import jax.numpy as jnp
 import numpy as np
 import optax
 import pyarrow as pa
@@ -38,6 +39,12 @@ def test_b1k_pipeline_preserves_task_and_original_frame_indices(tmp_path, monkey
         monkeypatch.setattr(jax, "process_count", no_jax_backend)
         monkeypatch.setattr(jax, "process_index", no_jax_backend)
     (tmp_path / "meta").mkdir()
+    episode_meta = tmp_path / "meta" / "episodes" / "chunk-000"
+    episode_meta.mkdir(parents=True)
+    pq.write_table(
+        pa.table({"episode_index": [42], "length": [10], "dataset_from_index": [0]}),
+        episode_meta / "file-000.parquet",
+    )
     (tmp_path / "meta" / "tasks.jsonl").write_text(
         json.dumps(
             {
@@ -56,27 +63,46 @@ def test_b1k_pipeline_preserves_task_and_original_frame_indices(tmp_path, monkey
                 "start": [0, 0, 5],
                 "end": [576, 5, 10],
                 "subtask": ["", "move to radio", "press radio"],
+                "is_annotated": [True, True, True],
+                "provenance": ["annotated", "annotated", "annotated"],
             }
         ),
         tmp_path / "meta" / "subtask_segments.parquet",
     )
     robot = ROBOT_REGISTRY["b1k/R1Pro"]
 
+    class IndexView:
+        def __init__(self, columns):
+            self.columns = columns
+
+        def select_columns(self, names):
+            assert names == ["episode_index", "frame_index"]
+            return IndexView({name: self.columns[name] for name in names})
+
+        def __getitem__(self, name):
+            return self.columns[name]
+
     class Frames:
         def __init__(self, *, episodes, delta_timestamps, **kwargs):
             assert episodes == [42]
             assert len(delta_timestamps[robot.action_key]) == 2
+            self.hf_dataset = IndexView(
+                {"episode_index": np.full(10, 42, dtype=np.int64), "frame_index": np.arange(10)}
+            )
+            self.decode_count = 0
 
         def __len__(self):
             return 10
 
         def __getitem__(self, index):
+            self.decode_count += 1
             row = {
                 "episode_index": np.int64(42),
                 "frame_index": np.int64(index),
                 "task_index": np.int64(0),
                 "observation.state": np.zeros(57),
                 "action": np.zeros((2, 23)),
+                "action_is_pad": np.asarray([False, index == 9]),
             }
             row.update(
                 {obs.dataset_key: np.zeros((3, 32, 48), dtype=np.float32) for obs in robot.observations.values()}
@@ -115,6 +141,63 @@ def test_b1k_pipeline_preserves_task_and_original_frame_indices(tmp_path, monkey
         tokenizer._tokenizer.decode(converted["tokenized_prompt"][converted["token_loss_mask"]].tolist())
         == "press radio"
     )
+
+    executor_model = dataclasses.replace(
+        model_config,
+        train_subtask_prediction=False,
+        train_subtask_executor=True,
+    )
+    executor_factory = dataclasses.replace(
+        factory,
+        frame_stride=1,
+        subtask_prompts_path=str(tmp_path / "meta" / "subtask_segments.parquet"),
+        subtask_executor_max_samples_per_segment=3,
+    )
+    executor_config = executor_factory.create(tmp_path / "assets", executor_model)
+    executor_dataset = data_loader.create_b1k_dataset(executor_config, 2)
+    assert executor_dataset._dataset._dataset.decode_count == 0
+    assert [int(executor_dataset[index]["frame_index"]) for index in range(len(executor_dataset))] == [
+        0,
+        2,
+        4,
+        5,
+        7,
+        9,
+    ]
+    assert executor_dataset[0]["prompt"] == "move to radio"
+    assert executor_dataset[3]["prompt"] == "press radio"
+    assert executor_dataset[2]["action_loss_mask"].tolist() == [True, False]
+    assert executor_dataset[5]["action_loss_mask"].tolist() == [True, False]
+    executor_converted = data_loader.transform_dataset(executor_dataset, executor_config, skip_norm_stats=True)[3]
+    assert "token_ar_mask" not in executor_converted
+    assert "token_loss_mask" not in executor_converted
+    assert executor_converted["action_loss_mask"].tolist() == [True, True]
+    executor_prompt = tokenizer._tokenizer.decode(
+        executor_converted["tokenized_prompt"][executor_converted["tokenized_prompt_mask"]].tolist()
+    )
+    assert "press radio" in executor_prompt
+    assert "turn on radio" not in executor_prompt
+
+    strict_model = dataclasses.replace(
+        model_config,
+        train_subtask_prediction=False,
+        train_subtask_executor=False,
+    )
+    strict_factory = dataclasses.replace(
+        factory,
+        frame_stride=3,
+        subtask_prompts_path=str(tmp_path / "meta" / "subtask_segments.parquet"),
+        strict_subtask_action_chunks=True,
+    )
+    strict_config = strict_factory.create(tmp_path / "assets", strict_model)
+    strict_dataset = data_loader.create_b1k_dataset(strict_config, 2)
+    assert len(strict_dataset) == 3
+    assert [int(strict_dataset[index]["frame_index"]) for index in range(len(strict_dataset))] == [0, 3, 6]
+    assert strict_dataset[0]["prompt"] == "move to radio"
+    assert strict_dataset[2]["prompt"] == "press radio"
+    assert "subtask" not in strict_dataset[0]
+    assert "action_loss_mask" not in strict_dataset[0]
+
     if framework == "pytorch":
         train_config = dataclasses.replace(config, data=factory, model=model_config, batch_size=2, num_workers=0)
         loader = data_loader.create_data_loader(train_config, framework="pytorch", skip_norm_stats=True, num_batches=1)
@@ -175,6 +258,41 @@ def test_real_train_step_returns_separate_metrics_and_updates_state(model_setup,
     assert float(info["grad_norm"]) > 0
 
 
+def test_action_only_train_step_reports_only_action_metrics(model_setup, tokenizer):
+    _, _, actions, joint_model_config = model_setup
+    model_config = dataclasses.replace(joint_model_config, train_subtask_prediction=False)
+    arrays = [tokenizer.tokenize(prompt, np.zeros(4)) for prompt in ("move to radio", "press radio")]
+    tokens, masks = [jnp.asarray(np.stack([item[index] for item in arrays])) for index in range(2)]
+    observation = dataclasses.replace(
+        model_config.fake_obs(2),
+        tokenized_prompt=tokens,
+        tokenized_prompt_mask=masks,
+        token_ar_mask=None,
+        token_loss_mask=None,
+    )
+    model = model_config.create(jax.random.key(10))
+    config = dataclasses.replace(config_lib.get_config("pi05_b1k"), model=model_config, ema_decay=None)
+    model_def, params = nnx.split(model)
+    tx = optax.adam(1e-3)
+    state = utils.TrainState(
+        step=0,
+        params=params,
+        model_def=model_def,
+        tx=tx,
+        opt_state=tx.init(params.filter(config.trainable_filter)),
+        ema_decay=None,
+    )
+
+    updated, info = jax.jit(functools.partial(train_b1k.train_step, config))(
+        jax.random.key(11), state, (observation, actions)
+    )
+
+    assert int(updated.step) == 1
+    assert {"loss", "action_loss", "grad_norm", "param_norm"} == info.keys()
+    np.testing.assert_allclose(info["loss"], info["action_loss"])
+    assert all(np.isfinite(value).all() for value in info.values())
+
+
 def test_subtask_cli_flags_parse_with_existing_pi05_b1k_config(monkeypatch):
     monkeypatch.setattr(
         sys,
@@ -208,3 +326,142 @@ def test_subtask_cli_flags_parse_with_existing_pi05_b1k_config(monkeypatch):
     assert config.model.max_token_len == 512
     assert config.model.subtask_loss_chunk_size == 4
     assert config.weight_loader.params_path == "/tmp/pi05_base/params"
+
+
+def test_pure_executor_cli_flags_parse(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "train_b1k.py",
+            "pi05_b1k",
+            "--exp-name",
+            "test-executor",
+            "--model.train-subtask-executor",
+            "--data.subtask-prompts-path",
+            "/tmp/segments.parquet",
+            "--data.subtask-whole-task-prob",
+            "0",
+            "--data.subtask-executor-max-samples-per-segment",
+            "8",
+            "--no-wandb-enabled",
+        ],
+    )
+    config = config_lib.cli()
+    assert not config.model.train_subtask_prediction
+    assert config.model.train_subtask_executor
+    assert config.data.subtask_executor_max_samples_per_segment == 8
+    assert config.data.subtask_whole_task_prob == 0
+
+
+def test_strict_action_chunk_cli_flags_parse(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "train_b1k.py",
+            "pi05_b1k",
+            "--exp-name",
+            "test-strict-action-chunks",
+            "--data.subtask-prompts-path",
+            "/tmp/segments.parquet",
+            "--data.subtask-whole-task-prob",
+            "0",
+            "--data.strict-subtask-action-chunks",
+            "--model.action-horizon",
+            "32",
+            "--model.max-token-len",
+            "200",
+            "--no-wandb-enabled",
+        ],
+    )
+    config = config_lib.cli()
+    assert config.data.strict_subtask_action_chunks
+    assert config.data.subtask_prompts_path == "/tmp/segments.parquet"
+    assert config.model.action_horizon == 32
+    assert not config.model.train_subtask_prediction
+    assert not config.model.train_subtask_executor
+
+
+def test_subtask_modes_are_mutually_exclusive():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        dataclasses.replace(
+            config_lib.get_config("pi05_b1k").model,
+            train_subtask_prediction=True,
+            train_subtask_executor=True,
+            max_token_len=512,
+        )
+
+    config = config_lib.get_config("pi05_b1k")
+    executor_model = dataclasses.replace(config.model, train_subtask_executor=True)
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        dataclasses.replace(
+            config.data,
+            subtask_prompts_path="/tmp/segments.parquet",
+            strict_subtask_action_chunks=True,
+        ).create(config.assets_dirs, executor_model)
+
+
+def test_validation_episode_split_overrides_factory_and_reuses_repo(monkeypatch, tmp_path):
+    monkeypatch.setattr(config_lib.LeRobotB1KDataConfig, "_load_norm_stats", lambda *args: None)
+    config = config_lib.get_config("pi05_b1k")
+    train_factory = dataclasses.replace(
+        config.data,
+        repo_id="test/same-repo",
+        dataset_root=str(tmp_path),
+        episodes_index=[42],
+        base_config=dataclasses.replace(config.data.base_config, episodes_index=[42]),
+    )
+    config = dataclasses.replace(
+        config,
+        data=train_factory,
+        val_log_interval=10,
+        val_episodes_index=[99],
+    )
+    norm_stats = {"state": object()}
+
+    val_config, repo_id, use_norm_stats, data_config = train_b1k._prepare_validation_config(config, norm_stats)
+
+    assert repo_id == "test/same-repo"
+    assert val_config.data.episodes_index == [99]
+    assert val_config.data.base_config.episodes_index == [99]
+    assert data_config.episodes_index == [99]
+    assert data_config.norm_stats is norm_stats
+    assert use_norm_stats
+
+
+def test_validation_rejects_overlapping_episode_split():
+    config = config_lib.get_config("pi05_b1k")
+    train_factory = dataclasses.replace(config.data, repo_id="test/same-repo", episodes_index=[42, 99])
+    config = dataclasses.replace(config, data=train_factory, val_episodes_index=[99])
+
+    with pytest.raises(ValueError, match="overlap"):
+        train_b1k._prepare_validation_config(config, None)
+
+
+def test_validation_rejects_implicit_all_episode_training_split():
+    config = config_lib.get_config("pi05_b1k")
+    train_factory = dataclasses.replace(config.data, repo_id="test/same-repo", episodes_index=None)
+    config = dataclasses.replace(config, data=train_factory, val_episodes_index=[99])
+
+    with pytest.raises(ValueError, match="explicit training episodes_index"):
+        train_b1k._prepare_validation_config(config, None)
+
+
+def test_validation_rejects_different_repo_without_separate_dataset_root():
+    config = config_lib.get_config("pi05_b1k")
+    train_factory = dataclasses.replace(config.data, repo_id="test/train", episodes_index=[42])
+    config = dataclasses.replace(
+        config,
+        data=train_factory,
+        val_repo_id="test/validation",
+        val_episodes_index=[99],
+    )
+
+    with pytest.raises(ValueError, match="only an explicit episode split"):
+        train_b1k._prepare_validation_config(config, None)
+
+
+def test_enabled_validation_requires_explicit_split():
+    with pytest.raises(ValueError, match="requires val_repo_id or val_episodes_index"):
+        dataclasses.replace(config_lib.get_config("pi05_b1k"), val_log_interval=10)

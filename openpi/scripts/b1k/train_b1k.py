@@ -11,6 +11,7 @@ import flax.nnx as nnx
 from flax.training import common_utils
 import flax.traverse_util as traverse_util
 import jax
+from jax.experimental import multihost_utils
 import jax.numpy as jnp
 import numpy as np
 import optax
@@ -41,44 +42,50 @@ def _extract_training_norm_stats(train_data_loader: _data_loader.DataLoader | No
 
 def _prepare_validation_config(
     config: _config.TrainConfig, training_norm_stats: dict | None
-) -> tuple[_config.TrainConfig, str, bool]:
-    """
-    Prepare validation configuration with training norm_stats.
+) -> tuple[_config.TrainConfig, str, bool, _config.DataConfig]:
+    """Build an explicit validation split while reusing training normalization stats."""
+    train_repo_id = getattr(config.data, "repo_id", None)
+    if config.val_repo_id is None and config.val_episodes_index is None:
+        raise ValueError("Enabled validation requires val_repo_id or val_episodes_index.")
+    repo_id = config.val_repo_id or train_repo_id
+    if repo_id is None:
+        raise ValueError("No validation repository ID could be determined.")
+    if repo_id != train_repo_id:
+        raise ValueError("B1K validation currently supports only an explicit episode split from the training repo.")
+    if config.val_episodes_index is None:
+        raise ValueError("Validation on the training repo requires an explicit val_episodes_index split.")
+    train_episodes = getattr(config.data, "episodes_index", None)
+    if train_episodes is None:
+        raise ValueError("Validation on the training repo requires an explicit training episodes_index split.")
+    overlap = set(train_episodes) & set(config.val_episodes_index)
+    if overlap:
+        raise ValueError(f"Training and validation episode sets overlap: {sorted(overlap)[:10]}")
 
-    Returns:
-        tuple: (validation_config, repo_id, use_norm_stats, actual_val_data_config)
-    """
+    val_base_config = dataclasses.replace(config.data.base_config, episodes_index=config.val_episodes_index)
+    # Override the factory-level episode list as well as its base config. The B1K
+    # factory intentionally gives its own field precedence.
+    val_data_factory = dataclasses.replace(
+        config.data,
+        repo_id=repo_id,
+        episodes_index=config.val_episodes_index,
+        base_config=val_base_config,
+    )
     val_config = dataclasses.replace(
         config,
         batch_size=config.val_batch_size or config.batch_size,
+        data=val_data_factory,
     )
+    actual_val_data_config = val_data_factory.create(val_config.assets_dirs, val_config.model)
+    if actual_val_data_config.episodes_index != config.val_episodes_index:
+        raise RuntimeError("Validation episode selection was not preserved by the data config factory.")
 
-    use_norm_stats = False
-    if config.val_repo_id or hasattr(val_config.data, "repo_id"):
-        repo_id = config.val_repo_id or (getattr(val_config.data, "repo_id", None) + "-val")
-        episodes_index = config.val_episodes_index
-
-        # Create validation data config by copying the training data config but changing repo_id
-        val_base_config = dataclasses.replace(val_config.data.base_config, episodes_index=episodes_index)
-        val_data_config = dataclasses.replace(val_config.data, repo_id=repo_id, base_config=val_base_config)
-        val_config = dataclasses.replace(val_config, data=val_data_config)
-
-        # Create the actual DataConfig using the factory and add norm_stats
-        actual_val_data_config = val_config.data.create(val_config.assets_dirs, val_config.model)
-
-        # Explicitly use norm_stats from training data loader for validation
-        if training_norm_stats is not None:
-            actual_val_data_config = dataclasses.replace(actual_val_data_config, norm_stats=training_norm_stats)
-            logging.info("Copied norm_stats from training data loader to validation config")
-            logging.info("Training norm_stats keys: %s", list(training_norm_stats.keys()))
-            use_norm_stats = True
-        else:
-            logging.warning("No norm_stats found in training data loader - skipping normalization for validation")
-
-        return val_config, repo_id, use_norm_stats, actual_val_data_config
-
-    raise ValueError("No validation repository ID could be determined")
-
+    use_norm_stats = training_norm_stats is not None
+    if use_norm_stats:
+        actual_val_data_config = dataclasses.replace(actual_val_data_config, norm_stats=training_norm_stats)
+        logging.info("Copied training normalization statistics to validation data config.")
+    else:
+        logging.warning("No training norm_stats found; validation will run without normalization.")
+    return val_config, repo_id, use_norm_stats, actual_val_data_config
 
 
 def _create_validation_data_loader(
@@ -86,7 +93,7 @@ def _create_validation_data_loader(
     val_config: _config.TrainConfig,
     *,
     use_norm_stats: bool,
-    replicated_sharding: jax.sharding.NamedSharding,
+    data_sharding: jax.sharding.NamedSharding,
 ) -> _data_loader.DataLoader:
     """Create validation data loader with custom wrapper for training norm_stats."""
 
@@ -121,7 +128,7 @@ def _create_validation_data_loader(
     val_torch_data_loader = _data_loader.TorchDataLoader(
         val_dataset,
         local_batch_size=val_config.batch_size // jax.process_count(),
-        sharding=replicated_sharding,
+        sharding=data_sharding,
         shuffle=False,
         num_batches=val_config.val_num_batches,
         num_workers=val_config.num_workers,
@@ -136,9 +143,10 @@ def _compute_validation_losses(
     train_state: training_utils.TrainState,
     mesh: jax.sharding.Mesh,
     train_state_sharding: jax.sharding.NamedSharding,
+    data_sharding: jax.sharding.NamedSharding,
     replicated_sharding: jax.sharding.NamedSharding,
     config: _config.TrainConfig,
-) -> float | None:
+) -> float:
     """Compute validation losses over multiple batches."""
 
     # Define validation loss function (similar to train_step structure)
@@ -162,7 +170,7 @@ def _compute_validation_losses(
     # JIT compile the validation step
     pvalidation_step = jax.jit(
         validation_step,
-        in_shardings=(train_state_sharding, replicated_sharding, replicated_sharding),
+        in_shardings=(train_state_sharding, data_sharding, replicated_sharding),
         out_shardings=replicated_sharding,
     )
 
@@ -172,63 +180,35 @@ def _compute_validation_losses(
     # the specific seed offset is arbitrary.
     val_rng = jax.random.key(config.seed + 1000)
 
-    for batch_idx in range(config.val_num_batches):
+    for batch_index in range(config.val_num_batches):
         try:
             batch = next(val_iter)
         except StopIteration:
             break
-
-        try:
-            with sharding.set_mesh(mesh):
-                loss = pvalidation_step(train_state, batch, val_rng)
-            losses.append(jax.device_get(loss))
-        except (RuntimeError, ValueError) as e:
-            logging.warning("Error computing validation loss for batch %d: %s", batch_idx, e)
-            continue
+        with sharding.set_mesh(mesh):
+            loss = pvalidation_step(train_state, batch, jax.random.fold_in(val_rng, batch_index))
+        losses.append(jax.device_get(loss))
 
     if not losses:
-        return None
+        raise RuntimeError("Validation loader produced no batches.")
     return float(jnp.mean(jnp.array(losses)))
 
 
-def compute_validation_loss(
+def create_validation_data_loader(
     config: _config.TrainConfig,
-    train_state: training_utils.TrainState,
-    mesh: jax.sharding.Mesh,
-    train_state_sharding: jax.sharding.NamedSharding,
-    replicated_sharding: jax.sharding.NamedSharding,
-    train_data_loader: _data_loader.DataLoader | None = None,
-) -> float | None:
-    """Compute average validation loss over a few batches. Downloads validation dataset if missing locally."""
-    # Extract training normalization stats
+    train_data_loader: _data_loader.DataLoader,
+    data_sharding: jax.sharding.NamedSharding,
+) -> _data_loader.DataLoader:
+    """Create the validation loader once, reusing training normalization statistics."""
     training_norm_stats = _extract_training_norm_stats(train_data_loader)
-
-    # Prepare validation configuration
-    try:
-        val_config, repo_id, use_norm_stats, actual_val_data_config = _prepare_validation_config(
-            config, training_norm_stats
-        )
-    except ValueError:
-        logging.warning("Could not determine validation repository ID, skipping validation loss.")
-        return None
-
-    # Check if validation dataset exists locally (same behavior as training dataset)
-    is_local = True
-
-    # Create validation data loader (this will use local data or trigger download if needed)
-    try:
-        val_loader = _create_validation_data_loader(
-            actual_val_data_config, val_config, use_norm_stats=use_norm_stats, replicated_sharding=replicated_sharding
-        )
-        if not is_local:
-            logging.info(f"Validation dataset downloaded successfully: {repo_id}")
-    except Exception as e:
-        logging.warning(f"Failed to create validation data loader for {repo_id}: {e}")
-        logging.warning("Skipping validation loss computation.")
-        return None
-
-    # Compute and return validation losses
-    return _compute_validation_losses(val_loader, train_state, mesh, train_state_sharding, replicated_sharding, config)
+    val_config, repo_id, use_norm_stats, actual_val_data_config = _prepare_validation_config(
+        config, training_norm_stats
+    )
+    val_loader = _create_validation_data_loader(
+        actual_val_data_config, val_config, use_norm_stats=use_norm_stats, data_sharding=data_sharding
+    )
+    logging.info("Created validation data loader for %s", repo_id)
+    return val_loader
 
 
 def init_logging():
@@ -262,12 +242,7 @@ def init_wandb(config: _config.TrainConfig, *, resuming: bool, log_code: bool = 
         run_id = (ckpt_dir / "wandb_id.txt").read_text().strip()
         wandb.init(id=run_id, resume="must", project=config.project_name)
     else:
-        wandb.init(
-            name=config.exp_name,
-            config=dataclasses.asdict(config),
-            project=config.project_name,
-            group="openpi"
-        )
+        wandb.init(name=config.exp_name, config=dataclasses.asdict(config), project=config.project_name, group="openpi")
         (ckpt_dir / "wandb_id.txt").write_text(wandb.run.id)
 
     if log_code:
@@ -351,11 +326,11 @@ def train_step(
     def loss_fn(
         model: _model.BaseModel, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions
     ):
-        if getattr(model, "train_subtask_prediction", False):
+        if getattr(model, "train_subtask_prediction", False) or getattr(model, "train_subtask_executor", False):
             chunked_loss, metrics = model.compute_loss_with_metrics(rng, observation, actions, train=True)
         else:
             chunked_loss = model.compute_loss(rng, observation, actions, train=True)
-            metrics = {}
+            metrics = {"action_loss": jnp.mean(chunked_loss)}
         return jnp.mean(chunked_loss), metrics
 
     train_rng = jax.random.fold_in(rng, state.step)
@@ -448,6 +423,9 @@ def main(config: _config.TrainConfig):
         shuffle=True,
         skip_norm_stats=False,
     )
+    val_data_loader = (
+        create_validation_data_loader(config, data_loader, data_sharding) if config.val_log_interval else None
+    )
     expected_batches = os.environ.get("OPENPI_EXPECTED_BATCHES_PER_EPOCH")
     if expected_batches is not None and data_loader.batches_per_epoch != int(expected_batches):
         raise RuntimeError(
@@ -457,7 +435,9 @@ def main(config: _config.TrainConfig):
     if expected_epochs is not None:
         expected_steps = int(expected_epochs) * data_loader.batches_per_epoch
         if config.num_train_steps != expected_steps:
-            raise RuntimeError(f"Training has {config.num_train_steps} steps, expected {expected_steps} for exact epochs.")
+            raise RuntimeError(
+                f"Training has {config.num_train_steps} steps, expected {expected_steps} for exact epochs."
+            )
 
     train_state, train_state_sharding = init_train_state(config, init_rng, mesh, resume=resuming)
     jax.block_until_ready(train_state)
@@ -505,25 +485,43 @@ def main(config: _config.TrainConfig):
             stacked_infos = common_utils.stack_forest(infos)
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
             if require_finite_metrics:
-                required = {"loss", "action_loss", "subtask_loss", "grad_norm", "subtask_tokens"}
+                required = {"loss", "action_loss", "grad_norm", "param_norm"}
+                train_subtask_prediction = getattr(config.model, "train_subtask_prediction", False)
+                train_subtask_executor = getattr(config.model, "train_subtask_executor", False)
+                if train_subtask_prediction:
+                    required.update({"subtask_loss", "subtask_token_accuracy", "subtask_tokens"})
+                if train_subtask_executor:
+                    required.add("valid_action_fraction")
                 missing = required - reduced_info.keys()
                 if missing:
                     raise RuntimeError(f"Distributed smoke is missing metrics: {sorted(missing)}")
                 nonfinite = [key for key, value in reduced_info.items() if not np.isfinite(np.asarray(value)).all()]
                 if nonfinite:
                     raise RuntimeError(f"Distributed smoke produced non-finite metrics: {nonfinite}")
-                if float(reduced_info["subtask_tokens"]) <= 0:
+                if train_subtask_prediction and float(reduced_info["subtask_tokens"]) <= 0:
                     raise RuntimeError("Distributed smoke observed no supervised subtask tokens.")
+                if not train_subtask_prediction:
+                    unexpected = {"subtask_loss", "subtask_token_accuracy", "subtask_tokens"} & reduced_info.keys()
+                    if unexpected:
+                        raise RuntimeError(f"Action-only smoke produced subtask metrics: {sorted(unexpected)}")
+                    if not np.isclose(float(reduced_info["loss"]), float(reduced_info["action_loss"])):
+                        raise RuntimeError("Action-only smoke loss does not match action_loss.")
             if is_primary:
                 info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
                 pbar.write(f"Step {step}: {info_str}")
                 wandb.log(reduced_info, step=step)
             infos = []
-        if config.val_log_interval and step % config.val_log_interval == 0:
-            val_loss = compute_validation_loss(
-                config, train_state, mesh, train_state_sharding, replicated_sharding, data_loader
+        if val_data_loader is not None and step % config.val_log_interval == 0:
+            val_loss = _compute_validation_losses(
+                val_data_loader,
+                train_state,
+                mesh,
+                train_state_sharding,
+                data_sharding,
+                replicated_sharding,
+                config,
             )
-            if val_loss is not None and is_primary:
+            if is_primary:
                 wandb.log({"val_loss": val_loss}, step=step)
                 logging.info("Validation loss at step %d: %.4f", step, val_loss)
         batch = next(data_iter)
@@ -539,11 +537,7 @@ def main(config: _config.TrainConfig):
         jax.block_until_ready(restored_state)
         restored_step = int(restored_state.step)
         if restored_step != config.num_train_steps:
-            raise RuntimeError(
-                f"Restored checkpoint step is {restored_step}, expected {config.num_train_steps}."
-            )
-        from jax.experimental import multihost_utils
-
+            raise RuntimeError(f"Restored checkpoint step is {restored_step}, expected {config.num_train_steps}.")
         multihost_utils.sync_global_devices("openpi_final_checkpoint_verified")
         if is_primary and (success_path := os.environ.get("OPENPI_SUCCESS_PATH")):
             path = epath.Path(success_path)
@@ -551,14 +545,27 @@ def main(config: _config.TrainConfig):
             path.write_text(
                 json.dumps(
                     {
+                        "action_horizon": config.model.action_horizon,
                         "batches_per_epoch": data_loader.batches_per_epoch,
                         "checkpoint_dir": str(config.checkpoint_dir),
+                        "conditioning_mode": (
+                            "joint"
+                            if getattr(config.model, "train_subtask_prediction", False)
+                            else (
+                                "subtask_only"
+                                if getattr(config.model, "train_subtask_executor", False)
+                                or data_loader.data_config().strict_subtask_action_chunks
+                                else "task"
+                            )
+                        ),
                         "contract_sha256": os.environ.get("OPENPI_TRAINING_CONTRACT_SHA256"),
                         "epochs": int(expected_epochs) if expected_epochs is not None else None,
                         "global_devices": jax.device_count(),
                         "mesh": dict(mesh.shape),
                         "processes": jax.process_count(),
                         "restored_step": restored_step,
+                        "strict_subtask_action_chunks": data_loader.data_config().strict_subtask_action_chunks,
+                        "subtask_executor": data_loader.data_config().subtask_executor,
                     },
                     sort_keys=True,
                 )

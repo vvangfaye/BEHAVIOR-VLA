@@ -134,7 +134,10 @@ def test_b1k_wrapper_keeps_text_and_resets_on_instruction_change(tmp_path):
 
         def infer(self, obs):
             self.calls.append(obs)
-            return {"actions": np.zeros((2, 23)), "subtask": obs.get("subtask", "press radio")}
+            result = {"actions": np.zeros((2, 23)), "subtask": obs.get("subtask", "press radio")}
+            if obs.get("subtask") != "legacy override":
+                result["subtask_source"] = "provided" if "subtask" in obs else "generated"
+            return result
 
         def reset(self):
             self.resets += 1
@@ -147,27 +150,37 @@ def test_b1k_wrapper_keeps_text_and_resets_on_instruction_change(tmp_path):
     source.update({camera.obs_key: np.zeros((224, 224, 3), dtype=np.uint8) for camera in robot.observations.values()})
     wrapper.act(source)
     assert wrapper.last_subtasks == {0: "press radio"}
+    assert wrapper.last_subtask_sources == {0: "generated"}
     wrapper.act(source)
     assert len(policy.calls) == 1
     wrapper.act({**source, "subtask": "move to radio"})
     assert policy.calls[-1]["subtask"] == "move to radio"
     assert wrapper.last_subtasks == {0: "move to radio"}
+    assert wrapper.last_subtask_sources == {0: "provided"}
     assert policy.resets == 1
+    wrapper.act({**source, "subtask": "legacy override"})
+    assert wrapper.last_subtasks == {0: "legacy override"}
+    assert wrapper.last_subtask_sources == {}
+    assert policy.resets == 2
     wrapper.reset()
     assert wrapper.last_subtasks == {}
-    assert policy.resets == 2
+    assert wrapper.last_subtask_sources == {}
+    assert policy.resets == 3
 
 
 def test_server_protocol_preserves_subtasks_and_episode_reset():
     class Policy:
         def __init__(self):
             self.last_subtasks = {0: "press radio"}
+            self.last_subtask_sources = {0: "provided"}
             self.resets = 0
 
         def act(self, obs):
             return torch.zeros(23)
 
         def reset(self):
+            self.last_subtasks = {}
+            self.last_subtask_sources = {}
             self.resets += 1
 
     class Socket:
@@ -191,7 +204,44 @@ def test_server_protocol_preserves_subtasks_and_episode_reset():
     asyncio.run(server._handler(socket))
     assert socket.sent[1]["action"].shape == (23,)
     assert socket.sent[1]["subtasks"] == ["press radio"]
+    assert socket.sent[1]["subtask_sources"] == ["provided"]
+    assert policy.last_subtasks == {}
+    assert policy.last_subtask_sources == {}
     assert policy.resets == 1
+
+
+def test_server_protocol_keeps_legacy_subtask_response_compatible():
+    class Policy:
+        def __init__(self):
+            self.last_subtasks = {0: "press radio"}
+
+        def act(self, obs):
+            return torch.zeros(23)
+
+        def reset(self):
+            pass
+
+    class Socket:
+        remote_address = "test-client"
+
+        def __init__(self):
+            self.requests = iter([{}])
+            self.sent = []
+
+        async def recv(self):
+            try:
+                return websocket_b1k_server.packb(next(self.requests))
+            except StopIteration:
+                raise websockets.ConnectionClosed(None, None) from None
+
+        async def send(self, data):
+            self.sent.append(websocket_b1k_server.unpackb(data))
+
+    socket = Socket()
+    server = websocket_b1k_server.WebsocketPolicyServer(Policy())
+    asyncio.run(server._handler(socket))
+    assert socket.sent[1]["subtasks"] == ["press radio"]
+    assert "subtask_sources" not in socket.sent[1]
 
 
 def test_b1k_server_cli_exposes_subtask_settings():
