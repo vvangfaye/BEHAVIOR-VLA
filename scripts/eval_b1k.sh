@@ -16,6 +16,7 @@ MODE="${MODE:-public_test}"
 PROMPT_MODE="${PROMPT_MODE:-whole_task}"
 EXTERNAL_SUBTASK_SET="${EXTERNAL_SUBTASK+x}"
 EXTERNAL_SUBTASK="${EXTERNAL_SUBTASK:-}"
+EXTERNAL_SUBTASK_SELECTOR="${EXTERNAL_SUBTASK_SELECTOR:-}"
 case "$PROMPT_MODE" in
     whole_task|oracle_unsatisfied_goal) ;;
     *) echo "PROMPT_MODE must be whole_task or oracle_unsatisfied_goal" >&2; exit 2 ;;
@@ -63,6 +64,21 @@ if [[ -n "$EXTERNAL_SUBTASK_SET" ]]; then
     fi
     EXTERNAL_SUBTASK_ARGS=(--external-subtask "$EXTERNAL_SUBTASK")
 fi
+if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
+    if [[ -n "$EXTERNAL_SUBTASK_SET" ]]; then
+        echo "EXTERNAL_SUBTASK and EXTERNAL_SUBTASK_SELECTOR are mutually exclusive" >&2; exit 2
+    fi
+    if [[ "$EXTERNAL_SUBTASK_SELECTOR" != state_machine_v1 ]]; then
+        echo "EXTERNAL_SUBTASK_SELECTOR must be state_machine_v1" >&2; exit 2
+    fi
+    if [[ "$SUBTASK_PREDICTION" != 1 ]]; then
+        echo "EXTERNAL_SUBTASK_SELECTOR requires SUBTASK_PREDICTION=1" >&2; exit 2
+    fi
+    if [[ "$PROMPT_MODE" != whole_task ]]; then
+        echo "EXTERNAL_SUBTASK_SELECTOR requires PROMPT_MODE=whole_task" >&2; exit 2
+    fi
+    EXTERNAL_SUBTASK_ARGS=(--external-subtask-selector "$EXTERNAL_SUBTASK_SELECTOR")
+fi
 SUBTASK_SERVER_ARGS=()
 if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
     : "${PI05_CKPT:?set PI05_CKPT to your joint subtask-trained checkpoint}"
@@ -76,6 +92,17 @@ TASKS=("$@")
 if [[ ${#TASKS[@]} -eq 0 ]]; then
     echo "Usage: MODEL=pi05 $0 <task-name> [task-name...]" >&2
     exit 2
+fi
+if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
+    for task in "${TASKS[@]}"; do
+        case "$task" in
+            carrying_in_groceries|make_rose_centerpieces) ;;
+            *)
+                echo "EXTERNAL_SUBTASK_SELECTOR only supports carrying_in_groceries and make_rose_centerpieces" >&2
+                exit 2
+                ;;
+        esac
+    done
 fi
 
 PI05_CKPT="${PI05_CKPT:-$REPO_ROOT/openpi/outputs/checkpoints/pi05_b1k/pi05_b1k_full_20260803_162620/49999}"

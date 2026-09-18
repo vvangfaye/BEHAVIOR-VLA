@@ -4,6 +4,17 @@ import json
 import math
 from pathlib import Path
 
+STATE_MACHINE_V1 = "state_machine_v1"
+SELECTOR_LABELS_SHA256 = (
+    "fd785101426544b24ce756a84e72e2f5971776cfe6ebf7bde18e5ff7fb58ac04"
+)
+LEGACY_SEGMENTS_SHA256 = (
+    "999c58103ad91046d3a1215e202ab2022c645b55524261b3eeed6d66e7f1322d"
+)
+TRAINING_ANNOTATION_SHA256 = (
+    "870086137b5fac4ff8a701e6e539cdc99ee43d3efacb81028a2ae0b4f78fff2d"
+)
+
 
 def final_q_score(result: dict) -> float:
     value = result.get("q_score", 0.0)
@@ -41,7 +52,9 @@ def validate_subtask_events(value: object) -> None:
             raise ValueError("subtask event steps must be non-negative integers")
         if step < previous_step:
             raise ValueError("subtask event steps must be ordered")
-        if subtask is not None and (not isinstance(subtask, str) or not subtask.strip()):
+        if subtask is not None and (
+            not isinstance(subtask, str) or not subtask.strip()
+        ):
             raise ValueError("subtask event text must be null or a nonempty string")
         has_text = has_text or isinstance(subtask, str) and bool(subtask.strip())
         previous_step = step
@@ -49,7 +62,147 @@ def validate_subtask_events(value: object) -> None:
         raise ValueError("subtask_events contains no predicted subtask text")
 
 
-def load_worker_metrics(results_root: Path) -> tuple[list[dict], list[dict], list[dict], list[int]]:
+def validate_generated_subtask_rollout(result: dict) -> None:
+    conditioning = result.get("conditioning")
+    if not isinstance(conditioning, dict):
+        raise ValueError("conditioning must be an object")
+    expected = {
+        "mode": "whole_task",
+        "oracle": False,
+        "privileged": False,
+        "comparable_to_whole_task": True,
+    }
+    for name, value in expected.items():
+        actual = conditioning.get(name)
+        matches = actual is value if isinstance(value, bool) else actual == value
+        if not matches:
+            raise ValueError(f"conditioning.{name} is {actual!r}, expected {value!r}")
+    if conditioning.get("selector") is not None:
+        raise ValueError("conditioning.selector must be absent")
+    if result.get("selector_events"):
+        raise ValueError("selector_events must be absent or empty")
+    if result.get("selector_summary"):
+        raise ValueError("selector_summary must be absent or empty")
+    validate_subtask_events(result.get("subtask_events"))
+    if any(event.get("source") != "generated" for event in result["subtask_events"]):
+        raise ValueError("all subtask event sources must be 'generated'")
+
+
+def _nonnegative_int(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return value
+
+
+def _nonempty_text(value: object, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a nonempty string")
+    return value.strip()
+
+
+def validate_selector_rollout(result: dict) -> dict:
+    conditioning = result.get("conditioning")
+    if not isinstance(conditioning, dict):
+        raise ValueError("conditioning must be an object")
+    expected_conditioning = {
+        "selector": STATE_MACHINE_V1,
+        "label_format": "legacy",
+        "selector_labels_sha256": SELECTOR_LABELS_SHA256,
+        "legacy_segments_sha256": LEGACY_SEGMENTS_SHA256,
+        "training_annotation_sha256": TRAINING_ANNOTATION_SHA256,
+        "source": "provided",
+        "subtask_source": "provided",
+        "oracle": True,
+        "privileged": True,
+        "official_benchmark": False,
+    }
+    for name, expected in expected_conditioning.items():
+        actual = conditioning.get(name)
+        if isinstance(expected, bool):
+            matches = actual is expected
+        else:
+            matches = actual == expected
+        if not matches:
+            raise ValueError(
+                f"conditioning.{name} is {actual!r}, expected {expected!r}"
+            )
+
+    selector_events = result.get("selector_events")
+    if not isinstance(selector_events, list) or not selector_events:
+        raise ValueError("selector_events must be a nonempty list")
+    entered: dict[str, int] = {}
+    previous_step = -1
+    for event in selector_events:
+        if not isinstance(event, dict):
+            raise ValueError("each selector event must be an object")
+        step = _nonnegative_int(event.get("step"), "selector event step")
+        if step < previous_step:
+            raise ValueError("selector event steps must be ordered")
+        phase = _nonempty_text(
+            event.get("current_phase"), "selector event current_phase"
+        )
+        _nonempty_text(event.get("current_text"), "selector event current_text")
+        entered[phase] = entered.get(phase, 0) + 1
+        previous_step = step
+
+    selector_summary = result.get("selector_summary")
+    if not isinstance(selector_summary, dict) or not selector_summary:
+        raise ValueError("selector_summary must be a nonempty object")
+    if selector_summary.get("valid") is not True:
+        raise ValueError("selector_summary.valid must be true")
+    if selector_summary.get("mode") != STATE_MACHINE_V1:
+        raise ValueError(f"selector_summary.mode must be {STATE_MACHINE_V1!r}")
+    if selector_summary.get("task_name") != result["task"]:
+        raise ValueError("selector_summary.task_name must match the rollout task")
+
+    validated_action_requests = _nonnegative_int(
+        selector_summary.get("validated_action_requests"),
+        "selector_summary.validated_action_requests",
+    )
+    if validated_action_requests != result["steps"]:
+        raise ValueError(
+            f"selector_summary.validated_action_requests is {validated_action_requests}, expected {result['steps']}"
+        )
+
+    validate_subtask_events(result.get("subtask_events"))
+    if any(event.get("source") != "provided" for event in result["subtask_events"]):
+        raise ValueError("all subtask event sources must be 'provided'")
+
+    recoveries = _nonnegative_int(
+        selector_summary.get("recoveries"), "selector_summary.recoveries"
+    )
+    stalls = selector_summary.get("stalls")
+    if not isinstance(stalls, list):
+        raise ValueError("selector_summary.stalls must be a list")
+    stalled: dict[str, int] = {}
+    for stall in stalls:
+        if not isinstance(stall, dict):
+            raise ValueError("each selector stall must be an object")
+        phase = _nonempty_text(stall.get("phase"), "selector stall phase")
+        stalled[phase] = stalled.get(phase, 0) + 1
+
+    completion_counts = selector_summary.get("phase_completion_counts")
+    if not isinstance(completion_counts, dict):
+        raise ValueError("selector_summary.phase_completion_counts must be an object")
+    completed = {}
+    for raw_phase, raw_count in completion_counts.items():
+        phase = _nonempty_text(raw_phase, "selector completion phase")
+        completed[phase] = _nonnegative_int(
+            raw_count, f"selector completion count for {phase}"
+        )
+
+    return {
+        "recoveries": recoveries,
+        "stalls": len(stalls),
+        "entered": entered,
+        "completed": completed,
+        "stalled": stalled,
+    }
+
+
+def load_worker_metrics(
+    results_root: Path,
+) -> tuple[list[dict], list[dict], list[dict], list[int]]:
     worker_metrics = []
     invalid_files = []
     failed_metrics = []
@@ -57,20 +210,32 @@ def load_worker_metrics(results_root: Path) -> tuple[list[dict], list[dict], lis
     for path in sorted(results_root.rglob("eval_metrics_*.json")):
         try:
             value = json.loads(path.read_text())
-            required = {"port", "server_gpu", "eval_gpu", "elapsed_seconds", "exit_code"}
+            required = {
+                "port",
+                "server_gpu",
+                "eval_gpu",
+                "elapsed_seconds",
+                "exit_code",
+            }
             if not isinstance(value, dict) or not required.issubset(value):
                 raise ValueError("missing required worker metric fields")
             for name in ("port", "server_gpu", "eval_gpu", "exit_code"):
                 if isinstance(value[name], bool) or not isinstance(value[name], int):
                     raise ValueError(f"{name} must be an integer")
             elapsed = value["elapsed_seconds"]
-            if isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)) or elapsed <= 0:
+            if (
+                isinstance(elapsed, bool)
+                or not isinstance(elapsed, (int, float))
+                or elapsed <= 0
+            ):
                 raise ValueError("elapsed_seconds must be positive")
             value["path"] = str(path)
             worker_metrics.append(value)
             ports.append(value["port"])
             if value["exit_code"] != 0:
-                failed_metrics.append({"path": str(path), "exit_code": value["exit_code"]})
+                failed_metrics.append(
+                    {"path": str(path), "exit_code": value["exit_code"]}
+                )
         except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
             invalid_files.append({"path": str(path), "error": str(exc)})
     worker_metrics.sort(key=lambda value: value["port"])
@@ -86,20 +251,29 @@ def load_worker_statuses(
     expected_rollouts: int,
     require_videos: bool,
     require_subtask_events: bool,
+    require_selector_events: bool,
 ) -> tuple[list[dict], list[str], list[str], list[dict], list[dict]]:
     if expected_workers is None:
         return [], [], [], [], []
     if status_root is None:
         raise ValueError("--status-root is required with --expected-workers")
 
-    expected_paths = {status_root / f"worker-{worker}.json" for worker in range(expected_workers)}
-    existing_paths = set(status_root.glob("worker-*.json")) if status_root.is_dir() else set()
+    expected_paths = {
+        status_root / f"worker-{worker}.json" for worker in range(expected_workers)
+    }
+    existing_paths = (
+        set(status_root.glob("worker-*.json")) if status_root.is_dir() else set()
+    )
     missing_files = sorted(str(path) for path in expected_paths - existing_paths)
     unexpected_files = sorted(str(path) for path in existing_paths - expected_paths)
     statuses = []
     invalid_files = []
     mismatches = []
-    per_worker = expected_rollouts // expected_workers if expected_rollouts % expected_workers == 0 else None
+    per_worker = (
+        expected_rollouts // expected_workers
+        if expected_rollouts % expected_workers == 0
+        else None
+    )
 
     for worker in range(expected_workers):
         path = status_root / f"worker-{worker}.json"
@@ -125,18 +299,28 @@ def load_worker_statuses(
                     "expected_rollouts": per_worker,
                     "completed_rollouts": per_worker,
                     "completed_videos": per_worker if require_videos else None,
-                    "rollouts_with_subtask_events": per_worker if require_subtask_events else None,
+                    "rollouts_with_subtask_events": per_worker
+                    if require_subtask_events
+                    else None,
+                    "rollouts_with_selector_events": per_worker
+                    if require_selector_events
+                    else None,
                 }
                 if value.get("tasks") != expected_tasks:
-                    errors.append(f"tasks are {value.get('tasks')!r}, expected {expected_tasks!r}")
+                    errors.append(
+                        f"tasks are {value.get('tasks')!r}, expected {expected_tasks!r}"
+                    )
                 indices = value.get("instance_indices")
                 if not isinstance(indices, list) or any(
-                    isinstance(item, bool) or not isinstance(item, int) for item in indices
+                    isinstance(item, bool) or not isinstance(item, int)
+                    for item in indices
                 ):
                     errors.append("instance_indices must be a list of integers")
                 for name, expected in required_counts.items():
                     if expected is not None and value.get(name) != expected:
-                        errors.append(f"{name} is {value.get(name)!r}, expected {expected}")
+                        errors.append(
+                            f"{name} is {value.get(name)!r}, expected {expected}"
+                        )
             value["path"] = str(path)
             statuses.append(value)
             if errors:
@@ -152,7 +336,9 @@ def load_worker_statuses(
             mismatches.append(
                 {
                     "path": str(status_root),
-                    "errors": [f"worker instance indices are {sorted(observed_indices)}, expected 0..19"],
+                    "errors": [
+                        f"worker instance indices are {sorted(observed_indices)}, expected 0..19"
+                    ],
                 }
             )
     statuses.sort(key=lambda value: value["worker"])
@@ -176,20 +362,36 @@ def main() -> None:
     parser.add_argument("--wall-time-seconds", type=float)
     parser.add_argument("--require-videos", action="store_true")
     parser.add_argument("--require-subtask-events", action="store_true")
+    parser.add_argument("--require-generated-subtasks", action="store_true")
+    parser.add_argument("--require-selector-events", action="store_true")
     parser.add_argument("--require-complete", action="store_true")
     args = parser.parse_args()
 
+    if args.require_generated_subtasks and args.require_selector_events:
+        parser.error(
+            "--require-generated-subtasks and --require-selector-events are mutually exclusive"
+        )
     if args.expected_task and args.expected_tasks:
         parser.error("--expected-task and --expected-tasks are mutually exclusive")
     expected_task_value = args.expected_tasks or args.expected_task
     exact_expectations = any(
         value is not None
-        for value in (expected_task_value, args.expected_instance_ids, args.expected_rollout_ids)
+        for value in (
+            expected_task_value,
+            args.expected_instance_ids,
+            args.expected_rollout_ids,
+        )
     )
-    if exact_expectations and (not expected_task_value or not args.expected_instance_ids):
-        parser.error("expected tasks and --expected-instance-ids must be provided together")
+    if exact_expectations and (
+        not expected_task_value or not args.expected_instance_ids
+    ):
+        parser.error(
+            "expected tasks and --expected-instance-ids must be provided together"
+        )
     expected_tasks = expected_task_value.split() if expected_task_value else []
-    if expected_task_value and (not expected_tasks or len(expected_tasks) != len(set(expected_tasks))):
+    if expected_task_value and (
+        not expected_tasks or len(expected_tasks) != len(set(expected_tasks))
+    ):
         parser.error("expected tasks must contain unique values")
     try:
         expected_instance_ids = (
@@ -222,6 +424,7 @@ def main() -> None:
     invalid_files = []
     duplicate_rollouts = []
     invalid_subtask_events = []
+    invalid_generated_subtasks = []
     result_paths = {}
     results_by_key = {}
     for path in sorted(args.results_root.rglob("json/*.json")):
@@ -243,8 +446,14 @@ def main() -> None:
                 for name in integer_fields
             ):
                 raise ValueError("instance_id, rollout_id, and steps must be integers")
-            if value["instance_id"] < 0 or value["rollout_id"] < 0 or value["steps"] < 0:
-                raise ValueError("instance_id, rollout_id, and steps must be non-negative")
+            if (
+                value["instance_id"] < 0
+                or value["rollout_id"] < 0
+                or value["steps"] < 0
+            ):
+                raise ValueError(
+                    "instance_id, rollout_id, and steps must be non-negative"
+                )
             final_q_score(value)
             key = (value["task"], value["instance_id"], value["rollout_id"])
             if key in result_paths:
@@ -258,16 +467,62 @@ def main() -> None:
                 try:
                     validate_subtask_events(value.get("subtask_events"))
                 except ValueError as exc:
-                    invalid_subtask_events.append({"path": str(path), "error": str(exc)})
+                    invalid_subtask_events.append(
+                        {"path": str(path), "error": str(exc)}
+                    )
+            if args.require_generated_subtasks:
+                try:
+                    validate_generated_subtask_rollout(value)
+                except ValueError as exc:
+                    invalid_generated_subtasks.append(
+                        {"path": str(path), "error": str(exc)}
+                    )
             parsed_results.append(value)
         except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
             invalid_files.append({"path": str(path), "error": str(exc)})
 
     actual_keys = set(results_by_key)
     missing_rollout_keys = sorted(expected_keys - actual_keys)
-    unexpected_rollout_keys = sorted(actual_keys - expected_keys) if expected_keys else []
-    selected_keys = sorted(actual_keys & expected_keys) if expected_keys else sorted(actual_keys)
+    unexpected_rollout_keys = (
+        sorted(actual_keys - expected_keys) if expected_keys else []
+    )
+    selected_keys = (
+        sorted(actual_keys & expected_keys) if expected_keys else sorted(actual_keys)
+    )
     selected_results = [results_by_key[key] for key in selected_keys]
+
+    invalid_selector_rollouts = []
+    selector_total_recoveries = 0
+    selector_total_stalls = 0
+    selector_phase_counts: dict[str, dict[str, int]] = {}
+    if args.require_selector_events:
+        for key in selected_keys:
+            try:
+                diagnostics = validate_selector_rollout(results_by_key[key])
+            except (KeyError, TypeError, ValueError) as exc:
+                invalid_selector_rollouts.append(
+                    {
+                        "key": list(key),
+                        "path": str(result_paths[key]),
+                        "error": str(exc),
+                    }
+                )
+                continue
+            selector_total_recoveries += diagnostics["recoveries"]
+            selector_total_stalls += diagnostics["stalls"]
+            phases = (
+                set(diagnostics["entered"])
+                | set(diagnostics["completed"])
+                | set(diagnostics["stalled"])
+            )
+            for phase in phases:
+                counts = selector_phase_counts.setdefault(
+                    phase, {"entered": 0, "completed": 0, "stalled": 0}
+                )
+                counts["entered"] += diagnostics["entered"].get(phase, 0)
+                counts["completed"] += diagnostics["completed"].get(phase, 0)
+                counts["stalled"] += diagnostics["stalled"].get(phase, 0)
+    selector_phase_counts = dict(sorted(selector_phase_counts.items()))
 
     all_video_paths = set(args.results_root.rglob("videos/*.mp4"))
     expected_video_paths = set()
@@ -277,14 +532,18 @@ def main() -> None:
     if args.require_videos:
         for key in selected_keys:
             result_path = result_paths[key]
-            video_path = result_path.parent.parent / "videos" / f"{result_path.stem}.mp4"
+            video_path = (
+                result_path.parent.parent / "videos" / f"{result_path.stem}.mp4"
+            )
             expected_video_paths.add(video_path)
             if not video_path.exists():
                 missing_videos.append(str(video_path))
                 continue
             try:
                 if video_path.stat().st_size <= 0:
-                    invalid_videos.append({"path": str(video_path), "error": "video is empty"})
+                    invalid_videos.append(
+                        {"path": str(video_path), "error": "video is empty"}
+                    )
                 else:
                     completed_videos += 1
             except OSError as exc:
@@ -295,9 +554,12 @@ def main() -> None:
         else []
     )
 
-    worker_metrics, invalid_metric_files, failed_worker_metrics, duplicate_metric_ports = (
-        load_worker_metrics(args.results_root)
-    )
+    (
+        worker_metrics,
+        invalid_metric_files,
+        failed_worker_metrics,
+        duplicate_metric_ports,
+    ) = load_worker_metrics(args.results_root)
     try:
         (
             worker_statuses,
@@ -313,6 +575,7 @@ def main() -> None:
             args.expected_rollouts,
             args.require_videos,
             args.require_subtask_events,
+            args.require_selector_events,
         )
     except ValueError as exc:
         parser.error(str(exc))
@@ -325,13 +588,16 @@ def main() -> None:
         else None
     )
     worker_metrics_incomplete = (
-        args.expected_workers is not None and len(worker_metrics) != args.expected_workers
+        args.expected_workers is not None
+        and len(worker_metrics) != args.expected_workers
     )
 
     per_task = {}
     for result in selected_results:
         task = result["task"]
-        stats = per_task.setdefault(task, {"rollouts": 0, "successes": 0, "q_score_sum": 0.0})
+        stats = per_task.setdefault(
+            task, {"rollouts": 0, "successes": 0, "q_score_sum": 0.0}
+        )
         stats["rollouts"] += 1
         stats["successes"] += int(result["success"])
         stats["q_score_sum"] += final_q_score(result)
@@ -357,12 +623,15 @@ def main() -> None:
         else max(args.expected_rollouts - count, 0),
         "successes": successes,
         "success_rate": successes / count if count else 0.0,
-        "mean_q_score": sum(final_q_score(result) for result in selected_results) / count
+        "mean_q_score": sum(final_q_score(result) for result in selected_results)
+        / count
         if count
         else 0.0,
         "total_steps": total_steps,
         "wall_time_seconds": wall_time,
-        "rollouts_per_hour": count * 3600 / wall_time if wall_time and wall_time > 0 else None,
+        "rollouts_per_hour": count * 3600 / wall_time
+        if wall_time and wall_time > 0
+        else None,
         "aggregate_steps_per_second": total_steps / wall_time
         if wall_time and wall_time > 0
         else None,
@@ -377,6 +646,7 @@ def main() -> None:
         "invalid_videos": invalid_videos,
         "unexpected_videos": unexpected_videos,
         "invalid_subtask_events": invalid_subtask_events,
+        "invalid_generated_subtasks": invalid_generated_subtasks,
         "invalid_files": invalid_files,
         "invalid_metric_files": invalid_metric_files,
         "failed_worker_metrics": failed_worker_metrics,
@@ -389,6 +659,16 @@ def main() -> None:
         "worker_status_mismatches": worker_status_mismatches,
         "tasks": per_task,
     }
+    if args.require_selector_events:
+        summary["selector_diagnostics"] = {
+            "selector": STATE_MACHINE_V1,
+            "valid_rollouts": count - len(invalid_selector_rollouts),
+            "invalid_rollout_keys": [item["key"] for item in invalid_selector_rollouts],
+            "invalid_rollouts": invalid_selector_rollouts,
+            "total_recoveries": selector_total_recoveries,
+            "total_stalls": selector_total_stalls,
+            "per_phase": selector_phase_counts,
+        }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
     print(json.dumps(summary, indent=2, sort_keys=True))
@@ -413,6 +693,8 @@ def main() -> None:
         or bool(invalid_videos)
         or bool(unexpected_videos)
         or bool(invalid_subtask_events)
+        or bool(invalid_generated_subtasks)
+        or bool(invalid_selector_rollouts)
     )
     if args.require_complete and incomplete:
         raise SystemExit(2)

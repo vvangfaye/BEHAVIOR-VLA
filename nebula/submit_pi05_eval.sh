@@ -13,6 +13,11 @@ ENTRY_FILE="nebula/eval_pi05.py"
 ALGO_NAME="${ALGO_NAME:-pytorch2120}"
 AIHUB_MODEL_NAME="${AIHUB_MODEL_NAME:-behavior}"
 AI_HUB_CLI="${AI_HUB_CLI:-ai-hub-cli}"
+PI05_MODEL_FORMAT="${PI05_MODEL_FORMAT:-jax}"
+case "$PI05_MODEL_FORMAT" in
+    jax|torch) ;;
+    *) echo "PI05_MODEL_FORMAT must be jax or torch" >&2; exit 2 ;;
+esac
 EVAL_PROFILE="${EVAL_PROFILE:-smoke}"
 case "$EVAL_PROFILE" in
     smoke|speed|two_tasks|reduced|full) ;;
@@ -46,9 +51,17 @@ else
     SPEED_TASK="${SPEED_TASK:-}"
     SPEED_EXPECTED_INSTANCE_IDS="${SPEED_EXPECTED_INSTANCE_IDS:-}"
 fi
+if [[ "$EVAL_PROFILE" == smoke && "$PI05_MODEL_FORMAT" == torch ]]; then
+    SMOKE_TASK="${SMOKE_TASK:-carrying_in_groceries}"
+    SMOKE_EVAL_GPU="${SMOKE_EVAL_GPU:-0}"
+else
+    SMOKE_TASK="${SMOKE_TASK:-turning_on_radio}"
+    SMOKE_EVAL_GPU="${SMOKE_EVAL_GPU:-1}"
+fi
 CONFIRM_FULL="${CONFIRM_FULL:-0}"
 SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-1}"
-if [[ "$EVAL_PROFILE" == two_tasks ]]; then
+EXTERNAL_SUBTASK_SELECTOR="${EXTERNAL_SUBTASK_SELECTOR:-}"
+if [[ "$EVAL_PROFILE" == two_tasks && "$PI05_MODEL_FORMAT" == jax ]]; then
     MAX_FAILOVER_TIMES="${MAX_FAILOVER_TIMES:-3}"
 else
     MAX_FAILOVER_TIMES="${MAX_FAILOVER_TIMES:-0}"
@@ -59,21 +72,40 @@ if [[ "$EVAL_PROFILE" == full && "$CONFIRM_FULL" != 1 ]]; then
 fi
 
 STAMP="$(date +%Y%m%d_%H%M%S)"
-RUN_ID="${RUN_ID:-pi05_joint_subtask_117541_${EVAL_PROFILE}_$STAMP}"
-JOB_NAME="${JOB_NAME:-pi05-eval-${EVAL_PROFILE}-$STAMP}"
+if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
+    RUN_ID="${RUN_ID:-pi05_selector_diagnostic_117541_${EVAL_PROFILE}_$STAMP}"
+    JOB_NAME="${JOB_NAME:-pi05-selector-diagnostic-${EVAL_PROFILE}-$STAMP}"
+elif [[ "$PI05_MODEL_FORMAT" == torch ]]; then
+    RUN_ID="${RUN_ID:-pi05_torch_joint_subtask_${EVAL_PROFILE}_$STAMP}"
+    JOB_NAME="${JOB_NAME:-pi05-torch-eval-${EVAL_PROFILE}-$STAMP}"
+else
+    RUN_ID="${RUN_ID:-pi05_joint_subtask_117541_${EVAL_PROFILE}_$STAMP}"
+    JOB_NAME="${JOB_NAME:-pi05-eval-${EVAL_PROFILE}-$STAMP}"
+fi
 OUTPUT_BASE="${OUTPUT_BASE:-/data/oss_bucket_0/wangfaye/result/behavior-challenge/pi05_closed_loop_aihub}"
 PERSISTENT_OUTPUT="$OUTPUT_BASE/$RUN_ID"
 
 EVAL_ENV_ARCHIVE="${EVAL_ENV_ARCHIVE:-/data/oss_bucket_0/wangfaye/conda_env/b1k-eval.tar.gz}"
-PI05_ENV_ARCHIVE="${PI05_ENV_ARCHIVE:-/data/oss_bucket_0/wangfaye/conda_env/b1k-pi05.tar.gz}"
+if [[ "$PI05_MODEL_FORMAT" == torch ]]; then
+    DEFAULT_PI05_ENV_ARCHIVE="/data/oss_bucket_0/wangfaye/conda_env/b1k-pi05-torch.tar.gz"
+else
+    DEFAULT_PI05_ENV_ARCHIVE="/data/oss_bucket_0/wangfaye/conda_env/b1k-pi05.tar.gz"
+fi
+PI05_ENV_ARCHIVE="${PI05_ENV_ARCHIVE:-$DEFAULT_PI05_ENV_ARCHIVE}"
 OPENPI_CACHE_ARCHIVE="${OPENPI_CACHE_ARCHIVE:-/data/oss_bucket_0/wangfaye/conda_env/b1k-pi05-openpi-cache.tar}"
 ASSET_ROOT="${ASSET_ROOT:-/data/oss_bucket_0/wangfaye/embodied/datasets/behavior-1k/eval-assets/v1}"
-if [[ "$EVAL_PROFILE" == two_tasks ]]; then
+if [[ "$PI05_MODEL_FORMAT" == torch ]]; then
+    DEFAULT_CHECKPOINT_SOURCE=""
+elif [[ "$EVAL_PROFILE" == two_tasks ]]; then
     DEFAULT_CHECKPOINT_SOURCE="/data/oss_bucket_0/wangfaye/result/behavior-challenge/pi05_two_tasks_joint_subtask/staged_local_pi05_b1k_2tasks_joint_subtask_117541_20260915_151620"
 else
     DEFAULT_CHECKPOINT_SOURCE="/data/oss_bucket_0/wangfaye/result/behavior-challenge/pi05_two_tasks_joint_subtask/checkpoints/pi05_b1k/pi05_b1k_2tasks_joint_subtask_s1_117542_20260910_172411/117541"
 fi
 CHECKPOINT_SOURCE="${CHECKPOINT_SOURCE:-$DEFAULT_CHECKPOINT_SOURCE}"
+[[ -n "$CHECKPOINT_SOURCE" ]] || {
+    echo "CHECKPOINT_SOURCE is required for PI05_MODEL_FORMAT=torch" >&2
+    exit 2
+}
 PI05_REPO_ID="${PI05_REPO_ID:-b1k_two_tasks_joint_subtask_s1}"
 INSTANCE_INDICES="${INSTANCE_INDICES:-0 1 2 3 4}"
 NUM_ROLLOUTS="${NUM_ROLLOUTS:-1}"
@@ -86,7 +118,26 @@ KEEP_RUNTIME="${KEEP_RUNTIME:-0}"
 [[ "$MAX_FAILOVER_TIMES" =~ ^[0-9]+$ ]] || { echo "MAX_FAILOVER_TIMES must be a non-negative integer" >&2; exit 2; }
 [[ "$WRITE_VIDEO" == 0 || "$WRITE_VIDEO" == 1 ]] || { echo "WRITE_VIDEO must be 0 or 1" >&2; exit 2; }
 [[ "$SUBTASK_PREDICTION" == 0 || "$SUBTASK_PREDICTION" == 1 ]] || { echo "SUBTASK_PREDICTION must be 0 or 1" >&2; exit 2; }
+[[ "$SMOKE_EVAL_GPU" =~ ^[0-9]+$ ]] || { echo "SMOKE_EVAL_GPU must be a non-negative integer" >&2; exit 2; }
 [[ "$PI05_MEM_FRACTION" =~ ^0\.[0-9]+$ ]] || { echo "PI05_MEM_FRACTION must be between 0 and 1" >&2; exit 2; }
+if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
+    [[ "$EXTERNAL_SUBTASK_SELECTOR" == state_machine_v1 ]] || {
+        echo "EXTERNAL_SUBTASK_SELECTOR must be state_machine_v1" >&2
+        exit 2
+    }
+    [[ "$EVAL_PROFILE" == two_tasks ]] || {
+        echo "EXTERNAL_SUBTASK_SELECTOR is supported only for EVAL_PROFILE=two_tasks" >&2
+        exit 2
+    }
+    [[ "$SUBTASK_PREDICTION" == 1 ]] || {
+        echo "EXTERNAL_SUBTASK_SELECTOR requires SUBTASK_PREDICTION=1" >&2
+        exit 2
+    }
+    [[ -z "${EXTERNAL_SUBTASK:-}" ]] || {
+        echo "EXTERNAL_SUBTASK and EXTERNAL_SUBTASK_SELECTOR are mutually exclusive" >&2
+        exit 2
+    }
+fi
 if [[ "$EVAL_PROFILE" == speed ]]; then
     (( EVAL_WORKERS == 4 )) || { echo "speed profile requires EVAL_WORKERS=4" >&2; exit 2; }
     (( NUM_ROLLOUTS == 1 )) || { echo "speed profile requires NUM_ROLLOUTS=1" >&2; exit 2; }
@@ -129,11 +180,28 @@ elif [[ "$EVAL_PROFILE" == two_tasks ]]; then
 fi
 
 for path in "$EVAL_ENV_ARCHIVE" "$PI05_ENV_ARCHIVE" "$OPENPI_CACHE_ARCHIVE" \
-    "$ASSET_ROOT/SHA256SUMS" "$CHECKPOINT_SOURCE/params/_METADATA" \
-    "$CHECKPOINT_SOURCE/assets/$PI05_REPO_ID/norm_stats.json"; do
+    "$ASSET_ROOT/SHA256SUMS" "$CHECKPOINT_SOURCE/assets/$PI05_REPO_ID/norm_stats.json"; do
     [[ -s "$path" ]] || { echo "Required input missing or empty: $path" >&2; exit 1; }
 done
-if [[ "$EVAL_PROFILE" == two_tasks ]]; then
+if [[ "$PI05_MODEL_FORMAT" == torch ]]; then
+    for path in "$CHECKPOINT_SOURCE/model.safetensors" "$CHECKPOINT_SOURCE/metadata.json"; do
+        [[ -s "$path" ]] || { echo "Torch checkpoint input missing or empty: $path" >&2; exit 1; }
+    done
+    [[ ! -e "$CHECKPOINT_SOURCE/params/_METADATA" ]] || {
+        echo "Torch checkpoint must not contain JAX params/_METADATA" >&2
+        exit 1
+    }
+else
+    [[ -s "$CHECKPOINT_SOURCE/params/_METADATA" ]] || {
+        echo "JAX checkpoint input missing or empty: $CHECKPOINT_SOURCE/params/_METADATA" >&2
+        exit 1
+    }
+    [[ ! -e "$CHECKPOINT_SOURCE/model.safetensors" ]] || {
+        echo "JAX checkpoint must not contain model.safetensors" >&2
+        exit 1
+    }
+fi
+if [[ "$EVAL_PROFILE" == two_tasks || "$PI05_MODEL_FORMAT" == torch ]]; then
     for path in "$CHECKPOINT_SOURCE/_CHECKPOINT_METADATA" \
         "$CHECKPOINT_SOURCE/SHA256SUMS.inference" "$CHECKPOINT_SOURCE/_READY"; do
         [[ -s "$path" ]] || { echo "Staged checkpoint input missing or empty: $path" >&2; exit 1; }
@@ -176,6 +244,7 @@ mkdir -p \
 cp -a "$REPO_ROOT/openpi/src" "$BUNDLE_DIR/openpi/"
 cp -a "$REPO_ROOT/openpi/packages/openpi-client/src" "$BUNDLE_DIR/openpi/packages/openpi-client/"
 cp -a "$REPO_ROOT/openpi/scripts/b1k/serve_b1k.py" "$BUNDLE_DIR/openpi/scripts/b1k/"
+cp -a "$REPO_ROOT/openpi/scripts/install_transformers_patch.py" "$BUNDLE_DIR/openpi/scripts/"
 cp -a "$REPO_ROOT/BEHAVIOR-1K/OmniGibson/omnigibson" "$BUNDLE_DIR/BEHAVIOR-1K/OmniGibson/"
 cp -a "$REPO_ROOT/BEHAVIOR-1K/docs/assets/OmniGibson_logo.png" "$BUNDLE_DIR/BEHAVIOR-1K/docs/assets/"
 cp -a "$REPO_ROOT/BEHAVIOR-1K/bddl3/bddl" "$BUNDLE_DIR/BEHAVIOR-1K/bddl3/"
@@ -198,6 +267,7 @@ write_setting() { printf 'export %s=%q\n' "$1" "$2"; }
 {
     write_setting RUN_ID "$RUN_ID"
     write_setting EVAL_PROFILE "$EVAL_PROFILE"
+    write_setting PI05_MODEL_FORMAT "$PI05_MODEL_FORMAT"
     write_setting CONFIRM_FULL "$CONFIRM_FULL"
     write_setting EVAL_ENV_ARCHIVE "$EVAL_ENV_ARCHIVE"
     write_setting PI05_ENV_ARCHIVE "$PI05_ENV_ARCHIVE"
@@ -213,6 +283,9 @@ write_setting() { printf 'export %s=%q\n' "$1" "$2"; }
     write_setting PI05_MEM_FRACTION "$PI05_MEM_FRACTION"
     write_setting WRITE_VIDEO "$WRITE_VIDEO"
     write_setting SUBTASK_PREDICTION "$SUBTASK_PREDICTION"
+    write_setting EXTERNAL_SUBTASK_SELECTOR "$EXTERNAL_SUBTASK_SELECTOR"
+    write_setting SMOKE_TASK "$SMOKE_TASK"
+    write_setting SMOKE_EVAL_GPU "$SMOKE_EVAL_GPU"
     write_setting SPEED_TASK "$SPEED_TASK"
     write_setting SPEED_EXPECTED_INSTANCE_IDS "$SPEED_EXPECTED_INSTANCE_IDS"
     write_setting PERSISTENT_OUTPUT "$PERSISTENT_OUTPUT"
@@ -228,10 +301,17 @@ printf 'JOB_NAME: %s\n' "$JOB_NAME"
 printf 'RUN_ID: %s\n' "$RUN_ID"
 printf 'QUEUE: %s (%s)\n' "$QUEUE" "$GPU_CARD_TYPE"
 printf 'PROFILE: %s\n' "$EVAL_PROFILE"
+printf 'MODEL_FORMAT: %s\n' "$PI05_MODEL_FORMAT"
 printf 'CLUSTER: %s\n' "$CLUSTER_FILE"
 printf 'SUBTASK_PREDICTION: %s\n' "$SUBTASK_PREDICTION"
+printf 'EXTERNAL_SUBTASK_SELECTOR: %s\n' "${EXTERNAL_SUBTASK_SELECTOR:-<disabled>}"
+if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
+    printf 'EVALUATION_KIND: selector diagnostic (label_format=legacy oracle=true privileged=true official_benchmark=false)\n'
+    printf 'EXPECTED_ROLLOUTS: 120 (4 co-located workers)\n'
+fi
 printf 'MAX_FAILOVER_TIMES: %s\n' "$MAX_FAILOVER_TIMES"
 printf 'CHECKPOINT: %s\n' "$CHECKPOINT_SOURCE"
+printf 'POLICY_ENV: %s\n' "$PI05_ENV_ARCHIVE"
 printf 'EVAL_ENV: %s\n' "$EVAL_ENV_ARCHIVE"
 printf 'ASSETS: %s\n' "$ASSET_ROOT"
 printf 'OUTPUT: %s\n' "$PERSISTENT_OUTPUT"
@@ -247,6 +327,8 @@ if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ]]; then
                 "$worker" "$worker" "$worker" "$((BASE_PORT + worker))"
         fi
     done
+elif [[ "$EVAL_PROFILE" == smoke ]]; then
+    printf 'GPU MAP: policy=0 simulator=%s task=%s\n' "$SMOKE_EVAL_GPU" "$SMOKE_TASK"
 else
     printf 'GPU MAP: policy=0 simulator=1\n'
 fi
@@ -294,13 +376,26 @@ set +e
 submit_status=${PIPESTATUS[0]}
 set -e
 python3 - "$CLI_OUTPUT_PATH" "$RECEIPT_PATH" "$RUN_ID" "$JOB_NAME" \
-    "$EVAL_PROFILE" "$PERSISTENT_OUTPUT" "$submit_status" <<'PY'
+    "$EVAL_PROFILE" "$PERSISTENT_OUTPUT" "$EXTERNAL_SUBTASK_SELECTOR" "$PI05_MODEL_FORMAT" \
+    "$PI05_ENV_ARCHIVE" "$CHECKPOINT_SOURCE" "$submit_status" <<'PY'
 import json
 import re
 import sys
 from pathlib import Path
 
-output_path, receipt_path, run_id, job_name, profile, persistent_output, exit_code = sys.argv[1:]
+(
+    output_path,
+    receipt_path,
+    run_id,
+    job_name,
+    profile,
+    persistent_output,
+    selector,
+    model_format,
+    policy_env_archive,
+    checkpoint_source,
+    exit_code,
+) = sys.argv[1:]
 text = Path(output_path).read_text(errors="replace")
 identifiers = set()
 urls = set(re.findall(r"https?://[^\s<>\"']+", text))
@@ -318,16 +413,34 @@ for line in text.splitlines():
         line,
     ):
         identifiers.add(match.group(1))
+ready_path = Path(checkpoint_source) / "_READY"
+ready = json.loads(ready_path.read_text()) if ready_path.is_file() else {}
 receipt = {
     "run_id": run_id,
     "job_name": job_name,
     "profile": profile,
+    "model_format": model_format,
+    "policy_env_archive": policy_env_archive,
+    "checkpoint_source": checkpoint_source,
+    "checkpoint_manifest_sha256": ready.get("manifest_sha256"),
     "persistent_output": persistent_output,
     "exit_code": int(exit_code),
     "job_identifiers": sorted(identifiers),
     "urls": sorted(urls),
     "stdout_stderr": output_path,
 }
+if selector:
+    receipt["evaluation_kind"] = "selector_diagnostic"
+    receipt["selector_diagnostics"] = {
+        "selector": selector,
+        "label_format": "legacy",
+        "selector_labels_sha256": "fd785101426544b24ce756a84e72e2f5971776cfe6ebf7bde18e5ff7fb58ac04",
+        "legacy_segments_sha256": "999c58103ad91046d3a1215e202ab2022c645b55524261b3eeed6d66e7f1322d",
+        "training_annotation_sha256": "870086137b5fac4ff8a701e6e539cdc99ee43d3efacb81028a2ae0b4f78fff2d",
+        "oracle": True,
+        "privileged": True,
+        "official_benchmark": False,
+    }
 Path(receipt_path).write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
 PY
 printf 'Submission receipt: %s\n' "$RECEIPT_PATH"
