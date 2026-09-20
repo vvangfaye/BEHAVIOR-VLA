@@ -34,6 +34,9 @@ class SubtaskPolicy(Policy):
             raise ValueError("subtask_interval must be a positive number of action-chunk requests.")
         if not math.isfinite(subtask_temperature) or subtask_temperature < 0:
             raise ValueError("subtask_temperature must be finite and nonnegative.")
+        conditioning = getattr(model, "subtask_action_conditioning", "task_and_subtask")
+        if conditioning != tokenizer_transform.subtask_action_conditioning:
+            raise ValueError("Model and tokenizer subtask_action_conditioning must match.")
         super().__init__(model, **kwargs)
         self._observation_transform = transforms_lib.compose(transforms)
         self._tokenizer_transform = tokenizer_transform
@@ -48,7 +51,12 @@ class SubtaskPolicy(Policy):
                 model.generate_subtask, static_argnames=("max_decoding_steps", "temperature", "eos_token_id")
             )
         )
-        self._metadata = {**self._metadata, "subtask_generation": True, "subtask_interval": subtask_interval}
+        self._metadata = {
+            **self._metadata,
+            "subtask_generation": True,
+            "subtask_interval": subtask_interval,
+            "subtask_action_conditioning": conditioning,
+        }
         self.reset()
 
     def reset(self):
@@ -129,6 +137,10 @@ class SubtaskPolicy(Policy):
                 arrays = self._tokenizer.tokenize_subtask_tokens(prompt, label_tokens, state, max_subtask_len=limit)
                 source = "cached"
             prepared = self._pack(inputs, arrays)
+        # Rebuild from current state and the exact label on every action request,
+        # including cached and externally provided subtasks. No high-level KV
+        # cache is passed to sample_actions.
+        prepared.update(self._tokenizer_transform.action_fields(label_tokens, state))
         outputs = super().infer(self._pad(prepared), noise=noise)
         self._calls_since_generation += 1
         # Add text AFTER action-only output adapters so it survives B1KOutputs.

@@ -63,7 +63,7 @@ class TinyBackbone(nn.Module):
 
     def forward(self, *, inputs_embeds, attention_mask, **kwargs):
         prefix, suffix = inputs_embeds
-        embeddings = torch.cat([prefix, suffix], dim=1)
+        embeddings = prefix if suffix is None else torch.cat([prefix, suffix], dim=1)
         query = self.paligemma.language_model.layers[0].self_attn.q_proj(embeddings)
         attention = (query @ embeddings.transpose(-2, -1) / 8**0.5 + attention_mask[:, 0]).softmax(dim=-1)
         output = embeddings + attention @ embeddings
@@ -76,6 +76,7 @@ def make_model(module, *, subtask=True):
     model.config = types.SimpleNamespace(action_dim=3, action_horizon=2)
     model.pi05 = True
     model.train_subtask_prediction = subtask
+    model.subtask_action_conditioning = "task_and_subtask"
     model.train_subtask_executor = False
     model.max_subtask_len = 4
     model.subtask_loss_chunk_size = 2
@@ -99,6 +100,38 @@ def make_observation():
         token_loss_mask=torch.tensor([[0, 0, 0, 1, 1, 0, 0], [0, 0, 1, 1, 0, 0, 0]], dtype=torch.bool),
         state=torch.randn(2, 3),
     )
+
+
+def test_factorized_action_loss_and_gradients_do_not_depend_on_task(model_module):
+    torch.manual_seed(17)
+    model = make_model(model_module)
+    model.subtask_action_conditioning = "subtask_only"
+    obs = make_observation()
+    obs.action_tokenized_prompt = torch.tensor([[2, 5, 1, 6], [2, 7, 1, 6]])
+    obs.action_tokenized_prompt_mask = torch.ones(2, 4, dtype=torch.bool)
+    actions, noise, time = torch.randn(2, 2, 3), torch.randn(2, 2, 3), torch.tensor([0.3, 0.7])
+    _, metrics = model(obs, actions, noise=noise, time=time, return_metrics=True)
+    params = tuple(model.parameters())
+    grads = torch.autograd.grad(metrics["action_loss"], params, retain_graph=True, allow_unused=True)
+    obs.tokenized_prompt[:, 1] = 18  # Change full task only; leave low-level context fixed.
+    _, changed = model(obs, actions, noise=noise, time=time, return_metrics=True)
+    torch.testing.assert_close(metrics["action_loss"], changed["action_loss"], rtol=0, atol=0)
+    changed_grads = torch.autograd.grad(changed["action_loss"], params, allow_unused=True)
+    for first, second in zip(grads, changed_grads, strict=True):
+        # This fixture's tiny attention layer does not use adaptive time norms.
+        if first is None:
+            assert second is None
+        else:
+            torch.testing.assert_close(first, second, rtol=0, atol=0)
+    assert not torch.isclose(metrics["subtask_loss"], changed["subtask_loss"])
+    # Both branches can backpropagate through the shared SigLIP computation.
+    fresh_loss = model(obs, actions, noise=noise, time=time)
+    fresh_loss.mean().backward()
+    assert model.paligemma_with_expert.image_projection.weight.grad.abs().sum() > 0
+    assert model.action_out_proj.weight.grad.abs().sum() > 0
+    obs.action_tokenized_prompt = None
+    with pytest.raises(ValueError, match="action_tokenized_prompt"):
+        model(obs, actions, noise=noise, time=time)
 
 
 def test_prefix_masks_prevent_label_leakage_and_allow_action_conditioning(model_module):

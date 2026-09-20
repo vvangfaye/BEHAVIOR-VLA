@@ -1,6 +1,6 @@
 import dataclasses
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import flax.nnx as nnx
 import jax
@@ -33,8 +33,11 @@ class Pi0Config(_model.BaseModelConfig):
     # This config option is not used directly by the model, but it is read by the ModelTransformFactory.
     discrete_state_input: bool = None  # type: ignore
 
-    # Supervise intermediate language as well as continuous actions (JAX only).
+    # Supervise intermediate language as well as continuous actions (JAX and Torch).
     train_subtask_prediction: bool = False
+    # Keep the old default for checkpoint compatibility. Joint launchers select
+    # subtask_only: p(s | observation, task) p(actions | observation, s).
+    subtask_action_conditioning: Literal["task_and_subtask", "subtask_only"] = "task_and_subtask"
     # Train a pure current-subtask executor with temporal action-loss masking.
     train_subtask_executor: bool = False
     subtask_loss_weight: float = 1.0
@@ -44,6 +47,8 @@ class Pi0Config(_model.BaseModelConfig):
     pytorch_compile_mode: str | None = "max-autotune"
 
     def __post_init__(self):
+        if self.subtask_action_conditioning not in ("task_and_subtask", "subtask_only"):
+            raise ValueError("Unknown subtask_action_conditioning.")
         if self.max_token_len is None:
             object.__setattr__(self, "max_token_len", 200 if self.pi05 else 48)
         if self.discrete_state_input is None:
@@ -110,6 +115,16 @@ class Pi0Config(_model.BaseModelConfig):
                 token_loss_mask=(
                     jax.ShapeDtypeStruct([batch_size, self.max_token_len], bool)
                     if self.train_subtask_prediction
+                    else None
+                ),
+                action_tokenized_prompt=(
+                    jax.ShapeDtypeStruct([batch_size, self.max_token_len], jnp.int32)
+                    if self.train_subtask_prediction and self.subtask_action_conditioning == "subtask_only"
+                    else None
+                ),
+                action_tokenized_prompt_mask=(
+                    jax.ShapeDtypeStruct([batch_size, self.max_token_len], bool)
+                    if self.train_subtask_prediction and self.subtask_action_conditioning == "subtask_only"
                     else None
                 ),
                 action_loss_mask=(

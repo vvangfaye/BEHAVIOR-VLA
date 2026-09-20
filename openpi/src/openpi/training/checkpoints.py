@@ -14,6 +14,7 @@ import orbax.checkpoint as ocp
 import orbax.checkpoint.future as future
 
 from openpi.shared import array_typing as at
+from openpi.shared import subtask_contract
 import openpi.shared.normalize as _normalize
 import openpi.training.data_loader as _data_loader
 import openpi.training.utils as training_utils
@@ -114,6 +115,7 @@ def save_state(
     def save_assets(directory: epath.Path):
         # Save the normalization stats.
         data_config = data_loader.data_config()
+        subtask_contract.save(directory, subtask_contract.from_data_config(data_config))
         norm_stats = data_config.norm_stats
         if norm_stats is not None and data_config.asset_id is not None:
             asset_id = data_config.asset_id if isinstance(data_config.asset_id, str) else data_config.asset_id[0]
@@ -136,7 +138,11 @@ def restore_state(
     data_loader: _data_loader.DataLoader,
     step: int | None = None,
 ) -> training_utils.TrainState:
-    del data_loader
+    restore_step = checkpoint_manager.latest_step() if step is None else step
+    subtask_contract.check_resume(
+        checkpoint_manager.directory / str(restore_step) / "assets",
+        subtask_contract.from_data_config(data_loader.data_config()),
+    )
 
     with at.disable_typechecking():
         # Split params that can be used for inference into a separate item.

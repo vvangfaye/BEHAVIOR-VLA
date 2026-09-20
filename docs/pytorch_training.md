@@ -73,10 +73,15 @@ bash scripts/train_pi05_subtask_pytorch_b1k.sh full
 空标注默认 `drop_episode`；预检输出的有效 episode 名单同时用于归一化统计和训练。
 标注规则和动作块边界限制仍见 [subtask 指南](subtask_training.md)。
 
-完整任务始终作为输入。subtask 标签以 next-token CE 训练；动作专家可见完整任务与
-GT subtask。文本位置使用因果注意力，防止从未来标签泄漏答案。默认总损失是
+joint 脚本默认 `SUBTASK_ACTION_CONDITIONING=subtask_only`。高层读取完整任务和观测，
+subtask 标签以 next-token CE 训练；低层独立读取观测与 GT subtask，不读取完整任务或
+高层 KV cache。两个前向共享模型参数与 SigLIP 输出，高层文本位置使用因果注意力。
+默认总损失是
 动作 flow-matching MSE 加 subtask CE，`SUBTASK_LOSS_WEIGHT` 可调文本项权重。
 语言 logits 只计算 label 对应的位置，并按 `SUBTASK_LOSS_CHUNK_SIZE=8` 分块重算。
+旧 joint checkpoint 继续训练时设置 `SUBTASK_ACTION_CONDITIONING=task_and_subtask`；
+切换到新目标请开新实验做 fine-tuning。推理从 checkpoint 的 assets 自动识别模式。
+两种模式权重结构相同，新增的高层前向仍会增加计算与激活开销，不能沿用旧训练的最大 batch。
 
 ## 显存、batch 和多卡
 
@@ -136,7 +141,8 @@ bash scripts/eval_b1k.sh turning_on_radio
 
 ## 本地验证范围
 
-78 项相关 CPU 回归通过，覆盖真实小型 HF 模型前反向、BF16 计算和推理、subtask
-生成、checkpoint 恢复、真实双进程 DDP，以及 BEHAVIOR 数据变换和启动脚本参数解析。
-另有 36 项原有 JAX subtask 回归通过。需要下载外部 ALOHA 数据的旧测试未纳入本地验证。
+2026-09-18 的条件分解改动通过 113 项 CPU 回归，覆盖 JAX/Gemma 和小型 HF 模型前反向、
+Torch BF16 计算与推理、完整任务对低层动作的独立性、生成/缓存/外部 subtask、
+JAX/Torch checkpoint 保存恢复，以及 BEHAVIOR 数据变换和启动脚本参数解析。
+1 项双进程 DDP 测试因本地执行沙箱禁止 loopback socket 而跳过。
 这些检查使用小模型和测试数据，未运行完整 BEHAVIOR 视频数据训练、H20 显存测量或仿真闭环。

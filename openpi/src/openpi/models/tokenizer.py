@@ -96,6 +96,12 @@ class PaligemmaTokenizer:
         self, prompt: str, tokens: np.ndarray, state: np.ndarray | None = None, *, max_subtask_len: int = 64
     ):
         """Condition actions on the exact generated tokens, without a decode/re-encode round trip."""
+        tokens = self._validate_subtask_tokens(tokens)
+        return self._pack_subtask(
+            self._subtask_prefix(prompt, state), tokens.tolist(), self._tokenizer.encode("\nAction: "), max_subtask_len
+        )
+
+    def _validate_subtask_tokens(self, tokens):
         tokens = np.asarray(tokens)
         if tokens.ndim != 1 or not np.issubdtype(tokens.dtype, np.integer):
             raise ValueError("Generated subtask tokens must be a one-dimensional integer array.")
@@ -103,9 +109,31 @@ class PaligemmaTokenizer:
             raise ValueError("Generated subtask must contain text followed by one final EOS.")
         if np.any(tokens < 0) or np.any(tokens >= self._tokenizer.vocab_size()) or not self.decode_subtask(tokens):
             raise ValueError("Generated subtask contains invalid or empty text.")
-        return self._pack_subtask(
-            self._subtask_prefix(prompt, state), tokens.tolist(), self._tokenizer.encode("\nAction: "), max_subtask_len
+        return tokens
+
+    def tokenize_subtask_actions(
+        self, tokens: np.ndarray, state: np.ndarray | None = None, *, max_subtask_len: int = 64
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Independent low-level input, with identical GT/generated token handling.
+
+        No full-task argument is accepted. All valid low-level context tokens are
+        bidirectional; no CE is computed on this branch.
+        """
+        tokens = self._validate_subtask_tokens(tokens)
+        prefix = ""
+        if state is not None:
+            state = np.asarray(state)
+            if state.ndim != 1 or not np.isfinite(state).all():
+                raise ValueError("Subtask tokenizer requires a finite, one-dimensional state.")
+            discretized = np.digitize(state, bins=np.linspace(-1, 1, 257)[:-1]) - 1
+            prefix = f"State: {' '.join(map(str, discretized))};\n"
+        arrays = self._pack_subtask(
+            self._tokenizer.encode(prefix + "Subtask: ", add_bos=True),
+            tokens.tolist(),
+            self._tokenizer.encode("\nAction: "),
+            max_subtask_len,
         )
+        return arrays[:2]
 
     def subtask_token_lengths(self, prompt: str, subtask: str, state: np.ndarray | None = None) -> tuple[int, int, int]:
         """Untruncated lengths for dataset preflight (prefix, label including EOS, action cue)."""

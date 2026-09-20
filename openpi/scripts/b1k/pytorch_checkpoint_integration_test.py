@@ -1,6 +1,7 @@
 """Checkpoint interoperability for the real patched HF model, kept small on CPU."""
 
 import copy
+import dataclasses
 import importlib.util
 from pathlib import Path
 import sys
@@ -11,6 +12,7 @@ import torch
 
 from openpi.models_pytorch.pi0_pytorch_integration_test import observation
 from openpi.models_pytorch.pi0_pytorch_integration_test import tiny_hf_model  # noqa: F401
+from openpi.shared import subtask_contract
 
 _SPEC = importlib.util.spec_from_file_location(
     "_checkpoint_integration_trainer", Path(__file__).resolve().parents[1] / "train_pytorch.py"
@@ -36,15 +38,23 @@ def _update(model, optimizer, batch):
     )
 
 
-@pytest.mark.parametrize("joint", [False, True])
+@pytest.mark.parametrize("mode", ["ordinary", "task_and_subtask", "subtask_only"])
 # The imported pytest fixture is injected by name; it is not an unused Python import.
-def test_real_hf_checkpoint_resumes_next_optimizer_update_with_tied_weights(tiny_hf_model, tmp_path, joint):  # noqa: F811
+def test_real_hf_checkpoint_resumes_next_optimizer_update_with_tied_weights(tiny_hf_model, tmp_path, mode):  # noqa: F811
     model = tiny_hf_model
+    joint = mode != "ordinary"
     model.train_subtask_prediction = joint
+    model.subtask_action_conditioning = mode if joint else "task_and_subtask"
+    model.config = dataclasses.replace(
+        model.config, train_subtask_prediction=joint, subtask_action_conditioning=model.subtask_action_conditioning
+    )
     model.gradient_checkpointing_enable()
     model.train()
     trainer.set_seed(612, 0)
     obs = observation()
+    if mode == "subtask_only":
+        obs.action_tokenized_prompt = torch.tensor([[2, 5, 1, 6]])
+        obs.action_tokenized_prompt_mask = torch.ones(1, 4, dtype=torch.bool)
     if not joint:
         obs.token_ar_mask = None
         obs.token_loss_mask = None
@@ -57,12 +67,14 @@ def test_real_hf_checkpoint_resumes_next_optimizer_update_with_tied_weights(tiny
         save_interval=1,
         num_train_steps=2,
         wandb_enabled=False,
+        model=model.config,
     )
     _update(model, optimizer, batch)
     unused_head = model.paligemma_with_expert.gemma_expert.lm_head.weight
     assert not unused_head.requires_grad
     assert unused_head not in optimizer.state
     trainer.save_checkpoint(model, optimizer, 1, config)
+    assert subtask_contract.load(tmp_path / "1" / "assets") == (mode if joint else None)
     checkpoint_state = copy.deepcopy(model.state_dict())
     expected_metrics = _update(model, optimizer, batch)
 

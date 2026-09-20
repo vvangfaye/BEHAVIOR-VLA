@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 import os
 import pathlib
@@ -8,6 +9,7 @@ import jax.numpy as jnp
 import openpi.models.model as _model
 import openpi.policies.policy as _policy
 from openpi.policies.subtask_policy import SubtaskPolicy
+from openpi.shared import subtask_contract
 import openpi.shared.download as download
 from openpi.training import checkpoints as _checkpoints
 from openpi.training import config as _config
@@ -23,8 +25,9 @@ def create_trained_policy(
     default_prompt: str | None = None,
     norm_stats: dict[str, transforms.NormStats] | None = None,
     pytorch_device: str | None = None,
-    subtask_interval: int = 1,
+    subtask_interval: int | None = None,
     subtask_temperature: float = 0.0,
+    subtask_action_conditioning: str | None = None,
 ) -> _policy.Policy:
     """Create a policy from a trained checkpoint.
 
@@ -47,6 +50,26 @@ def create_trained_policy(
     """
     repack_transforms = repack_transforms or transforms.Group()
     checkpoint_dir = download.maybe_download(str(checkpoint_dir))
+
+    if getattr(train_config.model, "train_subtask_prediction", False):
+        saved_mode = subtask_contract.load(checkpoint_dir / "assets")
+        if (
+            subtask_action_conditioning is not None
+            and saved_mode is not None
+            and subtask_action_conditioning != saved_mode
+        ):
+            raise ValueError("Requested subtask action conditioning disagrees with the checkpoint metadata.")
+        mode = subtask_action_conditioning or saved_mode or train_config.model.subtask_action_conditioning
+        if saved_mode is None:
+            logging.warning("Checkpoint has no joint conditioning metadata; using %s.", mode)
+        train_config = dataclasses.replace(
+            train_config, model=dataclasses.replace(train_config.model, subtask_action_conditioning=mode)
+        )
+        if subtask_interval is None:
+            # Engineering default, not a paper-specified frequency. One request
+            # corresponds to the action execution horizon configured by the client.
+            subtask_interval = 2 if mode == subtask_contract.FACTORIZED else 1
+        logging.info("Joint action conditioning=%s, subtask refresh every %s requests", mode, subtask_interval)
 
     # Check if this is a PyTorch model by looking for model.safetensors
     weight_path = os.path.join(checkpoint_dir, "model.safetensors")
@@ -91,7 +114,7 @@ def create_trained_policy(
         input_transforms = [
             t
             for t in input_transforms
-            if not isinstance(t, (transforms.TokenizeSubtaskPrompt, transforms.PadStatesAndActions))
+            if not isinstance(t, transforms.TokenizeSubtaskPrompt | transforms.PadStatesAndActions)
         ]
         policy_cls = SubtaskPolicy
         subtask_kwargs = {

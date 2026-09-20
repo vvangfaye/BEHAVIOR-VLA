@@ -159,8 +159,24 @@ def test_chunked_ce_matches_dense_ce_and_gradients(model_setup):
     assert np.isnan(model._compute_subtask_metrics(hidden, bad_obs)[0]).all()
 
 
-def test_joint_training_updates_both_experts_and_overfits(model_setup):
+def with_action_context(obs, tokenizer):
+    arrays = [
+        tokenizer.tokenize_subtask_actions(np.asarray(tokens)[np.asarray(mask)], np.zeros(4), max_subtask_len=8)
+        for tokens, mask in zip(obs.tokenized_prompt, obs.token_loss_mask, strict=True)
+    ]
+    return dataclasses.replace(
+        obs,
+        action_tokenized_prompt=jnp.asarray(np.stack([a[0] for a in arrays])),
+        action_tokenized_prompt_mask=jnp.asarray(np.stack([a[1] for a in arrays])),
+    )
+
+
+@pytest.mark.parametrize("conditioning", ["task_and_subtask", "subtask_only"])
+def test_joint_training_updates_both_experts_and_overfits(model_setup, tokenizer, conditioning):
     model, obs, actions, _ = model_setup
+    model.subtask_action_conditioning = conditioning
+    if conditioning == "subtask_only":
+        obs = with_action_context(obs, tokenizer)
     optimizer = nnx.Optimizer(model, optax.adam(1e-3))
 
     @nnx.jit
@@ -182,6 +198,53 @@ def test_joint_training_updates_both_experts_and_overfits(model_setup):
     assert float(final) < float(initial)
     assert float(metrics["subtask_loss"]) < float(first_metrics["subtask_loss"])
     assert float(metrics["subtask_token_accuracy"]) > float(first_metrics["subtask_token_accuracy"])
+
+
+def test_factorized_actions_independent_of_task_in_train_and_inference(model_setup, tokenizer):
+    model, obs, actions, config = model_setup
+    model.subtask_action_conditioning = "subtask_only"
+    new_config = dataclasses.replace(config, subtask_action_conditioning="subtask_only")
+    assert new_config.inputs_spec()[0].action_tokenized_prompt is not None
+    assert jax.tree.structure(nnx.state(model)) == jax.tree.structure(nnx.state(new_config.create(jax.random.key(0))))
+    obs = with_action_context(obs, tokenizer)
+    # Fresh adaRMS gates are zero, making the randomly initialized action expert
+    # independent of *all* prefix tokens. Update once so the negative control
+    # (changing the subtask must change actions) is meaningful.
+    optimizer = nnx.Optimizer(model, optax.sgd(0.1))
+    grads = nnx.grad(lambda m: m.compute_loss(jax.random.key(7), obs, actions).mean())(model)
+    optimizer.update(grads)
+    changed_task = dataclasses.replace(obs, tokenized_prompt=obs.tokenized_prompt.at[:, 1].set(42))
+    loss_fn = nnx_utils.module_jit(model.compute_loss_with_metrics)
+    _, metrics = loss_fn(jax.random.key(7), obs, actions)
+    _, changed_metrics = loss_fn(jax.random.key(7), changed_task, actions)
+    np.testing.assert_array_equal(metrics["action_loss"], changed_metrics["action_loss"])
+    assert not np.isclose(metrics["subtask_loss"], changed_metrics["subtask_loss"])
+
+    sample = nnx_utils.module_jit(model.sample_actions)
+    prediction = sample(jax.random.key(3), obs, num_steps=2)
+    np.testing.assert_array_equal(prediction, sample(jax.random.key(3), changed_task, num_steps=2))
+    changed_subtask = dataclasses.replace(obs, action_tokenized_prompt=obs.action_tokenized_prompt.at[:, 3].set(41))
+    assert not np.allclose(prediction, sample(jax.random.key(3), changed_subtask, num_steps=2))
+    with pytest.raises(ValueError, match="action_tokenized_prompt"):
+        model.sample_actions(jax.random.key(3), dataclasses.replace(obs, action_tokenized_prompt=None), num_steps=2)
+
+
+def test_factorized_tokenizer_context_and_observation_round_trip(tokenizer):
+    transform = transforms.TokenizeSubtaskPrompt(
+        tokenizer, max_subtask_len=8, subtask_action_conditioning="subtask_only"
+    )
+    source = {"state": np.zeros(4), "prompt": "turn on radio", "subtask": "press radio"}
+    first = transform(source)
+    second = transform({**source, "prompt": "move to radio"})
+    assert not np.array_equal(first["tokenized_prompt"], second["tokenized_prompt"])
+    np.testing.assert_array_equal(first["action_tokenized_prompt"], second["action_tokenized_prompt"])
+    text = tokenizer.decode_subtask(first["action_tokenized_prompt"][first["action_tokenized_prompt_mask"]])
+    assert "Task:" not in text
+    assert "press radio" in text
+    first.update(image={}, image_mask={})
+    observation = model_lib.Observation.from_dict(first)
+    restored = model_lib.Observation.from_dict(observation.to_dict())
+    np.testing.assert_array_equal(restored.for_subtask_actions().tokenized_prompt, first["action_tokenized_prompt"])
 
 
 def test_jax_masked_action_reduction_and_no_mask_regression():

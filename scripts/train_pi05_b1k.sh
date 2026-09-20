@@ -450,6 +450,7 @@ if [[ -n "$SUBTASK_PROMPTS" ]]; then
         TRAIN_DATA_ARGS+=(
             --data.subtask-whole-task-prob 0
             --model.train-subtask-prediction
+            --model.subtask-action-conditioning "${SUBTASK_ACTION_CONDITIONING:-subtask_only}"
             --model.max-token-len "$MAX_TOKEN_LEN"
             --model.max-subtask-len "$MAX_SUBTASK_LEN"
             --model.subtask-loss-weight "${SUBTASK_LOSS_WEIGHT:-1.0}"

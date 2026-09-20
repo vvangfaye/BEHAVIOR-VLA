@@ -108,6 +108,7 @@ class PI0Pytorch(nn.Module):
         self.action_dim = config.action_dim
         self.action_horizon = config.action_horizon
         self.train_subtask_prediction = config.train_subtask_prediction
+        self.subtask_action_conditioning = config.subtask_action_conditioning
         self.train_subtask_executor = getattr(config, "train_subtask_executor", False)
         self.subtask_loss_weight = config.subtask_loss_weight
         self.max_subtask_len = config.max_subtask_len
@@ -209,7 +210,7 @@ class PI0Pytorch(nn.Module):
         return time.to(dtype=torch.float32, device=device)
 
     def embed_prefix(
-        self, images, img_masks, lang_tokens, lang_masks, lang_ar_masks=None
+        self, images, img_masks, lang_tokens, lang_masks, lang_ar_masks=None, *, image_embeddings=None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Embed images with SigLIP and language tokens with embedding layer to prepare
         for PaliGemma transformer processing.
@@ -219,12 +220,14 @@ class PI0Pytorch(nn.Module):
         att_masks = []
 
         # Process images
-        for img, img_mask in zip(images, img_masks, strict=True):
+        for index, (img, img_mask) in enumerate(zip(images, img_masks, strict=True)):
 
             def image_embed_func(img):
                 return self.paligemma_with_expert.embed_image(img)
 
-            img_emb = self._apply_checkpoint(image_embed_func, img)
+            img_emb = (
+                self._apply_checkpoint(image_embed_func, img) if image_embeddings is None else image_embeddings[index]
+            )
 
             bsize, num_img_embs = img_emb.shape[:2]
 
@@ -263,6 +266,14 @@ class PI0Pytorch(nn.Module):
             att_masks[:, -num_lang_embs:] = lang_ar_masks.to(dtype=torch.bool)
 
         return embs, pad_masks, att_masks
+
+    @staticmethod
+    def _subtask_action_tokens(observation):
+        tokens = getattr(observation, "action_tokenized_prompt", None)
+        mask = getattr(observation, "action_tokenized_prompt_mask", None)
+        if tokens is None or mask is None:
+            raise ValueError("subtask_only actions require action_tokenized_prompt and its mask.")
+        return tokens, mask
 
     def embed_suffix(self, state, noisy_actions, timestep):
         """Embed state, noisy_actions, timestep to prepare for Expert Gemma processing."""
@@ -371,8 +382,31 @@ class PI0Pytorch(nn.Module):
             x_t = torch.where(valid_targets, x_t, noise)
             u_t = torch.where(valid_targets, u_t, 0.0)
 
+        factorized = self.train_subtask_prediction and self.subtask_action_conditioning == "subtask_only"
+        high_level_out = None
+        image_embeddings = None
+        lang_ar_masks = observation.token_ar_mask
+        if factorized:
+            action_tokens, action_masks = self._subtask_action_tokens(observation)
+            # SigLIP has no language input. Its outputs can share an autograd
+            # graph; task-conditioned LLM representations cannot be reused.
+            image_embeddings = [self._apply_checkpoint(self.paligemma_with_expert.embed_image, img) for img in images]
+            high_embs, high_mask, high_ar = self.embed_prefix(
+                images, img_masks, lang_tokens, lang_masks, lang_ar_masks, image_embeddings=image_embeddings
+            )
+            backbone_dtype = self.paligemma_with_expert.paligemma.language_model.layers[0].self_attn.q_proj.weight.dtype
+            high_embs = high_embs.to(backbone_dtype)
+            (high_level_out, _), _ = self.paligemma_with_expert.forward(
+                attention_mask=self._prepare_attention_masks_4d(make_att_2d_masks(high_mask, high_ar)),
+                position_ids=torch.cumsum(high_mask, dim=1) - 1,
+                past_key_values=None,
+                inputs_embeds=[high_embs, None],
+                use_cache=False,
+            )
+            lang_tokens, lang_masks, lang_ar_masks = action_tokens, action_masks, None
+
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
-            images, img_masks, lang_tokens, lang_masks, observation.token_ar_mask
+            images, img_masks, lang_tokens, lang_masks, lang_ar_masks, image_embeddings=image_embeddings
         )
         suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.embed_suffix(state, x_t, time)
         if (
@@ -424,7 +458,9 @@ class PI0Pytorch(nn.Module):
         action_loss, metrics = reduce_action_loss(elementwise_action_loss, action_loss_mask)
         loss = action_loss
         if self.train_subtask_prediction:
-            subtask_loss, token_accuracy, counts = self._compute_subtask_metrics(prefix_out, observation)
+            subtask_loss, token_accuracy, counts = self._compute_subtask_metrics(
+                high_level_out if factorized else prefix_out, observation
+            )
             metrics.update(
                 subtask_loss=subtask_loss.mean(),
                 subtask_token_accuracy=(token_accuracy * counts).sum() / counts.sum().clamp_min(1),
@@ -574,8 +610,12 @@ class PI0Pytorch(nn.Module):
 
         images, img_masks, lang_tokens, lang_masks, state = self._preprocess_observation(observation, train=False)
 
+        lang_ar_masks = observation.token_ar_mask
+        if self.train_subtask_prediction and self.subtask_action_conditioning == "subtask_only":
+            lang_tokens, lang_masks = self._subtask_action_tokens(observation)
+            lang_ar_masks = None
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
-            images, img_masks, lang_tokens, lang_masks, observation.token_ar_mask
+            images, img_masks, lang_tokens, lang_masks, lang_ar_masks
         )
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
         prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1

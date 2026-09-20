@@ -124,6 +124,7 @@ if [[ -n "$SUBTASK_PROMPTS" ]]; then
 fi
 if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
     TRAIN_ARGS+=(--model.train-subtask-prediction --model.max-token-len "$MAX_TOKEN_LEN"
+        --model.subtask-action-conditioning "${SUBTASK_ACTION_CONDITIONING:-subtask_only}"
         --model.max-subtask-len "$MAX_SUBTASK_LEN" --model.subtask-loss-weight "${SUBTASK_LOSS_WEIGHT:-1.0}"
         --model.subtask-loss-chunk-size "${SUBTASK_LOSS_CHUNK_SIZE:-8}")
 fi

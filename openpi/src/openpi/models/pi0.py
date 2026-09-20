@@ -91,6 +91,7 @@ class Pi0(_model.BaseModel):
         super().__init__(config.action_dim, config.action_horizon, config.max_token_len)
         self.pi05 = config.pi05
         self.train_subtask_prediction = config.train_subtask_prediction
+        self.subtask_action_conditioning = config.subtask_action_conditioning
         self.train_subtask_executor = config.train_subtask_executor
         self.subtask_loss_weight = config.subtask_loss_weight
         self.max_subtask_len = config.max_subtask_len
@@ -132,14 +133,17 @@ class Pi0(_model.BaseModel):
 
     @at.typecheck
     def embed_prefix(
-        self, obs: _model.Observation
+        self, obs: _model.Observation, *, image_embeddings=None
     ) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"], at.Bool[at.Array, "b s"]]:
         input_mask = []
         ar_mask = []
         tokens = []
         # embed images
         for name in obs.images:
-            image_tokens, _ = self.PaliGemma.img(obs.images[name], train=False)
+            if image_embeddings is None:
+                image_tokens, _ = self.PaliGemma.img(obs.images[name], train=False)
+            else:
+                image_tokens = image_embeddings[name]
 
             tokens.append(image_tokens)
             input_mask.append(
@@ -245,9 +249,28 @@ class Pi0(_model.BaseModel):
             x_t = jnp.where(valid_targets, x_t, noise)
             u_t = jnp.where(valid_targets, u_t, 0.0)
 
-        # one big forward pass of prefix + suffix at once
-        prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
-        suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(observation, x_t, time)
+        factorized = self.train_subtask_prediction and self.subtask_action_conditioning == "subtask_only"
+        high_level_out = None
+        image_embeddings = None
+        action_observation = observation
+        if factorized:
+            action_observation = observation.for_subtask_actions()
+            # Share only task-independent SigLIP outputs, never LLM hidden states
+            # or KV caches: even image tokens become task-conditioned in the LLM.
+            image_embeddings = {
+                name: self.PaliGemma.img(img, train=False)[0] for name, img in observation.images.items()
+            }
+            high_tokens, high_mask, high_ar = self.embed_prefix(observation, image_embeddings=image_embeddings)
+            (high_level_out, _), _ = self.PaliGemma.llm(
+                [high_tokens, None],
+                mask=make_attn_mask(high_mask, high_ar),
+                positions=jnp.cumsum(high_mask, axis=1) - 1,
+            )
+
+        prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(
+            action_observation, image_embeddings=image_embeddings
+        )
+        suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(action_observation, x_t, time)
         input_mask = jnp.concatenate([prefix_mask, suffix_mask], axis=1)
         ar_mask = jnp.concatenate([prefix_ar_mask, jnp.broadcast_to(suffix_ar_mask, suffix_mask.shape)], axis=1)
         attn_mask = make_attn_mask(input_mask, ar_mask)
@@ -265,7 +288,9 @@ class Pi0(_model.BaseModel):
         action_loss, metrics = reduce_action_loss(per_timestep_action_loss, observation.action_loss_mask)
         if not self.train_subtask_prediction:
             return action_loss, metrics
-        subtask_loss, token_accuracy, counts = self._compute_subtask_metrics(prefix_out, observation)
+        subtask_loss, token_accuracy, counts = self._compute_subtask_metrics(
+            high_level_out if factorized else prefix_out, observation
+        )
         metrics.update(
             subtask_loss=jnp.mean(subtask_loss),
             subtask_token_accuracy=jnp.sum(token_accuracy * counts) / jnp.maximum(jnp.sum(counts), 1),
@@ -422,6 +447,8 @@ class Pi0(_model.BaseModel):
         num_steps: int | at.Int[at.Array, ""] = 10,
         noise: at.Float[at.Array, "b ah ad"] | None = None,
     ) -> _model.Actions:
+        if self.train_subtask_prediction and self.subtask_action_conditioning == "subtask_only":
+            observation = observation.for_subtask_actions()
         observation = _model.preprocess_observation(None, observation, train=False)
         # note that we use the convention more common in diffusion literature, where t=1 is noise and t=0 is the target
         # distribution. yes, this is the opposite of the pi0 paper, and I'm sorry.

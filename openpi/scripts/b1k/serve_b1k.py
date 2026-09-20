@@ -49,7 +49,9 @@ class Args:
     max_token_len: int = 512
     max_subtask_len: int = 64
     # Refresh every N model action-chunk requests (not simulator frames).
-    subtask_interval: int = 1
+    subtask_interval: int | None = None
+    # None reads checkpoint assets; old checkpoints default to task_and_subtask.
+    subtask_action_conditioning: str | None = None
     subtask_temperature: float = 0.0
 
 
@@ -107,6 +109,7 @@ def main(args: Args) -> None:
         default_prompt=task_prompt,
         subtask_interval=args.subtask_interval,
         subtask_temperature=args.subtask_temperature,
+        subtask_action_conditioning=args.subtask_action_conditioning,
     )
     policy_metadata = dict(policy.metadata)
     if args.provided_subtask_as_prompt:

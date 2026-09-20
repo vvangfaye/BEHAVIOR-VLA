@@ -9,13 +9,33 @@
 - pure executor：只接收当前 subtask 作为 prompt，训练 `观测 + 当前 subtask → 动作块`，不计算文本 CE。
 
 ```text
-joint:    Task + State + image → Subtask tokens + action chunk
+joint 高层: Task + State + image → Subtask tokens (CE)
+joint 低层: Subtask + State + image → action chunk (flow matching)
 executor: Subtask + State + image → boundary-masked action chunk
 ```
 
-图像与任务前缀使用双向注意力，subtask 和动作提示文本使用因果注意力，动作块能看到完整
-真实 subtask。交叉熵监督第一个词直到 EOS，padding、任务前缀和 `Action:` 不计入文本损失。
-词表投影复用原有 embedding 权重，没有增加 checkpoint 参数。
+joint 训练脚本现在默认 `SUBTASK_ACTION_CONDITIONING=subtask_only`，对应
+`p(s | o, T) p(a | o, s)`。高层保留完整任务，用真值 subtask teacher forcing，交叉熵监督
+第一个词直到 EOS；padding、任务前缀和 `Action:` 不计入文本损失。低层使用独立的
+`State: ...; Subtask: <GT tokens + EOS> Action:` 前缀，全部有效上下文双向可见，
+不包含完整任务。两个语言前向共享权重，只复用不含语言信息的 SigLIP 输出，不复用高层
+隐藏状态或 KV cache，避免完整任务通过图像/文本隐藏状态间接进入动作分支。
+
+JAX 和 Torch 都支持此模式。没有新增模型参数，但相比旧 joint 增加了一次高层语言前向，
+训练速度和峰值显存需要在实际 GPU 上测量。此改动对齐层级条件关系，不代表复现论文的
+完整预训练、多数据源混合配方，也不包含历史记忆或 subtask 完成判别器。
+
+### 与旧 checkpoint 的兼容
+
+- 旧 joint 模式为 `SUBTASK_ACTION_CONDITIONING=task_and_subtask`，动作仍可见完整任务。
+  继续旧实验的 `RESUME=1` 时必须显式设置这个变量。
+- 新训练会在每个 checkpoint 的 `assets/subtask_conditioning.json` 写入模式。
+  JAX→Torch 转换会随 assets 一起复制；推理服务自动读取，显式指定冲突模式会报错。
+- 无该文件的旧 checkpoint 默认使用旧模式，不会因为升级代码就更换动作输入。
+  `Pi0Config` 本身保留旧默认；直接调用 Python trainer 时，新模式需设置
+  `--model.subtask-action-conditioning subtask_only`。
+- 从旧权重切换到新模式，请开新实验做 fine-tuning；不要恢复旧优化器状态，也不要只在
+  eval 时删掉完整任务就当作已训练的新模型。
 
 ## 1. 数据准备
 
@@ -228,7 +248,8 @@ subtask 推理也已接通，环境、权重转换和启动方法见 [PyTorch �
 - 语言前缀与训练完全一致。逐 token 解码使用 KV cache，保留每条样本独立的
   位置、有效掩码和 EOS 停止状态。动作端直接使用生成的 token，包含 EOS 和 Action 提示，
   不经过文字解码再编码。语言生成和动作采样各做一次图像编码，未跨阶段复用视觉特征。
-- `subtask_interval=1` 表示每次请求新动作块时重新生成；结合 `action_horizon=16`，通常
+- 新模式默认 `subtask_interval=2`，旧模式默认 1。2 是工程初始值，不是论文指定频率。
+  `subtask_interval=1` 表示每次请求新动作块时重新生成；结合 `action_horizon=16`，通常
   执行 16 个控制步后根据新观测重新预测。设置 N>1 可在 N 次动作块请求之间复用 subtask，
   但动作预测始终读取当前图像和状态。多环境批处理必须使用 interval=1 或独立 policy 实例。
 - 这是按动作块重新预测的调度，并未新增独立的 subtask 完成判别器。重新生成相同文本
@@ -252,6 +273,10 @@ OUTPUT_ROOT=/path/to/subtask-evaluation \
 ```
 
 可用 MAX_TOKEN_LEN、MAX_SUBTASK_LEN、SUBTASK_INTERVAL、SUBTASK_TEMPERATURE 调整服务参数。
+`EXECUTE_HORIZON` 单独控制每次执行多少步，默认 16；例如
+`SUBTASK_INTERVAL=2 EXECUTE_HORIZON=16` 通常每 16 步重新预测动作、每 32 步重新预测 subtask。
+期间始终用最新图像/状态和缓存的 subtask 重建低层输入。可用 interval=1/2/4 做闭环消融，
+较慢高层刷新可能延迟技能切换，不能保证提高成功率。
 默认 greedy 解码（temperature=0）；请给预测 subtask 与 oracle 评测使用不同输出目录。
 固定外部 subtask 的闭环 smoke 使用 `EXTERNAL_SUBTASK`，且必须同时设置
 `PROMPT_MODE=whole_task SUBTASK_PREDICTION=1`：
@@ -290,3 +315,8 @@ JAX_PLATFORMS=cpu .venv/bin/python -m pytest -q \
 因果注意力、边界外 target 隔离、JAX/PyTorch masked loss 一致性、真实 Pi0/Gemma 接口的
 联合反向传播、验证集隔离、外部 subtask 来源传输及原动作 API。模型测试使用小词表和轻量
 图像编码器；真实数据 preflight 不解码视频，也不代表完整 checkpoint 已完成收敛或闭环验证。
+
+条件分解回归还检查固定观测、subtask 和噪声时，改变完整任务不会改变动作 loss、
+Torch 动作梯度或两后端采样动作；训练一步打开初始化为零的 adaRMS gates 后，
+改变低层 subtask 会改变采样动作，避免把“模型忽略所有上下文”误当作通过独立性检查。
+JAX 和 Torch 都验证模式随 checkpoint 保存，恢复训练时不能无意切换条件关系。

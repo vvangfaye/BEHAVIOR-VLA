@@ -36,13 +36,18 @@ import safetensors.torch
 import torch
 import torch.distributed as dist
 
+from openpi.shared import subtask_contract
+
 if TYPE_CHECKING:
     import openpi.training.config as _config
 
 
 _CHECKPOINT_FILES = ("model.safetensors", "optimizer.pt", "metadata.json", "rng.pt")
 _RESUME_COMPATIBLE_DEFAULTS = {
-    "model": ((("train_subtask_executor",), False),),
+    "model": (
+        (("train_subtask_executor",), False),
+        (("subtask_action_conditioning",), "task_and_subtask"),
+    ),
     "data": (
         (("subtask_executor_max_samples_per_segment",), None),
         (("strict_subtask_action_chunks",), False),
@@ -345,6 +350,8 @@ def save_checkpoint(model, optimizer, global_step, config, is_main=None, data_co
             "timestamp": time.time(),
         }
         (temporary_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
+        if getattr(getattr(config, "model", None), "train_subtask_prediction", False):
+            subtask_contract.save(temporary_dir / "assets", config.model.subtask_action_conditioning)
         if data_config is not None and data_config.norm_stats is not None and data_config.asset_id is not None:
             import openpi.shared.normalize as normalize
 

@@ -21,6 +21,7 @@ from openpi.policies.b1k_policy import B1KOutputs
 from openpi.policies.policy import PolicyRecorder
 from openpi.policies.subtask_policy import SubtaskPolicy
 from openpi.serving import websocket_b1k_server
+from openpi.shared import subtask_contract
 from openpi.shared.eval_b1k_wrapper import B1KPolicyWrapper
 from openpi.training import config as config_lib
 from scripts.b1k import serve_b1k
@@ -37,11 +38,15 @@ def simple_input(obs):
     }
 
 
-def test_policy_auto_provided_refresh_reset_and_missing_eos(model_setup, tokenizer, monkeypatch):
+@pytest.mark.parametrize("conditioning", ["task_and_subtask", "subtask_only"])
+def test_policy_auto_provided_refresh_reset_and_missing_eos(model_setup, tokenizer, monkeypatch, conditioning):
     model, obs, _, _ = model_setup
+    model.subtask_action_conditioning = conditioning
     policy = SubtaskPolicy(
         model,
-        tokenizer_transform=transforms.TokenizeSubtaskPrompt(tokenizer, max_subtask_len=8),
+        tokenizer_transform=transforms.TokenizeSubtaskPrompt(
+            tokenizer, max_subtask_len=8, subtask_action_conditioning=conditioning
+        ),
         subtask_interval=2,
         output_transforms=[B1KOutputs(action_dim=4)],
         sample_kwargs={"num_steps": 2},
@@ -92,15 +97,20 @@ def test_policy_auto_provided_refresh_reset_and_missing_eos(model_setup, tokeniz
     assert "subtask" not in source
 
 
+@pytest.mark.parametrize("conditioning", ["task_and_subtask", "subtask_only"])
 def test_factory_uses_autonomous_policy_with_b1k_adapters_and_real_generation(
     model_setup,
     tokenizer,
     monkeypatch,
     tmp_path,
+    conditioning,
 ):
     _, _, _, model_config = model_setup
     model_config = dataclasses.replace(model_config, action_dim=32)
     model = model_config.create(jax.random.key(0))
+    model.subtask_action_conditioning = conditioning
+    if conditioning == "subtask_only":
+        subtask_contract.save(tmp_path / "assets", conditioning)
     word = tokenizer._tokenizer.encode("press")[0]
 
     def head(self, hidden):
@@ -123,6 +133,54 @@ def test_factory_uses_autonomous_policy_with_b1k_adapters_and_real_generation(
     assert result["subtask_source"] == "generated"
     assert np.isfinite(result["actions"]).all()
     assert policy.metadata["subtask_generation"]
+    assert policy.metadata["subtask_action_conditioning"] == conditioning
+    assert policy.metadata["subtask_interval"] == (2 if conditioning == "subtask_only" else 1)
+    if conditioning == "subtask_only":
+        with pytest.raises(ValueError, match="disagrees"):
+            policy_config.create_trained_policy(
+                config, tmp_path, norm_stats={}, subtask_action_conditioning="task_and_subtask"
+            )
+
+
+def test_factorized_policy_uses_current_observation_and_exact_tokens(model_setup, tokenizer, monkeypatch):
+    model, obs, _, _ = model_setup
+    model.subtask_action_conditioning = "subtask_only"
+    transform = transforms.TokenizeSubtaskPrompt(
+        tokenizer, max_subtask_len=8, subtask_action_conditioning="subtask_only"
+    )
+    policy = SubtaskPolicy(model, tokenizer_transform=transform, subtask_interval=2)
+    source = simple_input(obs)
+    training = transform({**source, "subtask": "press radio"})
+    ids = training["tokenized_prompt"][training["token_loss_mask"]]
+    high_inputs, action_inputs = [], []
+
+    def generate(key, observation, **kwargs):
+        high_inputs.append(observation)
+        return {
+            "tokens": ids[None],
+            "lengths": np.array([len(ids)]),
+            "has_eos": np.array([True]),
+            "valid_prefix": np.array([True]),
+        }
+
+    def sample(key, observation, **kwargs):
+        action_inputs.append(observation)
+        return jnp.zeros((1, 2, 4))
+
+    monkeypatch.setattr(policy, "_generate", generate)
+    monkeypatch.setattr(policy, "_sample_actions", sample)
+    assert policy.infer(source)["subtask_source"] == "generated"
+    np.testing.assert_array_equal(action_inputs[-1].action_tokenized_prompt[0], training["action_tokenized_prompt"])
+    changed = {**source, "state": np.ones(4), "image": {k: np.ones_like(v) for k, v in source["image"].items()}}
+    assert policy.infer(changed)["subtask_source"] == "cached"
+    assert len(high_inputs) == 1
+    assert not np.array_equal(action_inputs[0].action_tokenized_prompt, action_inputs[1].action_tokenized_prompt)
+    assert np.asarray(action_inputs[1].images["base_0_rgb"]).mean() == 1
+    assert policy.infer({**source, "subtask": "press radio"})["subtask_source"] == "provided"
+    np.testing.assert_array_equal(action_inputs[-1].action_tokenized_prompt, action_inputs[0].action_tokenized_prompt)
+    assert policy.infer({**source, "prompt": "move to radio"})["subtask_source"] == "generated"
+    np.testing.assert_array_equal(action_inputs[-1].action_tokenized_prompt, action_inputs[0].action_tokenized_prompt)
+    assert not np.array_equal(high_inputs[0].tokenized_prompt, high_inputs[-1].tokenized_prompt)
 
 
 def test_b1k_wrapper_keeps_text_and_resets_on_instruction_change(tmp_path):

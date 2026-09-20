@@ -91,8 +91,14 @@ SUBTASK_SERVER_ARGS=()
 if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
     : "${PI05_CKPT:?set PI05_CKPT to your joint subtask-trained checkpoint}"
     SUBTASK_SERVER_ARGS=(--subtask-prediction --max-token-len "${MAX_TOKEN_LEN:-512}"
-        --max-subtask-len "${MAX_SUBTASK_LEN:-64}" --subtask-interval "${SUBTASK_INTERVAL:-1}"
+        --max-subtask-len "${MAX_SUBTASK_LEN:-64}"
         --subtask-temperature "${SUBTASK_TEMPERATURE:-0.0}")
+    if [[ -n "${SUBTASK_INTERVAL:-}" ]]; then
+        SUBTASK_SERVER_ARGS+=(--subtask-interval "$SUBTASK_INTERVAL")
+    fi
+    if [[ -n "${SUBTASK_ACTION_CONDITIONING:-}" ]]; then
+        SUBTASK_SERVER_ARGS+=(--subtask-action-conditioning "$SUBTASK_ACTION_CONDITIONING")
+    fi
 elif [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
     if [[ -z "$EXTERNAL_SUBTASK_SET" && -z "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
         echo "PROVIDED_SUBTASK_AS_PROMPT requires EXTERNAL_SUBTASK or EXTERNAL_SUBTASK_SELECTOR" >&2; exit 2
@@ -178,7 +184,7 @@ start_server() {
         --policy.config pi05_b1k \
         --policy.dir "$PI05_CKPT" \
         --control_mode receding_horizon \
-        --action_horizon 16 \
+        --action_horizon "${EXECUTE_HORIZON:-16}" \
         "${SUBTASK_SERVER_ARGS[@]}" \
         --port "$PORT" >> "$SERVER_LOG" 2>&1 &
     SERVER_PID=$!

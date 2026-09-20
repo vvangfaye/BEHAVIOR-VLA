@@ -133,6 +133,7 @@ def test_launcher_arguments_parse_with_real_training_config(launch_environment, 
     assert config.name == "pi05_b1k_pytorch"
     assert config.ema_decay is None
     assert config.model.train_subtask_prediction == subtask
+    assert config.model.subtask_action_conditioning == ("subtask_only" if subtask else "task_and_subtask")
     assert config.data.dataset_root == environment["DATASET_ROOT"]
     assert config.data.episodes_index == ([5, 7] if subtask else [5, 6, 7])
     assert config.batch_size == 2
@@ -160,6 +161,7 @@ def test_filtered_episodes_shared_by_norm_stats_and_training(launch_environment)
     assert _values(training, "--data.episodes-index") == ["5", "7"]
     assert "--model.train-subtask-prediction" in training
     assert _value(training, "--model.max-token-len") == "512"
+    assert _value(training, "--model.subtask-action-conditioning") == "subtask_only"
     assert _value(training, "--data.subtask-whole-task-prob") == "0"
 
 

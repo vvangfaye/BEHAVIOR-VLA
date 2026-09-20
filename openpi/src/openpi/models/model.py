@@ -106,6 +106,10 @@ class Observation(Generic[ArrayT]):
     token_ar_mask: at.Int[ArrayT, "*b l"] | None = None
     # Token loss mask.
     token_loss_mask: at.Bool[ArrayT, "*b l"] | None = None
+    # Independent low-level context for factorized joint training. Contains
+    # state + current subtask, never the complete task or contextualized caches.
+    action_tokenized_prompt: at.Int[ArrayT, "*b l"] | None = None
+    action_tokenized_prompt_mask: at.Bool[ArrayT, "*b l"] | None = None
     # Valid action timesteps for temporally truncated supervision.
     action_loss_mask: at.Bool[ArrayT, "*b ah"] | None = None
 
@@ -115,6 +119,8 @@ class Observation(Generic[ArrayT]):
         # Ensure that tokenized_prompt and tokenized_prompt_mask are provided together.
         if ("tokenized_prompt" in data) != ("tokenized_prompt_mask" in data):
             raise ValueError("tokenized_prompt and tokenized_prompt_mask must be provided together.")
+        if (data.get("action_tokenized_prompt") is None) != (data.get("action_tokenized_prompt_mask") is None):
+            raise ValueError("action_tokenized_prompt and action_tokenized_prompt_mask must be provided together.")
         # If images are uint8, convert them to [-1, 1] float32.
         for key in data["image"]:
             if data["image"][key].dtype == np.uint8:
@@ -129,6 +135,8 @@ class Observation(Generic[ArrayT]):
             tokenized_prompt_mask=data.get("tokenized_prompt_mask"),
             token_ar_mask=data.get("token_ar_mask"),
             token_loss_mask=data.get("token_loss_mask"),
+            action_tokenized_prompt=data.get("action_tokenized_prompt"),
+            action_tokenized_prompt_mask=data.get("action_tokenized_prompt_mask"),
             action_loss_mask=data.get("action_loss_mask"),
         )
 
@@ -138,6 +146,18 @@ class Observation(Generic[ArrayT]):
         result["image"] = result.pop("images")
         result["image_mask"] = result.pop("image_masks")
         return result
+
+    def for_subtask_actions(self) -> "Observation[ArrayT]":
+        """Select the independent action context; fail closed if it is missing."""
+        if self.action_tokenized_prompt is None or self.action_tokenized_prompt_mask is None:
+            raise ValueError("subtask_only actions require action_tokenized_prompt and its mask.")
+        return dataclasses.replace(
+            self,
+            tokenized_prompt=self.action_tokenized_prompt,
+            tokenized_prompt_mask=self.action_tokenized_prompt_mask,
+            token_ar_mask=None,
+            token_loss_mask=None,
+        )
 
 
 # Defines the format of the actions. This field is included as "actions" inside the dictionary
@@ -209,6 +229,8 @@ def preprocess_observation(
         tokenized_prompt_mask=observation.tokenized_prompt_mask,
         token_ar_mask=observation.token_ar_mask,
         token_loss_mask=observation.token_loss_mask,
+        action_tokenized_prompt=observation.action_tokenized_prompt,
+        action_tokenized_prompt_mask=observation.action_tokenized_prompt_mask,
         action_loss_mask=observation.action_loss_mask,
     )
 

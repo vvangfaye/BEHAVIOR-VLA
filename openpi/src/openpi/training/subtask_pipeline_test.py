@@ -17,8 +17,12 @@ import pyarrow.parquet as pq
 import pytest
 import torch
 
+from openpi import transforms
 from openpi.configs import ROBOT_REGISTRY
 from openpi.models import tokenizer as tokenizer_lib
+from openpi.models.subtask_test import with_action_context
+from openpi.shared import subtask_contract
+from openpi.training import checkpoints
 from openpi.training import config as config_lib
 from openpi.training import data_loader
 from openpi.training import utils
@@ -29,7 +33,10 @@ pytest_plugins = ["openpi.models.subtask_test"]
 
 
 @pytest.mark.parametrize("framework", ["jax", "pytorch"])
-def test_b1k_pipeline_preserves_task_and_original_frame_indices(tmp_path, monkeypatch, tokenizer, framework):
+@pytest.mark.parametrize("conditioning", ["task_and_subtask", "subtask_only"])
+def test_b1k_pipeline_preserves_task_and_original_frame_indices(
+    tmp_path, monkeypatch, tokenizer, framework, conditioning
+):
     if framework == "pytorch":
 
         def no_jax_backend(*args, **kwargs):
@@ -117,7 +124,13 @@ def test_b1k_pipeline_preserves_task_and_original_frame_indices(tmp_path, monkey
     tokenizer._max_len = 128
     monkeypatch.setattr(tokenizer_lib, "PaligemmaTokenizer", lambda max_len: tokenizer)
     config = config_lib.get_config("pi05_b1k")
-    model_config = dataclasses.replace(config.model, train_subtask_prediction=True, max_token_len=128, action_horizon=2)
+    model_config = dataclasses.replace(
+        config.model,
+        train_subtask_prediction=True,
+        max_token_len=128,
+        action_horizon=2,
+        subtask_action_conditioning=conditioning,
+    )
     factory = dataclasses.replace(
         config.data,
         repo_id="test/b1k",
@@ -137,6 +150,12 @@ def test_b1k_pipeline_preserves_task_and_original_frame_indices(tmp_path, monkey
     assert converted["state"].shape == (32,)
     assert converted["actions"].shape == (2, 32)
     assert converted["token_loss_mask"].any()
+    if conditioning == "subtask_only":
+        action_text = tokenizer.decode_subtask(
+            converted["action_tokenized_prompt"][converted["action_tokenized_prompt_mask"]]
+        )
+        assert "press radio" in action_text
+        assert "turn on radio" not in action_text
     assert (
         tokenizer._tokenizer.decode(converted["tokenized_prompt"][converted["token_loss_mask"]].tolist())
         == "press radio"
@@ -208,6 +227,9 @@ def test_b1k_pipeline_preserves_task_and_original_frame_indices(tmp_path, monkey
         assert observation.token_loss_mask.dtype == torch.bool
         assert observation.tokenized_prompt_mask.dtype == torch.bool
         assert observation.token_loss_mask.any(dim=1).all()
+        if conditioning == "subtask_only":
+            assert observation.action_tokenized_prompt.dtype == torch.int32
+            assert observation.action_tokenized_prompt_mask.dtype == torch.bool
         assert observation.images["base_0_rgb"].dtype == torch.float32
         assert actions.shape == (2, 2, 32)
         prompt = tokenizer._tokenizer.decode(
@@ -236,8 +258,13 @@ def test_b1k_pipeline_preserves_task_and_original_frame_indices(tmp_path, monkey
 
 
 @pytest.mark.parametrize("trainer", [train_b1k, train])
-def test_real_train_step_returns_separate_metrics_and_updates_state(model_setup, trainer):
+@pytest.mark.parametrize("conditioning", ["task_and_subtask", "subtask_only"])
+def test_real_train_step_returns_separate_metrics_and_updates_state(model_setup, trainer, tokenizer, conditioning):
     model, obs, actions, model_config = model_setup
+    model.subtask_action_conditioning = conditioning
+    model_config = dataclasses.replace(model_config, subtask_action_conditioning=conditioning)
+    if conditioning == "subtask_only":
+        obs = with_action_context(obs, tokenizer)
     config = dataclasses.replace(config_lib.get_config("pi05_b1k"), model=model_config, ema_decay=None)
     model_def, params = nnx.split(model)
     tx = optax.adam(1e-3)
@@ -402,8 +429,9 @@ def test_subtask_modes_are_mutually_exclusive():
         ).create(config.assets_dirs, executor_model)
 
 
-def test_validation_episode_split_overrides_factory_and_reuses_repo(monkeypatch, tmp_path):
+def test_validation_episode_split_overrides_factory_and_reuses_repo(monkeypatch, tmp_path, tokenizer):
     monkeypatch.setattr(config_lib.LeRobotB1KDataConfig, "_load_norm_stats", lambda *args: None)
+    monkeypatch.setattr(tokenizer_lib, "PaligemmaTokenizer", lambda max_len: tokenizer)
     config = config_lib.get_config("pi05_b1k")
     train_factory = dataclasses.replace(
         config.data,
@@ -428,6 +456,44 @@ def test_validation_episode_split_overrides_factory_and_reuses_repo(monkeypatch,
     assert data_config.episodes_index == [99]
     assert data_config.norm_stats is norm_stats
     assert use_norm_stats
+
+
+def test_jax_checkpoint_persists_conditioning_and_guards_resume(model_setup, tokenizer, tmp_path):
+    model, _, _, _ = model_setup
+    model.subtask_action_conditioning = "subtask_only"
+    model_def, params = nnx.split(model)
+    tx = optax.sgd(0.1)
+    state = utils.TrainState(
+        step=jnp.asarray(1),
+        params=params,
+        model_def=model_def,
+        tx=tx,
+        opt_state=tx.init(params),
+        ema_decay=None,
+    )
+    transform = transforms.TokenizeSubtaskPrompt(tokenizer, subtask_action_conditioning="subtask_only")
+    data_config = config_lib.DataConfig(model_transforms=transforms.Group(inputs=[transform]))
+    loader = SimpleNamespace(data_config=lambda: data_config)
+    manager, _ = checkpoints.initialize_checkpoint_dir(
+        tmp_path / "checkpoints", keep_period=None, overwrite=False, resume=False
+    )
+    try:
+        checkpoints.save_state(manager, state, loader, 1)
+        manager.wait_until_finished()
+        assert subtask_contract.load(tmp_path / "checkpoints" / "1" / "assets") == "subtask_only"
+        restored = checkpoints.restore_state(manager, state, loader)
+        for actual, expected in zip(jax.tree.leaves(restored.params), jax.tree.leaves(params), strict=True):
+            np.testing.assert_array_equal(actual, expected)
+        data_config = dataclasses.replace(
+            data_config,
+            model_transforms=transforms.Group(
+                inputs=[dataclasses.replace(transform, subtask_action_conditioning="task_and_subtask")]
+            ),
+        )
+        with pytest.raises(ValueError, match="Cannot resume"):
+            checkpoints.restore_state(manager, state, loader)
+    finally:
+        manager.close()
 
 
 def test_validation_rejects_overlapping_episode_split():

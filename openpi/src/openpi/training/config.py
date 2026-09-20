@@ -165,6 +165,7 @@ class ModelTransformFactory(GroupFactory):
                                 _tokenizer.PaligemmaTokenizer(model_config.max_token_len),
                                 max_subtask_len=model_config.max_subtask_len,
                                 discrete_state_input=model_config.discrete_state_input,
+                                subtask_action_conditioning=model_config.subtask_action_conditioning,
                             ),
                             _transforms.PadStatesAndActions(model_config.action_dim),
                         ],

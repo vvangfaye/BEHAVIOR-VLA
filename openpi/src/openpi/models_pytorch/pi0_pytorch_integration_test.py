@@ -47,19 +47,21 @@ def tiny_hf_model(monkeypatch):
 
     monkeypatch.setattr(pi0_pytorch._gemma, "get_config", lambda variant: small)
     monkeypatch.setattr(gemma_pytorch, "CONFIG_MAPPING", {"paligemma": pali_config, "gemma": GemmaConfig})
-    return pi0_pytorch.PI0Pytorch(
-        Pi0Config(
-            pi05=True,
-            dtype="float32",
-            max_token_len=12,
-            max_subtask_len=4,
-            subtask_loss_chunk_size=2,
-            train_subtask_prediction=True,
-            action_dim=3,
-            action_horizon=2,
-            pytorch_compile_mode=None,
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(0)
+        yield pi0_pytorch.PI0Pytorch(
+            Pi0Config(
+                pi05=True,
+                dtype="float32",
+                max_token_len=12,
+                max_subtask_len=4,
+                subtask_loss_chunk_size=2,
+                train_subtask_prediction=True,
+                action_dim=3,
+                action_horizon=2,
+                pytorch_compile_mode=None,
+            )
         )
-    )
 
 
 def observation():
@@ -75,11 +77,16 @@ def observation():
     )
 
 
-@pytest.mark.parametrize("joint", [False, True])
-def test_real_hf_train_backward_and_cached_inference(tiny_hf_model, joint):
+@pytest.mark.parametrize("mode", ["ordinary", "task_and_subtask", "subtask_only"])
+def test_real_hf_train_backward_and_cached_inference(tiny_hf_model, mode):
     model = tiny_hf_model
+    joint = mode != "ordinary"
     model.train_subtask_prediction = joint
+    model.subtask_action_conditioning = mode if joint else "task_and_subtask"
     obs = observation()
+    if mode == "subtask_only":
+        obs.action_tokenized_prompt = torch.tensor([[2, 5, 1, 6]])
+        obs.action_tokenized_prompt_mask = torch.ones(1, 4, dtype=torch.bool)
     if joint:
         model.gradient_checkpointing_enable()
     else:
@@ -98,7 +105,21 @@ def test_real_hf_train_backward_and_cached_inference(tiny_hf_model, joint):
     assert backbone.paligemma.vision_tower.vision_model.embeddings.patch_embedding.weight.grad is not None
     assert not backbone.gemma_expert.lm_head.weight.requires_grad
     assert backbone.paligemma.lm_head.weight is backbone.paligemma.language_model.embed_tokens.weight
+    if mode == "subtask_only":
+        # Randomly initialized adaRMS gates are zero. Train once before checking
+        # sensitivity to the low-level label; otherwise every prefix is ignored.
+        torch.optim.SGD(model.parameters(), lr=0.1).step()
     model.eval()
+    if mode == "subtask_only":
+        # One update of a tiny random model can produce label effects smaller
+        # than BF16 resolution. Check the dependency before quantizing weights.
+        noise = torch.randn(1, 2, 3)
+        first = model.sample_actions("cpu", obs, noise=noise, num_steps=2)
+        obs.tokenized_prompt[:, 1] = 19
+        torch.testing.assert_close(first, model.sample_actions("cpu", obs, noise=noise, num_steps=2), rtol=0, atol=0)
+        obs.action_tokenized_prompt[:, 1] = 18
+        assert not torch.equal(first, model.sample_actions("cpu", obs, noise=noise, num_steps=2))
+        obs.action_tokenized_prompt[:, 1] = 5
     if joint:
         # Match create_trained_policy: inference stores the backbone in BF16
         # while selected norms/vision embeddings and action projections stay FP32.
@@ -106,6 +127,10 @@ def test_real_hf_train_backward_and_cached_inference(tiny_hf_model, joint):
     actions = model.sample_actions("cpu", obs, num_steps=2)
     assert actions.shape == (1, 2, 3)
     assert torch.isfinite(actions).all()
+    if mode == "subtask_only":
+        first = model.sample_actions("cpu", obs, noise=noise, num_steps=2)
+        obs.tokenized_prompt[:, 1] = 20
+        torch.testing.assert_close(first, model.sample_actions("cpu", obs, noise=noise, num_steps=2), rtol=0, atol=0)
     if joint:
         obs.tokenized_prompt_mask[:, 3:] = False
         obs.token_ar_mask[:] = False

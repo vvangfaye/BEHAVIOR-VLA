@@ -41,12 +41,15 @@ class TorchSubtaskModel(torch.nn.Module):
         return torch.ones(1, 2, self.action_dim, device=device)
 
 
-def make_policy(tokenizer):
+def make_policy(tokenizer, conditioning="task_and_subtask"):
     arrays = tokenizer.tokenize_subtask_training("turn on radio", "press radio", max_subtask_len=8)
     model = TorchSubtaskModel(arrays[0][arrays[3]])
+    model.subtask_action_conditioning = conditioning
     policy = SubtaskPolicy(
         model,
-        tokenizer_transform=transforms.TokenizeSubtaskPrompt(tokenizer, max_subtask_len=8),
+        tokenizer_transform=transforms.TokenizeSubtaskPrompt(
+            tokenizer, max_subtask_len=8, subtask_action_conditioning=conditioning
+        ),
         is_pytorch=True,
         pytorch_device="cpu",
         subtask_interval=2,
@@ -63,13 +66,19 @@ def source():
     }
 
 
-def test_torch_generation_cache_gt_and_reset(tokenizer):
-    policy, model = make_policy(tokenizer)
+@pytest.mark.parametrize("conditioning", ["task_and_subtask", "subtask_only"])
+def test_torch_generation_cache_gt_and_reset(tokenizer, conditioning):
+    policy, model = make_policy(tokenizer, conditioning)
     first = policy.infer(source())
     assert first["subtask"] == "press radio"
     assert first["subtask_source"] == "generated"
     assert first["actions"].shape == (2, 4)
     assert np.isfinite(first["actions"]).all()
+    if conditioning == "subtask_only":
+        action_context = model.action_inputs[0].for_subtask_actions()
+        text = tokenizer.decode_subtask(action_context.tokenized_prompt[0][action_context.tokenized_prompt_mask[0]])
+        assert "Task:" not in text
+        assert "press radio" in text
     assert policy.infer(source())["subtask_source"] == "cached"
     assert len(model.generation_inputs) == 1
     assert policy.infer(source())["subtask_source"] == "generated"

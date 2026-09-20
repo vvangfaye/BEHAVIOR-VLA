@@ -323,6 +323,17 @@ class TokenizeSubtaskPrompt(DataTransformFn):
     tokenizer: _tokenizer.PaligemmaTokenizer
     max_subtask_len: int = 64
     discrete_state_input: bool = True
+    subtask_action_conditioning: str = "task_and_subtask"
+
+    def action_fields(self, label_tokens, state):
+        if self.subtask_action_conditioning == "task_and_subtask":
+            return {}
+        if self.subtask_action_conditioning != "subtask_only":
+            raise ValueError("Unknown subtask_action_conditioning.")
+        tokens, mask = self.tokenizer.tokenize_subtask_actions(
+            label_tokens, state, max_subtask_len=self.max_subtask_len
+        )
+        return {"action_tokenized_prompt": tokens, "action_tokenized_prompt_mask": mask}
 
     def __call__(self, data: DataDict) -> DataDict:
         data = dict(data)
@@ -346,6 +357,7 @@ class TokenizeSubtaskPrompt(DataTransformFn):
             "tokenized_prompt_mask": mask,
             "token_ar_mask": ar_mask,
             "token_loss_mask": loss_mask,
+            **self.action_fields(tokens[loss_mask], state),
         }
 
 
