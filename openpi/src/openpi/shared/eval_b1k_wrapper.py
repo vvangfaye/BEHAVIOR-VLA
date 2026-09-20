@@ -20,6 +20,8 @@ class B1KPolicyWrapper:
         action_horizon: int,
         max_len: int,
         obs_size: tuple[int, int] = (224, 224),
+        *,
+        provided_subtask_as_prompt: bool = False,
     ) -> None:
         # Load robot config from registry
         self.robot = ROBOT_REGISTRY[robot]
@@ -29,6 +31,7 @@ class B1KPolicyWrapper:
         self.action_horizon = action_horizon
         self.obs_size = obs_size
         self.max_len = max_len
+        self.provided_subtask_as_prompt = provided_subtask_as_prompt
         self.temporal_ensemble_max = 5  # max number of sequences to ensemble
 
         # Extract gripper indices from robot config (end-effectors to preserve)
@@ -72,6 +75,10 @@ class B1KPolicyWrapper:
 
     def _infer(self, obs, index):
         result = self.policy.infer(obs)
+        if self.provided_subtask_as_prompt:
+            result = dict(result)
+            result["subtask"] = obs["subtask"]
+            result["subtask_source"] = "provided"
         index = int(index)
         if "subtask" in result:
             self.last_subtasks[index] = result["subtask"]
@@ -403,6 +410,10 @@ class B1KPolicyWrapper:
         subtask = input_obs.get("subtask")
         if subtask is not None and not isinstance(subtask, str):
             raise ValueError("An explicit B1K subtask override must be a text string.")
+        if self.provided_subtask_as_prompt:
+            if not isinstance(subtask, str) or not subtask.strip():
+                raise ValueError("Provided-subtask prompt mode requires a non-empty subtask string.")
+            subtask = subtask.strip()
         if self._last_prompt is not None and (prompt != self._last_prompt or subtask != self._last_subtask):
             logger.info("Policy instruction changed; clearing action buffers for immediate replanning.")
             self._clear_action_buffers()
@@ -411,6 +422,8 @@ class B1KPolicyWrapper:
         self._last_subtask = subtask
         input_obs = dict(input_obs)
         input_obs["prompt"] = prompt
+        if self.provided_subtask_as_prompt:
+            input_obs["subtask"] = subtask
 
         if self.control_mode == "receding_temporal":
             return self.act_receding_temporal(input_obs)

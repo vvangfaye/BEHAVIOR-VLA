@@ -2,7 +2,8 @@
 # Closed-loop evaluation of π0.5 in OmniGibson.
 # Starts the policy server, evaluates each task, then stops the server.
 # Usage: PI05_CKPT=/path/to/checkpoint bash scripts/eval_b1k.sh turning_on_radio
-# For joint subtask checkpoints, also set SUBTASK_PREDICTION=1.
+# For joint subtask checkpoints, set SUBTASK_PREDICTION=1; for action-only
+# subtask checkpoints, set PROVIDED_SUBTASK_AS_PROMPT=1 with an external subtask source.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -48,16 +49,23 @@ SERVER_GPU="${SERVER_GPU:-0}"
 EVAL_GPU="${EVAL_GPU:-1}"
 PI05_MEM_FRACTION="${PI05_MEM_FRACTION:-0.85}"
 SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-0}"
+PROVIDED_SUBTASK_AS_PROMPT="${PROVIDED_SUBTASK_AS_PROMPT:-0}"
 if [[ "$SUBTASK_PREDICTION" != 0 && "$SUBTASK_PREDICTION" != 1 ]]; then
     echo "SUBTASK_PREDICTION must be 0 or 1" >&2; exit 2
+fi
+if [[ "$PROVIDED_SUBTASK_AS_PROMPT" != 0 && "$PROVIDED_SUBTASK_AS_PROMPT" != 1 ]]; then
+    echo "PROVIDED_SUBTASK_AS_PROMPT must be 0 or 1" >&2; exit 2
+fi
+if [[ "$SUBTASK_PREDICTION" == 1 && "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
+    echo "SUBTASK_PREDICTION and PROVIDED_SUBTASK_AS_PROMPT are mutually exclusive" >&2; exit 2
 fi
 EXTERNAL_SUBTASK_ARGS=()
 if [[ -n "$EXTERNAL_SUBTASK_SET" ]]; then
     if [[ ! "$EXTERNAL_SUBTASK" =~ [^[:space:]] ]]; then
         echo "EXTERNAL_SUBTASK must be a non-empty, non-whitespace string" >&2; exit 2
     fi
-    if [[ "$SUBTASK_PREDICTION" != 1 ]]; then
-        echo "EXTERNAL_SUBTASK requires SUBTASK_PREDICTION=1" >&2; exit 2
+    if [[ "$SUBTASK_PREDICTION" != 1 && "$PROVIDED_SUBTASK_AS_PROMPT" != 1 ]]; then
+        echo "EXTERNAL_SUBTASK requires a subtask conditioning mode" >&2; exit 2
     fi
     if [[ "$PROMPT_MODE" != whole_task ]]; then
         echo "EXTERNAL_SUBTASK requires PROMPT_MODE=whole_task" >&2; exit 2
@@ -71,8 +79,8 @@ if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     if [[ "$EXTERNAL_SUBTASK_SELECTOR" != state_machine_v1 ]]; then
         echo "EXTERNAL_SUBTASK_SELECTOR must be state_machine_v1" >&2; exit 2
     fi
-    if [[ "$SUBTASK_PREDICTION" != 1 ]]; then
-        echo "EXTERNAL_SUBTASK_SELECTOR requires SUBTASK_PREDICTION=1" >&2; exit 2
+    if [[ "$SUBTASK_PREDICTION" != 1 && "$PROVIDED_SUBTASK_AS_PROMPT" != 1 ]]; then
+        echo "EXTERNAL_SUBTASK_SELECTOR requires a subtask conditioning mode" >&2; exit 2
     fi
     if [[ "$PROMPT_MODE" != whole_task ]]; then
         echo "EXTERNAL_SUBTASK_SELECTOR requires PROMPT_MODE=whole_task" >&2; exit 2
@@ -85,6 +93,14 @@ if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
     SUBTASK_SERVER_ARGS=(--subtask-prediction --max-token-len "${MAX_TOKEN_LEN:-512}"
         --max-subtask-len "${MAX_SUBTASK_LEN:-64}" --subtask-interval "${SUBTASK_INTERVAL:-1}"
         --subtask-temperature "${SUBTASK_TEMPERATURE:-0.0}")
+elif [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
+    if [[ -z "$EXTERNAL_SUBTASK_SET" && -z "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
+        echo "PROVIDED_SUBTASK_AS_PROMPT requires EXTERNAL_SUBTASK or EXTERNAL_SUBTASK_SELECTOR" >&2; exit 2
+    fi
+    if [[ "${MAX_TOKEN_LEN:-200}" != 200 ]]; then
+        echo "PROVIDED_SUBTASK_AS_PROMPT requires MAX_TOKEN_LEN=200" >&2; exit 2
+    fi
+    SUBTASK_SERVER_ARGS=(--provided-subtask-as-prompt --max-token-len 200)
 fi
 EVAL_RUNTIME_ROOT="${EVAL_RUNTIME_ROOT:-/dev/shm/wangfaye/omnigibson-runtime/$PORT}"
 
@@ -112,6 +128,9 @@ PI05_REPO_ID="${PI05_REPO_ID:-behavior-1k/2026-challenge-demos}"
 [[ -d "$PI05_CKPT" ]] || { echo "checkpoint not found: $PI05_CKPT" >&2; exit 1; }
 [[ -d "$PI05_CKPT/assets/$PI05_REPO_ID" ]] || {
     echo "norm stats not found: $PI05_CKPT/assets/$PI05_REPO_ID" >&2; exit 1; }
+if [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 && -f "$PI05_CKPT/model.safetensors" ]]; then
+    echo "PROVIDED_SUBTASK_AS_PROMPT currently supports JAX checkpoints only" >&2; exit 2
+fi
 if [[ -f "$PI05_CKPT/model.safetensors" ]]; then
     PI05_ENV="${PI05_ENV:-$REPO_ROOT/openpi/.venv-torch}"
     export JAX_PLATFORMS=cpu

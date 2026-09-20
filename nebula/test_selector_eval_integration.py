@@ -239,6 +239,7 @@ def run_shell(
         "EXTERNAL_SUBTASK_SELECTOR",
         "PI05_CKPT",
         "PI05_MODEL_FORMAT",
+        "PROVIDED_SUBTASK_AS_PROMPT",
     ):
         env.pop(name, None)
     env.update(overrides)
@@ -266,7 +267,16 @@ def run_shell(
         (
             {"EXTERNAL_SUBTASK_SELECTOR": SELECTOR, "SUBTASK_PREDICTION": "0"},
             TASK,
-            "requires SUBTASK_PREDICTION=1",
+            "requires a subtask conditioning mode",
+        ),
+        (
+            {
+                "EXTERNAL_SUBTASK_SELECTOR": SELECTOR,
+                "SUBTASK_PREDICTION": "1",
+                "PROVIDED_SUBTASK_AS_PROMPT": "1",
+            },
+            TASK,
+            "mutually exclusive",
         ),
         (
             {
@@ -296,16 +306,30 @@ def test_eval_script_rejects_invalid_selector_configuration(overrides, task, mes
     assert message in completed.stderr
 
 
-def test_submit_script_rejects_selector_outside_two_tasks_profile():
+def test_eval_script_accepts_strict_selector_configuration():
+    completed = run_shell(
+        EVAL_SCRIPT,
+        TASK,
+        EXTERNAL_SUBTASK_SELECTOR=SELECTOR,
+        SUBTASK_PREDICTION="0",
+        PROVIDED_SUBTASK_AS_PROMPT="1",
+        PI05_CKPT="/missing",
+    )
+
+    assert completed.returncode == 1
+    assert "checkpoint not found: /missing" in completed.stderr
+
+
+def test_submit_script_rejects_selector_outside_supported_profiles():
     completed = run_shell(
         SUBMIT_SCRIPT,
-        EVAL_PROFILE="smoke",
+        EVAL_PROFILE="reduced",
         EXTERNAL_SUBTASK_SELECTOR=SELECTOR,
         SUBTASK_PREDICTION="1",
     )
 
     assert completed.returncode == 2
-    assert "supported only for EVAL_PROFILE=two_tasks" in completed.stderr
+    assert "supported only for EVAL_PROFILE=smoke or two_tasks" in completed.stderr
 
 
 def test_submit_script_rejects_unknown_model_format():
@@ -322,7 +346,34 @@ def test_submit_script_requires_explicit_torch_checkpoint():
     assert "CHECKPOINT_SOURCE is required" in completed.stderr
 
 
-def test_worker_rejects_selector_outside_two_tasks_profile(tmp_path):
+def test_submit_script_rejects_torch_strict_prompt_mode():
+    completed = run_shell(
+        SUBMIT_SCRIPT,
+        EVAL_PROFILE="smoke",
+        PI05_MODEL_FORMAT="torch",
+        SUBTASK_PREDICTION="0",
+        PROVIDED_SUBTASK_AS_PROMPT="1",
+        EXTERNAL_SUBTASK_SELECTOR=SELECTOR,
+    )
+
+    assert completed.returncode == 2
+    assert "supports JAX checkpoints only" in completed.stderr
+
+
+def test_submit_script_rejects_joint_and_strict_prompt_modes_together():
+    completed = run_shell(
+        SUBMIT_SCRIPT,
+        EVAL_PROFILE="smoke",
+        SUBTASK_PREDICTION="1",
+        PROVIDED_SUBTASK_AS_PROMPT="1",
+        EXTERNAL_SUBTASK_SELECTOR=SELECTOR,
+    )
+
+    assert completed.returncode == 2
+    assert "mutually exclusive" in completed.stderr
+
+
+def test_worker_rejects_selector_outside_supported_profiles(tmp_path):
     nebula_dir = tmp_path / "repo" / "nebula"
     nebula_dir.mkdir(parents=True)
     worker = nebula_dir / WORKER_SCRIPT.name
@@ -330,7 +381,7 @@ def test_worker_rejects_selector_outside_two_tasks_profile(tmp_path):
     (nebula_dir / "eval_job.env").write_text(
         "\n".join(
             (
-                "EVAL_PROFILE=smoke",
+                "EVAL_PROFILE=reduced",
                 "CONFIRM_FULL=0",
                 "EVAL_WORKERS=1",
                 "BASE_PORT=8000",
@@ -345,7 +396,7 @@ def test_worker_rejects_selector_outside_two_tasks_profile(tmp_path):
     completed = run_shell(worker)
 
     assert completed.returncode == 1
-    assert "supported only for EVAL_PROFILE=two_tasks" in completed.stderr
+    assert "supported only for EVAL_PROFILE=smoke or two_tasks" in completed.stderr
 
 
 def test_worker_rejects_unknown_model_format(tmp_path):

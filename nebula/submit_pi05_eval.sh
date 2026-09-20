@@ -10,6 +10,7 @@ cd "$REPO_ROOT"
 QUEUE="${QUEUE:-aios_specific_nm125_l20}"
 GPU_CARD_TYPE="${GPU_CARD_TYPE:-l20}"
 ENTRY_FILE="nebula/eval_pi05.py"
+PROVIDED_SUBTASK_AS_PROMPT="${PROVIDED_SUBTASK_AS_PROMPT:-0}"
 ALGO_NAME="${ALGO_NAME:-pytorch2120}"
 AIHUB_MODEL_NAME="${AIHUB_MODEL_NAME:-behavior}"
 AI_HUB_CLI="${AI_HUB_CLI:-ai-hub-cli}"
@@ -51,7 +52,7 @@ else
     SPEED_TASK="${SPEED_TASK:-}"
     SPEED_EXPECTED_INSTANCE_IDS="${SPEED_EXPECTED_INSTANCE_IDS:-}"
 fi
-if [[ "$EVAL_PROFILE" == smoke && "$PI05_MODEL_FORMAT" == torch ]]; then
+if [[ "$EVAL_PROFILE" == smoke && ( "$PI05_MODEL_FORMAT" == torch || "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ) ]]; then
     SMOKE_TASK="${SMOKE_TASK:-carrying_in_groceries}"
     SMOKE_EVAL_GPU="${SMOKE_EVAL_GPU:-0}"
 else
@@ -61,18 +62,17 @@ fi
 CONFIRM_FULL="${CONFIRM_FULL:-0}"
 SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-1}"
 EXTERNAL_SUBTASK_SELECTOR="${EXTERNAL_SUBTASK_SELECTOR:-}"
-if [[ "$EVAL_PROFILE" == two_tasks && "$PI05_MODEL_FORMAT" == jax ]]; then
-    MAX_FAILOVER_TIMES="${MAX_FAILOVER_TIMES:-3}"
-else
-    MAX_FAILOVER_TIMES="${MAX_FAILOVER_TIMES:-0}"
-fi
+MAX_FAILOVER_TIMES="${MAX_FAILOVER_TIMES:-0}"
 if [[ "$EVAL_PROFILE" == full && "$CONFIRM_FULL" != 1 ]]; then
     echo "Full evaluation requires CONFIRM_FULL=1" >&2
     exit 2
 fi
 
 STAMP="$(date +%Y%m%d_%H%M%S)"
-if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
+if [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
+    RUN_ID="${RUN_ID:-pi05_strict_executor_114356_selector_${EVAL_PROFILE}_$STAMP}"
+    JOB_NAME="${JOB_NAME:-pi05-strict-selector-${EVAL_PROFILE}-$STAMP}"
+elif [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     RUN_ID="${RUN_ID:-pi05_selector_diagnostic_117541_${EVAL_PROFILE}_$STAMP}"
     JOB_NAME="${JOB_NAME:-pi05-selector-diagnostic-${EVAL_PROFILE}-$STAMP}"
 elif [[ "$PI05_MODEL_FORMAT" == torch ]]; then
@@ -94,7 +94,9 @@ fi
 PI05_ENV_ARCHIVE="${PI05_ENV_ARCHIVE:-$DEFAULT_PI05_ENV_ARCHIVE}"
 OPENPI_CACHE_ARCHIVE="${OPENPI_CACHE_ARCHIVE:-/data/oss_bucket_0/wangfaye/conda_env/b1k-pi05-openpi-cache.tar}"
 ASSET_ROOT="${ASSET_ROOT:-/data/oss_bucket_0/wangfaye/embodied/datasets/behavior-1k/eval-assets/v1}"
-if [[ "$PI05_MODEL_FORMAT" == torch ]]; then
+if [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
+    DEFAULT_CHECKPOINT_SOURCE="/data/oss_bucket_0/wangfaye/result/behavior-challenge/pi05_multihost/staged_inference_pi05_b1k_two_tasks_subtask_only_strict_s1_114356_20260919_074849"
+elif [[ "$PI05_MODEL_FORMAT" == torch ]]; then
     DEFAULT_CHECKPOINT_SOURCE=""
 elif [[ "$EVAL_PROFILE" == two_tasks ]]; then
     DEFAULT_CHECKPOINT_SOURCE="/data/oss_bucket_0/wangfaye/result/behavior-challenge/pi05_two_tasks_joint_subtask/staged_local_pi05_b1k_2tasks_joint_subtask_117541_20260915_151620"
@@ -106,7 +108,12 @@ CHECKPOINT_SOURCE="${CHECKPOINT_SOURCE:-$DEFAULT_CHECKPOINT_SOURCE}"
     echo "CHECKPOINT_SOURCE is required for PI05_MODEL_FORMAT=torch" >&2
     exit 2
 }
-PI05_REPO_ID="${PI05_REPO_ID:-b1k_two_tasks_joint_subtask_s1}"
+if [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
+    DEFAULT_PI05_REPO_ID="b1k_two_tasks_subtask_only_strict_s1"
+else
+    DEFAULT_PI05_REPO_ID="b1k_two_tasks_joint_subtask_s1"
+fi
+PI05_REPO_ID="${PI05_REPO_ID:-$DEFAULT_PI05_REPO_ID}"
 INSTANCE_INDICES="${INSTANCE_INDICES:-0 1 2 3 4}"
 NUM_ROLLOUTS="${NUM_ROLLOUTS:-1}"
 MAX_STEPS="${MAX_STEPS:-}"
@@ -118,21 +125,47 @@ KEEP_RUNTIME="${KEEP_RUNTIME:-0}"
 [[ "$MAX_FAILOVER_TIMES" =~ ^[0-9]+$ ]] || { echo "MAX_FAILOVER_TIMES must be a non-negative integer" >&2; exit 2; }
 [[ "$WRITE_VIDEO" == 0 || "$WRITE_VIDEO" == 1 ]] || { echo "WRITE_VIDEO must be 0 or 1" >&2; exit 2; }
 [[ "$SUBTASK_PREDICTION" == 0 || "$SUBTASK_PREDICTION" == 1 ]] || { echo "SUBTASK_PREDICTION must be 0 or 1" >&2; exit 2; }
+[[ "$PROVIDED_SUBTASK_AS_PROMPT" == 0 || "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]] || {
+    echo "PROVIDED_SUBTASK_AS_PROMPT must be 0 or 1" >&2; exit 2; }
 [[ "$SMOKE_EVAL_GPU" =~ ^[0-9]+$ ]] || { echo "SMOKE_EVAL_GPU must be a non-negative integer" >&2; exit 2; }
 [[ "$PI05_MEM_FRACTION" =~ ^0\.[0-9]+$ ]] || { echo "PI05_MEM_FRACTION must be between 0 and 1" >&2; exit 2; }
+if [[ "$SUBTASK_PREDICTION" == 1 && "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
+    echo "SUBTASK_PREDICTION and PROVIDED_SUBTASK_AS_PROMPT are mutually exclusive" >&2
+    exit 2
+fi
+if [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
+    [[ "$PI05_MODEL_FORMAT" == jax ]] || {
+        echo "PROVIDED_SUBTASK_AS_PROMPT currently supports JAX checkpoints only" >&2
+        exit 2
+    }
+    [[ "$SUBTASK_PREDICTION" == 0 ]] || {
+        echo "PROVIDED_SUBTASK_AS_PROMPT requires SUBTASK_PREDICTION=0" >&2
+        exit 2
+    }
+    [[ "$EXTERNAL_SUBTASK_SELECTOR" == state_machine_v1 ]] || {
+        echo "PROVIDED_SUBTASK_AS_PROMPT requires EXTERNAL_SUBTASK_SELECTOR=state_machine_v1" >&2
+        exit 2
+    }
+fi
 if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     [[ "$EXTERNAL_SUBTASK_SELECTOR" == state_machine_v1 ]] || {
         echo "EXTERNAL_SUBTASK_SELECTOR must be state_machine_v1" >&2
         exit 2
     }
-    [[ "$EVAL_PROFILE" == two_tasks ]] || {
-        echo "EXTERNAL_SUBTASK_SELECTOR is supported only for EVAL_PROFILE=two_tasks" >&2
+    [[ "$EVAL_PROFILE" == smoke || "$EVAL_PROFILE" == two_tasks ]] || {
+        echo "EXTERNAL_SUBTASK_SELECTOR is supported only for EVAL_PROFILE=smoke or two_tasks" >&2
         exit 2
     }
-    [[ "$SUBTASK_PREDICTION" == 1 ]] || {
-        echo "EXTERNAL_SUBTASK_SELECTOR requires SUBTASK_PREDICTION=1" >&2
+    [[ "$SUBTASK_PREDICTION" == 1 || "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]] || {
+        echo "EXTERNAL_SUBTASK_SELECTOR requires a subtask conditioning mode" >&2
         exit 2
     }
+    if [[ "$EVAL_PROFILE" == smoke ]]; then
+        case "$SMOKE_TASK" in
+            carrying_in_groceries|make_rose_centerpieces) ;;
+            *) echo "selector smoke supports only carrying_in_groceries or make_rose_centerpieces" >&2; exit 2 ;;
+        esac
+    fi
     [[ -z "${EXTERNAL_SUBTASK:-}" ]] || {
         echo "EXTERNAL_SUBTASK and EXTERNAL_SUBTASK_SELECTOR are mutually exclusive" >&2
         exit 2
@@ -201,7 +234,7 @@ else
         exit 1
     }
 fi
-if [[ "$EVAL_PROFILE" == two_tasks || "$PI05_MODEL_FORMAT" == torch ]]; then
+if [[ "$EVAL_PROFILE" == two_tasks || "$PI05_MODEL_FORMAT" == torch || "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
     for path in "$CHECKPOINT_SOURCE/_CHECKPOINT_METADATA" \
         "$CHECKPOINT_SOURCE/SHA256SUMS.inference" "$CHECKPOINT_SOURCE/_READY"; do
         [[ -s "$path" ]] || { echo "Staged checkpoint input missing or empty: $path" >&2; exit 1; }
@@ -210,6 +243,26 @@ if [[ "$EVAL_PROFILE" == two_tasks || "$PI05_MODEL_FORMAT" == torch ]]; then
         cd "$CHECKPOINT_SOURCE"
         sha256sum -c SHA256SUMS.inference
     )
+fi
+if [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
+    python3 - "$CHECKPOINT_SOURCE/_READY" "$PI05_REPO_ID" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+ready = json.loads(Path(sys.argv[1]).read_text())
+expected_repo_id = sys.argv[2]
+expected = {
+    "conditioning_mode": "subtask_only",
+    "strict_subtask_action_chunks": True,
+    "subtask_executor": False,
+    "action_horizon": 32,
+    "repo_id": expected_repo_id,
+}
+for key, value in expected.items():
+    if ready.get(key) != value:
+        raise SystemExit(f"Strict checkpoint metadata mismatch for {key}: expected {value!r}, got {ready.get(key)!r}")
+PY
 fi
 (
     cd "$ASSET_ROOT"
@@ -283,6 +336,7 @@ write_setting() { printf 'export %s=%q\n' "$1" "$2"; }
     write_setting PI05_MEM_FRACTION "$PI05_MEM_FRACTION"
     write_setting WRITE_VIDEO "$WRITE_VIDEO"
     write_setting SUBTASK_PREDICTION "$SUBTASK_PREDICTION"
+    write_setting PROVIDED_SUBTASK_AS_PROMPT "$PROVIDED_SUBTASK_AS_PROMPT"
     write_setting EXTERNAL_SUBTASK_SELECTOR "$EXTERNAL_SUBTASK_SELECTOR"
     write_setting SMOKE_TASK "$SMOKE_TASK"
     write_setting SMOKE_EVAL_GPU "$SMOKE_EVAL_GPU"
@@ -300,14 +354,20 @@ printf 'AIHUB_MODEL_NAME: %s\n' "$AIHUB_MODEL_NAME"
 printf 'JOB_NAME: %s\n' "$JOB_NAME"
 printf 'RUN_ID: %s\n' "$RUN_ID"
 printf 'QUEUE: %s (%s)\n' "$QUEUE" "$GPU_CARD_TYPE"
+printf 'ALGO_NAME: %s\n' "$ALGO_NAME"
 printf 'PROFILE: %s\n' "$EVAL_PROFILE"
 printf 'MODEL_FORMAT: %s\n' "$PI05_MODEL_FORMAT"
 printf 'CLUSTER: %s\n' "$CLUSTER_FILE"
 printf 'SUBTASK_PREDICTION: %s\n' "$SUBTASK_PREDICTION"
+printf 'PROVIDED_SUBTASK_AS_PROMPT: %s\n' "$PROVIDED_SUBTASK_AS_PROMPT"
 printf 'EXTERNAL_SUBTASK_SELECTOR: %s\n' "${EXTERNAL_SUBTASK_SELECTOR:-<disabled>}"
 if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     printf 'EVALUATION_KIND: selector diagnostic (label_format=legacy oracle=true privileged=true official_benchmark=false)\n'
-    printf 'EXPECTED_ROLLOUTS: 120 (4 co-located workers)\n'
+    if [[ "$EVAL_PROFILE" == two_tasks ]]; then
+        printf 'EXPECTED_ROLLOUTS: 120 (4 co-located workers)\n'
+    else
+        printf 'EXPECTED_ROLLOUTS: %s smoke rollout(s)\n' "$NUM_ROLLOUTS"
+    fi
 fi
 printf 'MAX_FAILOVER_TIMES: %s\n' "$MAX_FAILOVER_TIMES"
 printf 'CHECKPOINT: %s\n' "$CHECKPOINT_SOURCE"
@@ -377,7 +437,8 @@ submit_status=${PIPESTATUS[0]}
 set -e
 python3 - "$CLI_OUTPUT_PATH" "$RECEIPT_PATH" "$RUN_ID" "$JOB_NAME" \
     "$EVAL_PROFILE" "$PERSISTENT_OUTPUT" "$EXTERNAL_SUBTASK_SELECTOR" "$PI05_MODEL_FORMAT" \
-    "$PI05_ENV_ARCHIVE" "$CHECKPOINT_SOURCE" "$submit_status" <<'PY'
+    "$PI05_ENV_ARCHIVE" "$CHECKPOINT_SOURCE" "$SUBTASK_PREDICTION" \
+    "$PROVIDED_SUBTASK_AS_PROMPT" "$ALGO_NAME" "$submit_status" <<'PY'
 import json
 import re
 import sys
@@ -394,6 +455,9 @@ from pathlib import Path
     model_format,
     policy_env_archive,
     checkpoint_source,
+    subtask_prediction,
+    provided_subtask_as_prompt,
+    algo_name,
     exit_code,
 ) = sys.argv[1:]
 text = Path(output_path).read_text(errors="replace")
@@ -420,9 +484,17 @@ receipt = {
     "job_name": job_name,
     "profile": profile,
     "model_format": model_format,
+    "algo_name": algo_name,
     "policy_env_archive": policy_env_archive,
     "checkpoint_source": checkpoint_source,
     "checkpoint_manifest_sha256": ready.get("manifest_sha256"),
+    "conditioning_mode": (
+        "provided_subtask_as_prompt"
+        if provided_subtask_as_prompt == "1"
+        else "joint_subtask_prediction"
+        if subtask_prediction == "1"
+        else "whole_task"
+    ),
     "persistent_output": persistent_output,
     "exit_code": int(exit_code),
     "job_identifiers": sorted(identifiers),

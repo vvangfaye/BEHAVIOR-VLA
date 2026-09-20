@@ -168,6 +168,48 @@ def test_b1k_wrapper_keeps_text_and_resets_on_instruction_change(tmp_path):
     assert policy.resets == 3
 
 
+def test_b1k_wrapper_uses_provided_subtask_as_only_prompt():
+    class FakePolicy:
+        def __init__(self):
+            self.metadata = {}
+            self.calls = []
+            self.resets = 0
+
+        def infer(self, obs):
+            transformed = transforms.UseSubtaskAsPrompt()(obs)
+            self.calls.append(transformed)
+            return {"actions": np.zeros((2, 23))}
+
+        def reset(self):
+            self.resets += 1
+
+    policy = FakePolicy()
+    wrapper = B1KPolicyWrapper(
+        policy,
+        "b1k/R1Pro",
+        "make rose centerpieces",
+        "receding_horizon",
+        2,
+        2,
+        provided_subtask_as_prompt=True,
+    )
+    robot = ROBOT_REGISTRY["b1k/R1Pro"]
+    source = {f"{robot.name}::proprio": np.zeros(57), "prompt": "whole task"}
+    source.update({camera.obs_key: np.zeros((224, 224, 3), dtype=np.uint8) for camera in robot.observations.values()})
+
+    wrapper.act({**source, "subtask": "  move to rose  "})
+
+    assert policy.calls[0]["prompt"] == "move to rose"
+    assert "subtask" not in policy.calls[0]
+    assert wrapper.last_subtasks == {0: "move to rose"}
+    assert wrapper.last_subtask_sources == {0: "provided"}
+    wrapper.act({**source, "subtask": "pick rose"})
+    assert policy.resets == 1
+    assert policy.calls[1]["prompt"] == "pick rose"
+    with pytest.raises(ValueError, match="requires a non-empty subtask"):
+        wrapper.act(source)
+
+
 def test_server_protocol_preserves_subtasks_and_episode_reset():
     class Policy:
         def __init__(self):
@@ -268,5 +310,29 @@ def test_b1k_server_cli_exposes_subtask_settings():
         ],
     )
     assert args.subtask_prediction
+    assert not args.provided_subtask_as_prompt
     assert args.subtask_interval == 2
     assert args.subtask_temperature == 0.2
+
+
+def test_b1k_server_cli_exposes_provided_subtask_prompt_mode():
+    args = tyro.cli(
+        serve_b1k.Args,
+        args=[
+            "--robot",
+            "b1k/R1Pro",
+            "--task",
+            "b1k/carrying_in_groceries",
+            "--policy.config",
+            "pi05_b1k",
+            "--policy.dir",
+            "/tmp/strict-checkpoint",
+            "--provided-subtask-as-prompt",
+            "--max-token-len",
+            "200",
+        ],
+    )
+
+    assert args.provided_subtask_as_prompt
+    assert not args.subtask_prediction
+    assert args.max_token_len == 200
