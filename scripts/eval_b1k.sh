@@ -109,6 +109,27 @@ elif [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
     SUBTASK_SERVER_ARGS=(--provided-subtask-as-prompt --max-token-len 200)
 fi
 EVAL_RUNTIME_ROOT="${EVAL_RUNTIME_ROOT:-/dev/shm/wangfaye/omnigibson-runtime/$PORT}"
+QUEUE_MODE=0
+QUEUE_EVAL_ARGS=()
+if [[ -n "${PI05_EVAL_QUEUE_DB:-}" ]]; then
+    QUEUE_MODE=1
+    : "${PI05_EVAL_QUEUE_WORKER:?set PI05_EVAL_QUEUE_WORKER with PI05_EVAL_QUEUE_DB}"
+    : "${PI05_EVAL_QUEUE_RUN_ID:?set PI05_EVAL_QUEUE_RUN_ID with PI05_EVAL_QUEUE_DB}"
+    : "${PI05_EVAL_QUEUE_GENERATION:?set PI05_EVAL_QUEUE_GENERATION with PI05_EVAL_QUEUE_DB}"
+    : "${PI05_EVAL_QUEUE_ATTEMPT_ROOT:?set PI05_EVAL_QUEUE_ATTEMPT_ROOT with PI05_EVAL_QUEUE_DB}"
+    [[ "$PI05_EVAL_QUEUE_GENERATION" =~ ^[0-9]+$ ]] || {
+        echo "PI05_EVAL_QUEUE_GENERATION must be a non-negative integer" >&2; exit 2; }
+    QUEUE_EVAL_ARGS=(
+        --queue-db "$PI05_EVAL_QUEUE_DB"
+        --queue-worker "$PI05_EVAL_QUEUE_WORKER"
+        --queue-run-id "$PI05_EVAL_QUEUE_RUN_ID"
+        --queue-generation "$PI05_EVAL_QUEUE_GENERATION"
+        --queue-attempt-root "$PI05_EVAL_QUEUE_ATTEMPT_ROOT"
+    )
+    QUEUE_LOG_DIR="${PI05_EVAL_QUEUE_LOG_ROOT:-$PI05_EVAL_QUEUE_ATTEMPT_ROOT/../logs}"
+    QUEUE_LOG_DIR="$QUEUE_LOG_DIR/$PI05_EVAL_QUEUE_WORKER/generation-$PI05_EVAL_QUEUE_GENERATION"
+    mkdir -p "$QUEUE_LOG_DIR"
+fi
 
 TASKS=("$@")
 if [[ ${#TASKS[@]} -eq 0 ]]; then
@@ -155,7 +176,11 @@ if [[ "$PROMPT_MODE" == "oracle_unsatisfied_goal" ]]; then
 fi
 # Keyed by port so parallel workers sweeping disjoint task shards do not
 # interleave their server output into one unreadable log.
-SERVER_LOG="$OUTPUT_ROOT/$MODEL/server_$PORT.log"
+if (( QUEUE_MODE )); then
+    SERVER_LOG="$QUEUE_LOG_DIR/server_$PORT.log"
+else
+    SERVER_LOG="$OUTPUT_ROOT/$MODEL/server_$PORT.log"
+fi
 
 activate_env() {
     # conda-pack's activate script tests $CONDA_PREFIX without a default, which
@@ -230,19 +255,30 @@ PY
 }
 
 status=0
+if (( QUEUE_MODE )); then
+    FAILURES_LOG="$QUEUE_LOG_DIR/failures.txt"
+else
+    FAILURES_LOG="$OUTPUT_ROOT/$MODEL/failures.txt"
+fi
 for task in "${TASKS[@]}"; do
     out="$OUTPUT_ROOT/$MODEL/$task"
     mkdir -p "$out"
+    if (( QUEUE_MODE )); then EVAL_LOG="$QUEUE_LOG_DIR/eval_$task.log"; else EVAL_LOG="$out/eval.log"; fi
     echo "=== evaluating $MODEL on $task ==="
     start_server "$task"
     if ! wait_for_server; then
         stop_server
-        echo "FAIL $task (server failed to start)" | tee -a "$OUTPUT_ROOT/$MODEL/failures.txt"
+        echo "FAIL $task (server failed to start)" | tee -a "$FAILURES_LOG"
         status=1
-        continue
+        if (( QUEUE_MODE )); then break; else continue; fi
     fi
     cd "$REPO_ROOT/BEHAVIOR-1K"
     EVAL_ARGS=("${EXTERNAL_SUBTASK_ARGS[@]}")
+    EVAL_COMMAND=("$EVAL_ENV/bin/python" -m omnigibson.eval.eval)
+    if (( QUEUE_MODE )); then
+        EVAL_ARGS+=("${QUEUE_EVAL_ARGS[@]}")
+        EVAL_COMMAND=("$EVAL_ENV/bin/python" "$REPO_ROOT/scripts/eval_b1k_queue.py")
+    fi
     if [[ -n "$INSTANCE_INDICES" ]]; then
         # shellcheck disable=SC2086
         EVAL_ARGS+=(--instance-indices $INSTANCE_INDICES)
@@ -257,42 +293,55 @@ for task in "${TASKS[@]}"; do
     # shell), the ICD manifests written by setup_eval_env.sh, and the EULA flag
     # that Kit re-checks on every launch.
     mkdir -p "$EVAL_RUNTIME_ROOT"/{appdata,cache,config,warp}
+    run_evaluator() {
+        env OMNIGIBSON_DATA_PATH="$OMNIGIBSON_DATA_PATH" \
+            OMNIGIBSON_APPDATA_PATH="$EVAL_RUNTIME_ROOT/appdata" \
+            OMNIGIBSON_GPU_ID="$EVAL_GPU" \
+            XDG_CACHE_HOME="$EVAL_RUNTIME_ROOT/cache" \
+            XDG_CONFIG_HOME="$EVAL_RUNTIME_ROOT/config" \
+            WARP_CACHE_PATH="$EVAL_RUNTIME_ROOT/warp" \
+            HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}" \
+            PYTHONNOUSERSITE=1 \
+            OMNI_KIT_ACCEPT_EULA=YES \
+            LD_LIBRARY_PATH="$EVAL_ENV/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            VK_ICD_FILENAMES="$EVAL_ENV/share/vulkan/icd.d/nvidia_icd.json" \
+            __EGL_VENDOR_LIBRARY_FILENAMES="$EVAL_ENV/share/glvnd/egl_vendor.d/10_nvidia.json" \
+            "${EVAL_COMMAND[@]}" \
+                --task-name "$task" \
+                --host 127.0.0.1 --port "$PORT" \
+                --mode "$MODE" \
+                --prompt-mode "$PROMPT_MODE" \
+                --num-rollouts "$NUM_ROLLOUTS" \
+                "${EVAL_ARGS[@]}" \
+                --output-dir "$out" \
+                "$VIDEO_ARG"
+    }
     set +e
-    env OMNIGIBSON_DATA_PATH="$OMNIGIBSON_DATA_PATH" \
-        OMNIGIBSON_APPDATA_PATH="$EVAL_RUNTIME_ROOT/appdata" \
-        OMNIGIBSON_GPU_ID="$EVAL_GPU" \
-        XDG_CACHE_HOME="$EVAL_RUNTIME_ROOT/cache" \
-        XDG_CONFIG_HOME="$EVAL_RUNTIME_ROOT/config" \
-        WARP_CACHE_PATH="$EVAL_RUNTIME_ROOT/warp" \
-        HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}" \
-        PYTHONNOUSERSITE=1 \
-        OMNI_KIT_ACCEPT_EULA=YES \
-        LD_LIBRARY_PATH="$EVAL_ENV/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        VK_ICD_FILENAMES="$EVAL_ENV/share/vulkan/icd.d/nvidia_icd.json" \
-        __EGL_VENDOR_LIBRARY_FILENAMES="$EVAL_ENV/share/glvnd/egl_vendor.d/10_nvidia.json" \
-        "$EVAL_ENV/bin/python" -m omnigibson.eval.eval \
-            --task-name "$task" \
-            --host 127.0.0.1 --port "$PORT" \
-            --mode "$MODE" \
-            --prompt-mode "$PROMPT_MODE" \
-            --num-rollouts "$NUM_ROLLOUTS" \
-            "${EVAL_ARGS[@]}" \
-            --output-dir "$out" \
-            "$VIDEO_ARG" 2>&1 | tee "$out/eval.log"
-    pipeline_status=("${PIPESTATUS[@]}")
+    if (( QUEUE_MODE )); then
+        run_evaluator > "$EVAL_LOG" 2>&1
+        pipeline_status=("$?" 0)
+    else
+        run_evaluator 2>&1 | tee "$EVAL_LOG"
+        pipeline_status=("${PIPESTATUS[@]}")
+    fi
     set -e
     stop_server
     if (( pipeline_status[0] != 0 || pipeline_status[1] != 0 )); then
         echo "FAIL $task (evaluator=${pipeline_status[0]} tee=${pipeline_status[1]})" \
-            | tee -a "$OUTPUT_ROOT/$MODEL/failures.txt"
+            | tee -a "$FAILURES_LOG"
         status=1
+        if (( QUEUE_MODE )); then break; fi
     fi
 done
 
 EVAL_ELAPSED_SECONDS=$(( $(date +%s) - EVAL_START_EPOCH ))
 (( EVAL_ELAPSED_SECONDS > 0 )) || EVAL_ELAPSED_SECONDS=1
+if (( QUEUE_MODE )); then
+    METRICS_PATH="$QUEUE_LOG_DIR/eval_metrics_$PORT.json"
+else
+    METRICS_PATH="$OUTPUT_ROOT/$MODEL/eval_metrics_$PORT.json"
+fi
 printf '{"port":%d,"server_gpu":%d,"eval_gpu":%d,"elapsed_seconds":%d,"exit_code":%d}\n' \
-    "$PORT" "$SERVER_GPU" "$EVAL_GPU" "$EVAL_ELAPSED_SECONDS" "$status" \
-    > "$OUTPUT_ROOT/$MODEL/eval_metrics_$PORT.json"
+    "$PORT" "$SERVER_GPU" "$EVAL_GPU" "$EVAL_ELAPSED_SECONDS" "$status" > "$METRICS_PATH"
 echo "results under $OUTPUT_ROOT/$MODEL"
 exit "$status"
