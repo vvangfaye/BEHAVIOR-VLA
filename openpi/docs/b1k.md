@@ -1,310 +1,115 @@
-## Fine-tuning π₀.₅ on BEHAVIOR-1K
+# BEHAVIOR 2026 的 π0.5 / JAX 集成
 
-This tutorial walks through fine-tuning [π₀.₅](https://www.physicalintelligence.company/blog/pi05) on demonstration data from [BEHAVIOR-1K](https://github.com/StanfordVL/BEHAVIOR-1K) using this repository.
+本文说明本仓库的数据流和底层代码入口。环境安装、普通训练、联合训练与闭环命令见
+[仓库 README](../../README.md)，标签和边界处理见
+[subtask 指南](../../docs/subtask_training.md)。以下文件路径均相对 `openpi/`。
 
-**Last updated:** June 2026  
-**OpenPi model:** π₀.₅ (`pi05`)  
-**Robot:** R1Pro (dual-arm mobile manipulator)
-
-> **Note:** Replace placeholders such as `<OPENPI_DIR>`, `<DATASET_ROOT>`, `<TASK_NAME>`, and `<REPO_ID>` with your own paths and identifiers throughout this guide.
-
----
-
-### Overview
-
-The BEHAVIOR-1K workflow in OpenPi follows four steps:
-
-1. Prepare a LeRobot-format dataset from BEHAVIOR demonstrations
-2. Register the robot and task (or reuse the built-in R1Pro config)
-3. Compute normalization statistics and fine-tune π₀.₅
-4. Deploy the checkpoint and run evaluation in BEHAVIOR-1K
-
-OpenPi ships with a reference training config (`pi05_b1k`), B1K-specific training and serving scripts under `scripts/b1k/`, and a pre-registered R1Pro robot definition.
-
----
-
-### Installation
-
-OpenPi uses [uv](https://docs.astral.sh/uv/) to manage Python dependencies. See the [uv installation instructions](https://docs.astral.sh/uv/getting-started/installation/) to set it up, then install the environment:
-
-```bash
-cd <OPENPI_DIR>
-GIT_LFS_SKIP_SMUDGE=1 uv sync
-source .venv/bin/activate
-GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
-```
-
-`GIT_LFS_SKIP_SMUDGE=1` is required because LeRobot is pulled in as a dependency.
-
----
-
-### 1. Prepare your dataset
-
-Training expects demonstrations in [LeRobot](https://github.com/huggingface/lerobot) format on disk. Your dataset directory should look like:
+## 从演示数据到动作
 
 ```text
-<DATASET_ROOT>/
-├── meta/
-│   ├── info.json
-│   ├── stats.json
-│   └── tasks.parquet
-├── data/
-│   └── chunk-000/
-│       └── file-000.parquet
-└── videos/
-    └── observation.rgb.<camera_name>/
-        └── chunk-000/
-            └── file-000.mp4
+BEHAVIOR LeRobot 数据 + 原始 episode 子集 + 可选 subtask 段表
+  → 预检 / 筛选 episode
+  → create_b1k_dataset：按帧取样，匹配 prompt / subtask / action mask
+  → RepackTransform → B1KInputs → MappedDeltaActions → Normalize
+  → tokenizer / padding → Observation + action targets
+  → Pi0.compute_loss_with_metrics → train_step → checkpoint
+
+checkpoint params + assets
+  → create_trained_policy → Policy / SubtaskPolicy
+  → B1KPolicyWrapper → 每个控制步的 23 维动作
 ```
 
-**Collect or obtain data**
+`MappedDeltaActions` 由 `LeRobotB1KDataConfig.extra_delta_transform` 控制，
+当前 B1K 默认开启。推理输出按反向流程反归一化、恢复绝对关节目标。
 
-- If you collect data in BEHAVIOR-1K, convert it to LeRobot format before training. Follow the data-conversion instructions in the BEHAVIOR-1K repository for your simulator version.
-- You can also start from an existing LeRobot dataset and point training at its local root.
+## 数据和机器人映射
 
-**Set two identifiers**
+数据根目录需要 `meta/info.json`、任务和 episode 元数据、动作 parquet，以及所选 episode
+的三路 RGB 视频。`DATASET_ROOT` 是本地数据位置；`REPO_ID` 是保存和查找 norm stats
+使用的标识，不必等于任务名。选择子集时始终保留原始 `episode_index`。
 
-| Placeholder | Description | Example |
-|-------------|-------------|---------|
-| `<REPO_ID>` | Short dataset name used as the asset ID for norm stats and config | `turning_on_radio` |
-| `<DATASET_ROOT>` | Absolute path to the LeRobot dataset root | `/path/to/datasets/b1k/<TASK_NAME>` |
+[R1Pro 配置](../src/openpi/configs/robots/b1k.py)注册为 `b1k/R1Pro`：
 
-The `<REPO_ID>` is typically the task or dataset folder name. Normalization statistics are saved under `outputs/assets/<CONFIG_NAME>/<REPO_ID>/`.
+| 数据字段 | 用途 |
+| --- | --- |
+| `observation.rgb.zed_link_camera_0` | 头部相机 |
+| `observation.rgb.left_realsense_link_camera_0` | 左腕相机 |
+| `observation.rgb.right_realsense_link_camera_0` | 右腕相机 |
+| `observation.state` | 原始 proprio 向量，按机器人配置提取 |
+| `action` | 23 维控制动作 |
 
----
+动作顺序为 base 3 维、torso 4 维、左臂 7 维、左夹爪 1 维、右臂 7 维、右夹爪 1 维。
+[B1KInputs](../src/openpi/policies/b1k_policy.py)从原始 proprio 提取对应状态，并将每个夹爪
+两根手指的位置求和为一个宽度值。原始 proprio 不能直接替换成已经提取的 23 维状态，
+否则会再次按原始索引取值。
 
-### 2. Register robot and task
+躯干和双臂默认使用映射后的 delta action；base 和夹爪保持配置定义的控制量。
+不要套用 ALOHA / DROID 的动作索引或 normalization stats。
 
-OpenPi uses Python config files to map dataset keys, observation streams, and action indices to the model.
+训练任务文本来自数据集任务元数据；服务默认任务文本来自
+[任务注册表](../src/openpi/configs/tasks/__init__.py)，也可由观测中的 `prompt` 覆盖。
+Joint 高层始终读取完整任务，strict / executor 以当前 subtask 替换语言 prompt。
 
-#### Robot (R1Pro)
+## 配置和训练入口
 
-The R1Pro robot used in BEHAVIOR-1K is already registered in `src/openpi/configs/robots/b1k.py` as `b1k/R1Pro`. It defines:
+[训练配置](../src/openpi/training/config.py)中的 `pi05_b1k` 使用
+`Pi0Config(pi05=True, action_horizon=32)`、R1Pro 和 `tolerance_s=5e-3` 的视频时间戳容差。
+配置文件里的默认数据路径属于原示例，运行时应通过启动脚本覆盖。
 
-- **Cameras:** head (`zed_link`), left wrist, and right wrist RGB streams
-- **Action space (23-D):** base velocity, torso joints, dual arms, and grippers
-- **Proprioception:** extracted from `observation.state` using the indices in the robot config
+优先使用仓库根目录的 `scripts/train_pi05_b1k.sh` 及 joint / executor 包装脚本。
+它们依次组织预检、最终 episode 名单、归一化统计和 Python trainer。
+本目录旧 `scripts/b1k/train_b1k.sh` / `.sbatch.sh` 保留，但不是这套 subtask 工作流的入口。
 
-If you use a different robot or camera layout, copy this file and update `observations`, `action`, and `proprio` to match your dataset keys in `meta/info.json`.
-
-#### Task prompts
-
-Register natural-language task instructions in `src/openpi/configs/tasks/b1k.py`:
-
-```python
-# src/openpi/configs/tasks/b1k.py
-from . import TASK_REGISTRY
-
-TASKS = {
-    "<TASK_NAME>": "Natural-language instruction for your task.",
-    # Add more tasks as needed.
-}
-
-TASK_REGISTRY["b1k"] = TASKS
-```
-
-At inference time, the task is referenced as `b1k/<TASK_NAME>` (bucket + task key).
-
-See `src/openpi/configs/robots/b1k.py` and `src/openpi/configs/tasks/b1k.py` for the full reference implementation.
-
----
-
-### 3. Configure training
-
-Training configs live in `src/openpi/training/config.py`. The reference config `pi05_b1k` fine-tunes π₀.₅ on B1K data:
-
-```python
-TrainConfig(
-    name="pi05_b1k",
-    model=pi0_config.Pi0Config(action_horizon=32, pi05=True),
-    data=LeRobotB1KDataConfig(
-        repo_id="<REPO_ID>",
-        base_config=DataConfig(
-            data_cls=_lerobot_compat.LeRobotDataset,
-            dataset_root="<DATASET_ROOT>",
-            prompt_from_task=True,
-            dataset_kwargs={"tolerance_s": 5e-4},
-        ),
-        robot_config_name="b1k/R1Pro",
-    ),
-    weight_loader=weight_loaders.CheckpointWeightLoader(
-        "gs://openpi-assets/checkpoints/pi05_base/params"
-    ),
-    save_interval=10_000,
-    num_train_steps=50_000,
-    assets_base_dir="./outputs/assets",
-    checkpoint_base_dir="./outputs/checkpoints",
-)
-```
-
-**To train on your own task**, copy the `pi05_b1k` block and update:
-
-| Field | What to change |
-|-------|----------------|
-| `name` | Unique config name, e.g. `pi05_b1k_<TASK_NAME>` |
-| `repo_id` | Your `<REPO_ID>` |
-| `dataset_root` | Your `<DATASET_ROOT>` |
-| `robot_config_name` | Robot registry key (default: `b1k/R1Pro`) |
-
-Key implementation details:
-
-- **`LeRobotB1KDataConfig`** applies B1K-specific repacking, delta-action transforms for joint groups, and prompt loading from LeRobot task metadata. See `src/openpi/policies/b1k_policy.py`.
-- **`dataset_root`** is required for B1K datasets; the generic `scripts/train.py` path does not set this automatically.
-- **`action_horizon=32`** matches the π₀.₅ B1K setup; keep training and inference horizons consistent.
-
-You can override most fields from the command line when launching training (see below).
-
----
-
-### 4. Compute normalization statistics
-
-Before training, compute mean and standard deviation over state and actions in your dataset:
+如需调试底层 trainer，可从仓库根目录执行以下普通训练示例。先按
+[归一化指南](norm_stats.md)为同一配置与子集准备 assets：
 
 ```bash
-cd <OPENPI_DIR>
-uv run scripts/compute_norm_stats.py --config-name <CONFIG_NAME>
+cd openpi
+CUDA_VISIBLE_DEVICES=0 .venv/bin/python scripts/b1k/train_b1k.py pi05_b1k \
+  --exp-name pi05_manual_smoke \
+  --data.dataset-root /path/to/2026-challenge-demos \
+  --data.repo-id behavior-1k/manual_smoke \
+  --data.episodes-index 0 1 \
+  --weight-loader.params-path /path/to/pi05_base/params \
+  --batch-size 1 --num-workers 0 --num-train-steps 2 \
+  --assets-base-dir ./outputs/assets --no-wandb-enabled
 ```
 
-Replace `<CONFIG_NAME>` with your training config name (e.g. `pi05_b1k`). This writes `norm_stats.json` to:
+原始 episode 0、1 只用于示例；应选择机器上已下载的 episode。
+直接调用 trainer 不执行启动脚本的全表预检或自动过滤，也不会自动计算 norm stats。
+Subtask 模式应先通过脚本预检，并把最终名单传为 `--data.episodes-index`。
 
-```text
-outputs/assets/<CONFIG_NAME>/<REPO_ID>/
-```
+| 模式 | 模型与数据配置的关键差别 |
+| --- | --- |
+| 普通 | `train_subtask_prediction=False`、`train_subtask_executor=False`，完整任务 prompt |
+| Joint | `train_subtask_prediction=True`；新模式显式设置 `subtask_action_conditioning=subtask_only` |
+| Strict | 两个模型训练开关均为 False；数据 `strict_subtask_action_chunks=True`，subtask prompt |
+| Pure executor | `train_subtask_executor=True`，segment 采样与 `action_loss_mask` |
 
-Training will fail with a missing-norm-stats error if this step is skipped. For background on when to reload pre-training statistics instead, see [norm_stats.md](./norm_stats.md).
+三种 subtask 模式互斥，要求 `subtask_whole_task_prob=0`。Joint 的低层 subtask-only
+使用独立语言序列，不能用 ordinary / strict 的 tokenizer 配置代替。
 
----
+[train_b1k.py](../scripts/b1k/train_b1k.py)通过
+[data_loader.py](../src/openpi/training/data_loader.py)的 `create_b1k_data_loader()` 构造训练数据，
+使用 Torch DataLoader 取样，再转成 JAX 数组。`init_train_state()` 初始化模型和优化器，
+`train_step()` 计算 loss、梯度并更新 EMA，`main()` 管理验证与 checkpoint。
 
-### 5. Fine-tune π₀.₅
+`BATCH_SIZE` 是全局 batch，需要能被全局设备数整除。BF16 是模型计算配置，
+不意味着 trainable params、AdamW 两份动量和 EMA 副本都变成 BF16。
+训练步数与 LR 衰减长度分别配置；增加步数时核对 `LR_DECAY_STEPS`。
 
-Use the B1K training entry point `scripts/b1k/train_b1k.py`, which loads data via `create_b1k_data_loader`, logs camera views to Weights & Biases, and supports validation loss logging.
+## 保存、恢复和服务
 
-#### Single-node launch
+checkpoint 默认位于 `outputs/checkpoints/pi05_b1k/<EXP_NAME>/<step>/`。
+`params/` 用于推理，启用 EMA 时保存平滑后的参数；训练状态用于 `RESUME=1` 续训。
+`INIT_PARAMS` 只初始化新实验的权重。两者不能互换。
 
-The helper script `scripts/b1k/train_b1k.sh` wraps common defaults:
+Joint 另存 `assets/subtask_conditioning.json`，服务读取其中的动作条件模式；旧 checkpoint
+缺少该文件时默认旧 `task_and_subtask`。切换条件模式需要新实验训练，不能仅切换服务参数。
 
-```bash
-cd <OPENPI_DIR>
-source .venv/bin/activate
+服务入口是 [serve_b1k.py](../scripts/b1k/serve_b1k.py)，使用 `--policy.config` 和
+`--policy.dir`，没有 `policy:checkpoint` 子命令。B1K 的 websocket 返回单步 `action`；
+内部 policy 返回动作块 `actions`。服务命令和协议见[远程推理](remote_inference.md)。
 
-# Default: pi05_b1k on 8 GPUs
-./scripts/b1k/train_b1k.sh
-
-# Custom config, GPU count, and device IDs
-./scripts/b1k/train_b1k.sh <CONFIG_NAME> 4 0,1,2,3
-
-# Resume an existing run
-./scripts/b1k/train_b1k.sh <CONFIG_NAME> 4 0,1,2,3 --resume-run <EXP_NAME>
-```
-
-Or invoke the trainer directly:
-
-```bash
-XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/b1k/train_b1k.py <CONFIG_NAME> \
-    --exp_name=<EXP_NAME> \
-    --overwrite \
-    --batch_size=64 \
-    --num_train_steps=50000
-```
-
-Checkpoints are saved under:
-
-```text
-outputs/checkpoints/<CONFIG_NAME>/<EXP_NAME>/<STEP>/
-```
-
-**Common overrides**
-
-| Flag | Purpose |
-|------|---------|
-| `--batch_size` | Per-step batch size (must divide evenly across GPUs) |
-| `--num_train_steps` | Total optimization steps |
-| `--data.repo_id` | Override dataset repo ID |
-| `--data.base_config.dataset_root` | Override local dataset path |
-| `--data.robot_config_name` | Override robot registry key |
-| `--resume` / `--overwrite` | Resume from latest checkpoint or start fresh |
-| `--val_log_interval` | Steps between validation loss evaluations |
-
-Set `XLA_PYTHON_CLIENT_MEM_FRACTION=0.9` to allow JAX to use up to 90% of GPU memory.
-
-#### SLURM cluster
-
-For cluster jobs, adapt `scripts/b1k/train_b1k.sbatch.sh` with your account, partition, and environment paths.
-
----
-
-### 6. Evaluation
-
-After fine-tuning, serve the policy and connect your BEHAVIOR-1K evaluation client over WebSocket.
-
-#### Deploy the checkpoint
-
-```bash
-cd <OPENPI_DIR>
-source .venv/bin/activate
-
-uv run scripts/b1k/serve_b1k.py \
-    --robot b1k/R1Pro \
-    --task b1k/<TASK_NAME> \
-    policy:checkpoint \
-    --policy.config <CONFIG_NAME> \
-    --policy.dir <CHECKPOINT_DIR>
-```
-
-**Example** (replace paths with your run):
-
-```bash
-uv run scripts/b1k/serve_b1k.py \
-    --robot b1k/R1Pro \
-    --task b1k/<TASK_NAME> \
-    policy:checkpoint \
-    --policy.config pi05_b1k \
-    --policy.dir outputs/checkpoints/pi05_b1k/<EXP_NAME>/50000
-```
-
-This starts a WebSocket policy server on `0.0.0.0:8000`. The server:
-
-1. Loads the task prompt from `TASK_REGISTRY["b1k"]["<TASK_NAME>"]`
-2. Wraps the policy with `B1KPolicyWrapper` for receding-horizon action execution
-3. Accepts observations keyed by the R1Pro `obs_key` definitions in the robot config
-
-**Optional serve flags**
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--repo_id` | task bucket/name | Norm-stats asset ID if different from `--task` |
-| `--control_mode` | `receding_horizon` | Action execution mode |
-| `--action_horizon` | `16` | Steps to execute before replanning |
-| `--port` | `8000` | Server port |
-| `--record` | `false` | Record policy I/O for debugging |
-
-Point your BEHAVIOR-1K robot client at the server host and port to stream observations and receive actions.
-
----
-
-### Quick reference
-
-| Item | Value |
-|------|-------|
-| Base checkpoint | `gs://openpi-assets/checkpoints/pi05_base/params` |
-| Reference config | `pi05_b1k` in `src/openpi/training/config.py` |
-| Robot registry key | `b1k/R1Pro` |
-| Task registry format | `b1k/<TASK_NAME>` |
-| Norm stats script | `scripts/compute_norm_stats.py --config-name <CONFIG_NAME>` |
-| Training script | `scripts/b1k/train_b1k.py` |
-| Serving script | `scripts/b1k/serve_b1k.py` |
-| Checkpoint directory | `outputs/checkpoints/<CONFIG_NAME>/<EXP_NAME>/<STEP>/` |
-
----
-
-### Troubleshooting
-
-| Issue | Fix |
-|-------|-----|
-| Missing norm stats error | Run `scripts/compute_norm_stats.py` with your config name first |
-| Batch size not divisible by GPU count | Lower `--batch_size` or change the number of visible GPUs |
-| Wrong camera or action keys | Verify `dataset_key` values in `src/openpi/configs/robots/b1k.py` match `meta/info.json` |
-| Task prompt not found at serve time | Add `<TASK_NAME>` to `src/openpi/configs/tasks/b1k.py` under the `b1k` bucket |
-| Out of GPU memory | Reduce `--batch_size` or set `XLA_PYTHON_CLIENT_MEM_FRACTION=0.9` |
-
-For general fine-tuning concepts (LeRobot conversion, config structure, remote inference), see the [main README](../README.md) and [remote inference docs](./remote_inference.md).
+正式比较模型时，训练与验证按任务实例分组切分，复用训练集统计；先做数据预检和小规模 smoke，
+再评估闭环成功率。预检通过、训练 loss 下降、离线动作误差变小分别验证不同环节，均不能代替闭环结果。

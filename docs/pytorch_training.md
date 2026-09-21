@@ -1,5 +1,9 @@
 # BEHAVIOR 的 PyTorch π0.5 训练
 
+> 本文保留已有 Torch 实现的使用说明。当前运行与代码阅读以 JAX 为主，入口见
+> [仓库 README](../README.md)和 [JAX subtask 指南](subtask_training.md)。
+> 不应将本文的精度、batch、优化器或分布式设置直接当作 JAX 的默认值。
+
 支持普通动作训练和 subtask 文本/动作联合训练，复用 BEHAVIOR 数据配置、
 归一化和标注预检。训练器支持单卡、torchrun DDP、梯度累积及断点续训。
 本文命令从仓库根目录执行；数据、权重和环境路径按实际机器设置。
