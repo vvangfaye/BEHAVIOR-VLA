@@ -14,7 +14,8 @@
 - 另有两个汇总表：`skill_summary.csv`（技能词表 + 统计）、`skill_type_summary.csv`（技能类型统计）。
 - 共约 **406,341 个技能片段**，**35 种技能**，3 大类型。
 
-> 本文保留标注结构和历史数据统计。当前 π0.5 已支持 subtask 联合训练与在线生成，
+> 本文保留标注结构和历史数据统计，计数不是当前过滤后训练集的大小。
+> 当前 π0.5 支持 joint、strict subtask-only 与 pure executor，
 > 请以 [subtask 训练与推理指南](docs/subtask_training.md) 为准。
 
 ---
@@ -23,12 +24,12 @@
 
 任务 **turning on radio**，全长 1776 帧（≈ 59s，30 fps），切成 **4 个子任务**：
 
-| # | 帧区间 [start, end] | 时长 | skill_id | 描述 | 类型 | 目标物体 |
+| # | 帧区间 [start, end) | 时长 | skill_id | 描述 | 类型 | 目标物体 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 0 | [0, 265] | 8.8s | 1 | move to | navigation | radio_89 |
-| 1 | [265, 1162] | 29.9s | 2 | pick up from | uncoordinated | 从 coffee_table 拿起 radio_89 |
-| 2 | [1162, 1434] | 9.1s | 67 | press | coordinated | 按 radio_89（开机键） |
-| 3 | [1434, 1776] | 11.4s | 3 | place on | uncoordinated | 把 radio_89 放回 coffee_table |
+| 0 | [0, 265) | 8.8s | 1 | move to | navigation | radio_89 |
+| 1 | [265, 1162) | 29.9s | 2 | pick up from | uncoordinated | 从 coffee_table 拿起 radio_89 |
+| 2 | [1162, 1434) | 9.1s | 67 | press | coordinated | 按 radio_89（开机键） |
+| 3 | [1434, 1776) | 11.4s | 3 | place on | uncoordinated | 把 radio_89 放回 coffee_table |
 
 语义即：**走到收音机 → 拿起来 → 按开机 → 放回桌上**。
 
@@ -55,7 +56,7 @@
 | `skill_id` / `skill_description` | 技能编号 / 文本描述（与 `skill_summary.csv` 对应） |
 | `object_id` | 涉及的对象（含被操作物 + 参照物，如目标家具） |
 | `manipulating_object_id` | 实际被机器人操作的物体 |
-| `frame_duration` | **[起始帧, 结束帧]——把子任务精确对齐到帧** |
+| `frame_duration` | **[起始帧, 结束帧)，结束帧不包含在当前段内** |
 | `skill_type` | `navigation` / `uncoordinated` / `coordinated` |
 | `memory_prefix`/`spatial_prefix`/`mp_ef` | 记忆前缀 / 空间关系前缀 / 运动基元·末端信息（多为空） |
 
@@ -127,14 +128,23 @@ openpi/.venv/bin/python scripts/gen_subtask_prompts.py \
 
 ### 当前训练与推理入口
 
-联合训练保留完整任务作为输入，以 GT subtask 计算文本损失，并训练动作预测。
-推理时由模型先生成 subtask，再生成动作，无需输入 GT subtask。
+上面的 RLE 统计对应 legacy 标签格式。生成脚本另支持 `--label-format role_aware_v1`，
+记录对象角色、原始标注来源及 `is_annotated`，保留相邻同文本的不同源片段边界。
+它会产生不同的段表，不能直接套用上面的历史计数。
+
+Joint 高层保留完整任务，以 GT subtask 计算文本 CE；当前启动脚本默认
+`SUBTASK_ACTION_CONDITIONING=subtask_only`，低层只用观测和 GT subtask 学习动作。
+推理先生成 subtask，再生成动作。旧 `task_and_subtask` 模式仍保留用于旧 checkpoint。
 
 - 数据预检：`bash scripts/train_pi05_subtask_b1k.sh check`。
 - 联合训练：`bash scripts/train_pi05_subtask_b1k.sh full`。
 - 闭环评测：设置 `SUBTASK_PREDICTION=1`，运行 `scripts/eval_b1k.sh`。
 - 联合训练默认以 `drop_episode` 过滤包含空标注的 episode；这与历史上仅替换 prompt、
   缺标注时回退整任务的条件化训练不同。
+
+Strict 使用 `STRICT_SUBTASK_ACTION_CHUNKS=1`，只监督同一段内的完整动作块；pure executor
+使用 `train_pi05_subtask_executor_b1k.sh`，允许段尾起点并 mask 无效动作。
+这两种模式只训练动作，闭环需要外部 subtask，不会自动生成技能。
 
 完整参数、checkpoint 配置和标注预检说明见
 [当前指南](docs/subtask_training.md)。

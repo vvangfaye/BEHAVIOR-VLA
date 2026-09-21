@@ -1,69 +1,77 @@
-# Normalization statistics
+# BEHAVIOR π0.5 的归一化统计
 
-Following common practice, our models normalize the proprioceptive state inputs and action targets during policy training and inference. The statistics used for normalization are computed over the training data and stored alongside the model checkpoint.
+训练和推理必须使用相同的状态 / 动作定义与 normalization stats。
+当前 B1K 的 π0.5 配置使用 mean/std 归一化（`use_quantile_norm=False`），
+统计由本仓库的数据变换计算，不直接使用数据集 `meta/stats.json` 代替。
 
-## Reloading normalization statistics
+## 统计的是什么
 
-When you fine-tune one of our models on a new dataset, you need to decide whether to (A) reuse existing normalization statistics or (B) compute new statistics over your new training data. Which option is better for you depends on the similarity of your robot and task to the robot and task distribution in the pre-training dataset. Below, we list all the available pre-training normalization statistics for each model.
+数据经 [LeRobotB1KDataConfig](../src/openpi/training/config.py) 重排，再由
+[B1KInputs](../src/openpi/policies/b1k_policy.py)提取 R1Pro 状态和动作。
+默认开启 `extra_delta_transform`，把躯干和双臂目标转成相对当前状态的 delta。
+[compute_norm_stats.py](../scripts/compute_norm_stats.py)在这些变换之后统计 `state`、`actions`。
 
-**If your target robot matches one of these pre-training statistics, consider reloading the same normalization statistics.** By reloading the normalization statistics, the actions in your dataset will be more "familiar" to the model, which can lead to better performance. You can reload the normalization statistics by adding an `AssetsConfig` to your training config that points to the corresponding checkpoint directory and normalization statistics ID, like below for the `Trossen` (aka ALOHA) robot statistics of the `pi0_base` checkpoint:
+训练随后执行 Normalize 和模型输入变换；推理输出执行 Unnormalize 和对应的绝对动作恢复。
+因此更换机器人映射、delta 规则或数据分布后，不能仅凭维度相同就继续复用旧统计。
+具体索引见 [B1K 集成](b1k.md)。客户端传原始观测，不应提前重复做这套归一化。
 
-```python
-TrainConfig(
-    ...
-    data=LeRobotAlohaDataConfig(
-        ...
-        assets=AssetsConfig(
-            assets_dir="gs://openpi-assets/checkpoints/pi0_base/assets",
-            asset_id="trossen",
-        ),
-    ),
-)
+## 优先让训练入口管理
+
+[公共训练脚本](../../scripts/train_pi05_b1k.sh)查找：
+
+```text
+<ASSETS_BASE_DIR>/pi05_b1k/<REPO_ID>/norm_stats.json
 ```
 
-For an example of a full training config that reloads normalization statistics, see the `pi0_aloha_pen_uncap` config in the [training config file](https://github.com/physical-intelligence/openpi/blob/main/src/openpi/training/config.py).
+默认 `ASSETS_BASE_DIR` 是 `openpi/outputs/assets`。文件缺失时脚本计算统计，存在时通常复用。
+不同实验应按数据来源设置独立的 `REPO_ID` 或 `ASSETS_BASE_DIR`。
 
-**Note:** To successfully reload normalization statistics, it's important that your robot + dataset are following the action space definitions used in pre-training. We provide a detailed description of our action space definitions below.
+| 训练模式 | 新计算统计时的样本范围 | 已有文件的处理 |
+| --- | --- | --- |
+| 普通 π0.5 | 指定训练 episode；未指定则全数据 | 直接复用 |
+| Joint | 空标签预检后的训练 episode | 直接复用，不自动核对段表哈希 |
+| Strict | 预检后的 episode，且应用 frame stride / 完整动作块筛选 | 直接复用，需自行核对是否对应筛选配置 |
+| Pure executor | 预检后的训练 episode | 核对 provenance；缺失或不一致则停止 |
 
-**Note #2:** Whether reloading normalization statistics is beneficial depends on the similarity of your robot and task to the robot and task distribution in the pre-training dataset. We recommend to always try both, reloading and training with a fresh set of statistics computed on your new dataset (see [main README](../README.md) for instructions on how to compute new statistics), and pick the one that works better for your task.
+Pure executor 的 `norm_stats.provenance.json` 记录 episode 名单、段表及统计文件 SHA-256，
+启动时校验这些字段。统计使用训练 episode 的数据，并不是只对最终 capped anchors 中
+通过 action mask 的位置统计。不要将这两种采样范围混为一谈。
+需要重算时选择新的 assets 路径或标识，避免把不匹配文件强行复用。
 
+`NORM_MAX_FRAMES` 可限制统计样本量，属于近似统计；使用时记录该配置。
+验证 loader 使用训练集统计，不应为验证集重新拟合。传入预检前的名单或复用包含验证集的
+旧 assets，会破坏这项隔离；joint / strict 的文件存在检查不会自动发现这类问题。
 
-## Provided Pre-training Normalization Statistics
+## 手动计算普通训练的统计
 
-Below is a list of all the pre-training normalization statistics we provide. We provide them for both, the `pi0_base` and `pi0_fast_base` models. For `pi0_base`, set the `assets_dir` to `gs://openpi-assets/checkpoints/pi0_base/assets` and for `pi0_fast_base`, set the `assets_dir` to `gs://openpi-assets/checkpoints/pi0_fast_base/assets`.
-| Robot | Description | Asset ID |
-|-------|-------------|----------|
-| ALOHA | 6-DoF dual arm robot with parallel grippers | trossen |
-| Mobile ALOHA | Mobile version of ALOHA mounted on a Slate base | trossen_mobile |
-| Franka Emika (DROID) | 7-DoF arm with parallel gripper based on the DROID setup | droid |
-| Franka Emika (non-DROID) | Franka FR3 arm with Robotiq 2F-85 gripper | franka |
-| UR5e | 6-DoF UR5e arm with Robotiq 2F-85 gripper | ur5e |
-| UR5e bi-manual | Bi-manual UR5e setup with Robotiq 2F-85 grippers | ur5e_dual |
-| ARX | Bi-manual ARX-5 robot arm setup with parallel gripper | arx |
-| ARX mobile | Mobile version of bi-manual ARX-5 robot arm setup mounted on a Slate base | arx_mobile |
-| Fibocom mobile | Fibocom mobile robot with 2x ARX-5 arms | fibocom_mobile |
+以下命令从仓库根目录运行，仅演示原始 episodes 0、1；应与实际训练子集一致：
 
-
-## Pi0 Model Action Space Definitions
-
-Out of the box, both the `pi0_base` and `pi0_fast_base` use the following action space definitions (left and right are defined looking from behind the robot towards the workspace):
-```
-    "dim_0:dim_5": "left arm joint angles",
-    "dim_6": "left arm gripper position",
-    "dim_7:dim_12": "right arm joint angles (for bi-manual only)",
-    "dim_13": "right arm gripper position (for bi-manual only)",
-
-    # For mobile robots:
-    "dim_14:dim_15": "x-y base velocity (for mobile robots only)",
+```bash
+cd openpi
+CUDA_VISIBLE_DEVICES=0 .venv/bin/python scripts/compute_norm_stats.py \
+  --config-name pi05_b1k \
+  --dataset-root /path/to/2026-challenge-demos \
+  --repo-id behavior-1k/manual_smoke \
+  --episodes-index 0 1 \
+  --assets-base-dir ./outputs/assets \
+  --batch-size 1 --num-workers 0
 ```
 
-The proprioceptive state uses the same definitions as the action space, except for the base x-y position (the last two dimensions) for mobile robots, which we don't include in the proprioceptive state.
+Strict 的手动计算还需传 `--strict-subtask-action-chunks`、`--subtask-prompts-path`，
+并匹配 `--frame-stride` 和 `--action-horizon`。Pure executor 请使用其训练包装脚本管理
+provenance，而不是只生成一个没有 sidecar 的 JSON。
 
-For 7-DoF robots (e.g. Franka), we use the first 7 dimensions of the action space for the joint actions, and the 8th dimension for the gripper action.
+## checkpoint 与推理
 
-General info for Pi robots:
-- Joint angles are expressed in radians, with position zero corresponding to the zero position reported by each robot's interface library, except for ALOHA, where the standard ALOHA code uses a slightly different convention (see the [ALOHA example code](https://github.com/Physical-Intelligence/openpi/blob/main/examples/aloha_real/README.md) for details).
-- Gripper positions are in [0.0, 1.0], with 0.0 corresponding to fully open and 1.0 corresponding to fully closed.
-- Control frequencies are either 20 Hz for UR5e and Franka, and 50 Hz for ARX and Trossen (ALOHA) arms.
+[checkpoint 保存逻辑](../src/openpi/training/checkpoints.py)将使用的统计带入模型资产：
 
-For DROID, we use the original DROID action configuration, with joint velocity actions in the first 7 dimensions and gripper actions in the 8th dimension + a control frequency of 15 Hz.
+```text
+<checkpoint-step>/assets/<REPO_ID>/norm_stats.json
+```
+
+闭环设置 `PI05_REPO_ID=<REPO_ID>`；直接启动服务传 `--repo-id`。这两个标识应匹配保存目录，
+不根据本次评测任务名猜测。例如双任务共享一份训练统计时，两项任务使用同一个 repo ID。
+
+`assets/subtask_conditioning.json` 记录的是 joint 的语言条件模式，
+与 `assets/<REPO_ID>/norm_stats.json` 用途不同，不能相互代替。
+完整启动示例见[仓库 README](../../README.md)和 [subtask 指南](../../docs/subtask_training.md)。
