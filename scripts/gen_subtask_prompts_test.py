@@ -103,8 +103,9 @@ def test_role_aware_segments_preserve_boundaries_and_provenance():
         (7, 8, "annotated"),
         (8, 10, "imputed_tail"),
     ]
-    assert [row["source_segment_index"] for row in rows] == [None, 0, 1, 1, 2, 2]
-    assert [row["source_skill_index"] for row in rows] == [None, 10, 11, 11, 12, 12]
+    assert [row["source_segment_index"] for row in rows] == [0, 0, 1, 1, 2, 2]
+    assert [row["source_skill_index"] for row in rows] == [10, 10, 11, 11, 12, 12]
+    assert rows[0]["subtask"] == "move to rose"
     assert rows[4]["manipulating_object_ids"] == ["rose"]
     assert rows[4]["reference_object_ids"] == ["vase_1"]
     assert rows[4]["object_ids"] == ["rose", "vase_1"]
@@ -126,10 +127,9 @@ def test_legacy_text_and_rle_regression():
     assert prompts._subtask_text(segment) == "pick up from radio to coffee table koagbh"
     rows, uncovered, vocabulary = prompts.build_legacy_segments(annotation, 7, 6, "skill_annotation")
     assert rows == [
-        {"episode_index": 7, "start": 0, "end": 1, "subtask": ""},
         {
             "episode_index": 7,
-            "start": 1,
+            "start": 0,
             "end": 6,
             "subtask": "pick up from radio to coffee table koagbh",
         },

@@ -93,33 +93,35 @@ if [[ "$DATASET_PROFILE" == "full100" ]]; then
     EXPECTED_BASE_RGB_MANIFEST_SHA256="${EXPECTED_BASE_RGB_MANIFEST_SHA256:-}"
 elif [[ "$DATASET_PROFILE" == "two_tasks_joint_h200" ]]; then
     ALGO_NAME="${ALGO_NAME:-pytorch2120}"
-    BATCH_SIZE="${BATCH_SIZE:-192}"
+    SUBTASK_SEGMENTS_SOURCE="${SUBTASK_SEGMENTS_SOURCE:-/data/oss_bucket_0/wangfaye/embodied/datasets/behavior-1k/annotations/subtasks/v2_first_skill_backfill/subtask_segments.parquet}"
+    SUBTASK_SEGMENTS_SHA256="${SUBTASK_SEGMENTS_SHA256:-8b5d43eeab5705cfadce60549aa6cfca5ee64d905e2eaf76f38993ab4d898bfb}"
+    BATCH_SIZE="${BATCH_SIZE:-256}"
     FRAME_STRIDE="${FRAME_STRIDE:-1}"
-    TRAIN_EPOCHS="${TRAIN_EPOCHS:-3}"
+    TRAIN_EPOCHS="${TRAIN_EPOCHS:-4}"
     EXPECTED_TASKS="${EXPECTED_TASKS:-2}"
     EXPECTED_TASK_INDICES="${EXPECTED_TASK_INDICES:-14 56}"
-    EXPECTED_RETAINED_EPISODES="${EXPECTED_RETAINED_EPISODES:-322}"
-    EXPECTED_RETAINED_FRAMES="${EXPECTED_RETAINED_FRAMES:-2596207}"
-    EXPECTED_TRAINING_SAMPLES="${EXPECTED_TRAINING_SAMPLES:-2596207}"
-    EXPECTED_BATCHES_PER_EPOCH="${EXPECTED_BATCHES_PER_EPOCH:-13521}"
-    EXPECTED_TRAIN_STEPS="${EXPECTED_TRAIN_STEPS:-40563}"
-    EXPECTED_EPISODE_LIST_SHA256="${EXPECTED_EPISODE_LIST_SHA256:-7ac7177711d6a6de51c67734612bc7121da43fed29d08812acdf66ae09e6aff6}"
-    EXPECTED_CONTRACT_SHA256="${EXPECTED_CONTRACT_SHA256:-145525864adc45fad0e294267d77028fd33d0aa4c58d7a24e2950b6174db8b24}"
+    EXPECTED_RETAINED_EPISODES="${EXPECTED_RETAINED_EPISODES:-400}"
+    EXPECTED_RETAINED_FRAMES="${EXPECTED_RETAINED_FRAMES:-3761392}"
+    EXPECTED_TRAINING_SAMPLES="${EXPECTED_TRAINING_SAMPLES:-3761392}"
+    EXPECTED_BATCHES_PER_EPOCH="${EXPECTED_BATCHES_PER_EPOCH:-14692}"
+    EXPECTED_TRAIN_STEPS="${EXPECTED_TRAIN_STEPS:-58768}"
+    EXPECTED_EPISODE_LIST_SHA256="${EXPECTED_EPISODE_LIST_SHA256:-a0af9afbab793afb23ae425db432b1d21e3e7cced46494067ec1859c514d01bf}"
+    EXPECTED_CONTRACT_SHA256="${EXPECTED_CONTRACT_SHA256:-c5c4a7e6d5b0031d295264cd9e810203d3f93e31fcfd990c0bbbb5ab8aa81562}"
     if [[ "$MODE" == "smoke" ]]; then
         TRAIN_EPOCHS=""
         TRAIN_STEPS="${TRAIN_STEPS:-3}"
         SAVE_INTERVAL="${SAVE_INTERVAL:-1000000}"
         NORM_MAX_FRAMES="${NORM_MAX_FRAMES:-256}"
-        REPO_ID="${REPO_ID:-b1k_two_tasks_joint_subtask_h200_b192_s1_smoke}"
+        REPO_ID="${REPO_ID:-b1k_two_tasks_joint_subtask_h200_b256_s1_smoke}"
     else
         TRAIN_STEPS="${TRAIN_STEPS:-$EXPECTED_TRAIN_STEPS}"
         SAVE_INTERVAL="${SAVE_INTERVAL:-5000}"
         NORM_MAX_FRAMES="${NORM_MAX_FRAMES:-500000}"
-        REPO_ID="${REPO_ID:-b1k_two_tasks_joint_subtask_h200_b192_s1}"
+        REPO_ID="${REPO_ID:-b1k_two_tasks_joint_subtask_h200_b256_s1}"
     fi
     KEEP_PERIOD="${KEEP_PERIOD:-25000}"
     LOG_INTERVAL="${LOG_INTERVAL:-1}"
-    LOCAL_DATASET_NAME="${LOCAL_DATASET_NAME:-two_tasks_joint_subtask_h200_b192_s1}"
+    LOCAL_DATASET_NAME="${LOCAL_DATASET_NAME:-two_tasks_joint_subtask_h200_b256_s1}"
     NORM_STATS_SOURCE="${NORM_STATS_SOURCE:-}"
     MIN_LOCAL_BYTES="${MIN_LOCAL_BYTES:-0}"
     EXPECTED_META_FILES="${EXPECTED_META_FILES:-}"
@@ -269,6 +271,11 @@ fi
 EXPECTED_TASK_INDICES="${EXPECTED_TASK_INDICES:-}"
 EXPECTED_TRAINING_SAMPLES="${EXPECTED_TRAINING_SAMPLES:-}"
 RESUME="${RESUME:-0}"
+SUBTASK_ACTION_CONDITIONING="${SUBTASK_ACTION_CONDITIONING:-}"
+case "$SUBTASK_ACTION_CONDITIONING" in
+    ""|task_and_subtask|subtask_only) ;;
+    *) echo "SUBTASK_ACTION_CONDITIONING must be task_and_subtask or subtask_only" >&2; exit 2 ;;
+esac
 
 STAMP="$(date +%Y%m%d_%H%M%S)"
 RUN_ID="${RUN_ID:-pi05_${DATASET_PROFILE}_multihost_${MODE}_$STAMP}"
@@ -380,10 +387,10 @@ elif [[ "$DATASET_PROFILE" == "two_tasks_joint_h200" ]]; then
         || { echo "two_tasks_joint_h200 requires the H200 queue used by full100" >&2; exit 2; }
     [[ "$PROCESS_COUNT" == 2 && "$EXPECTED_LOCAL_DEVICES" == 8 && "$EXPECTED_GLOBAL_DEVICES" == 16 ]] \
         || { echo "two_tasks_joint_h200 requires 2 workers x 8 GPUs" >&2; exit 2; }
-    [[ "$FSDP_DEVICES" == 8 && "$BATCH_SIZE" == 192 && "$FRAME_STRIDE" == 1 ]] \
-        || { echo "two_tasks_joint_h200 requires FSDP=8, batch=192, stride=1" >&2; exit 2; }
-    if [[ "$MODE" != "smoke" && "$TRAIN_EPOCHS" != 3 ]]; then
-        echo "two_tasks_joint_h200 $MODE requires exactly 3 epochs" >&2
+    [[ "$FSDP_DEVICES" == 8 && "$BATCH_SIZE" == 256 && "$FRAME_STRIDE" == 1 ]] \
+        || { echo "two_tasks_joint_h200 requires FSDP=8, batch=256, stride=1" >&2; exit 2; }
+    if [[ "$MODE" != "smoke" && "$TRAIN_EPOCHS" != 4 ]]; then
+        echo "two_tasks_joint_h200 $MODE requires exactly 4 epochs" >&2
         exit 2
     fi
     if [[ "$MODE" == "full" && "$TRAIN_STEPS" != "$EXPECTED_TRAIN_STEPS" ]]; then
@@ -518,6 +525,7 @@ write_setting() { printf 'export %s=%q\n' "$1" "$2"; }
     write_setting EXP_NAME "$EXP_NAME"
     write_setting OUTPUT_ROOT "$OUTPUT_ROOT"
     write_setting RESUME "$RESUME"
+    write_setting SUBTASK_ACTION_CONDITIONING "$SUBTASK_ACTION_CONDITIONING"
     write_setting PROCESS_COUNT "$PROCESS_COUNT"
     write_setting EXPECTED_LOCAL_DEVICES "$EXPECTED_LOCAL_DEVICES"
     write_setting EXPECTED_GLOBAL_DEVICES "$EXPECTED_GLOBAL_DEVICES"

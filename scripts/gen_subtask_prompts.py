@@ -215,10 +215,11 @@ def build_legacy_segments(
                 labels[frame] = text
 
     uncovered = 0
+    first = next((label for label in labels if label is not None), None)
     last = None
     for frame in range(length):
         if labels[frame] is None:
-            labels[frame] = last if last is not None else ""
+            labels[frame] = last if last is not None else (first if first is not None else "")
             uncovered += 1
         else:
             last = labels[frame]
@@ -296,6 +297,7 @@ def build_role_aware_segments(
                 frames[frame] = record
 
     annotated_frames = [frame for frame, record in enumerate(frames) if record is not None]
+    first_annotated = frames[annotated_frames[0]] if annotated_frames else None
     last_annotated_frame = annotated_frames[-1] if annotated_frames else None
     uncovered = 0
     last = None
@@ -305,20 +307,23 @@ def build_role_aware_segments(
             continue
         uncovered += 1
         if last is None:
-            frames[frame] = {
-                "subtask": "",
-                "annotation_path": annotation_path,
-                "source_segment_index": None,
-                "source_interval_index": None,
-                "source_skill_index": None,
-                "skill_description": "",
-                "manipulating_object_ids": [],
-                "reference_object_ids": [],
-                "object_ids": [],
-                "memory_prefix": "",
-                "spatial_prefix": "",
-                "provenance": "imputed_leading",
-            }
+            if first_annotated is None:
+                frames[frame] = {
+                    "subtask": "",
+                    "annotation_path": annotation_path,
+                    "source_segment_index": None,
+                    "source_interval_index": None,
+                    "source_skill_index": None,
+                    "skill_description": "",
+                    "manipulating_object_ids": [],
+                    "reference_object_ids": [],
+                    "object_ids": [],
+                    "memory_prefix": "",
+                    "spatial_prefix": "",
+                    "provenance": "imputed_leading",
+                }
+            else:
+                frames[frame] = {**first_annotated, "provenance": "imputed_leading"}
         else:
             provenance = "imputed_tail" if frame > last_annotated_frame else "imputed_gap"
             frames[frame] = {**last, "provenance": provenance}

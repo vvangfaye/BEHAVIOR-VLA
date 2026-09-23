@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Debug Current File",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/openpi/.venv/bin/python",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/openpi/src:${workspaceFolder}"
+      },
+      "justMyCode": false
+    },
+    {
+      "name": "Python: Attach to Training (5678)",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": {
+        "host": "127.0.0.1",
+        "port": 5678
+      },
+      "justMyCode": false
+    }
+  ]
+}

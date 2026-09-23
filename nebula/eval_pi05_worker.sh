@@ -464,6 +464,13 @@ else:
     workers = [{"worker": 0, "server_gpu": 0, "eval_gpu": 1, "port": $BASE_PORT}]
 ready_path = pathlib.Path("$CHECKPOINT_SOURCE/_READY")
 ready = json.loads(ready_path.read_text()) if ready_path.is_file() else {}
+conditioning_path = pathlib.Path("$LOCAL_CHECKPOINT/assets/subtask_conditioning.json")
+action_conditioning = None
+if conditioning_path.is_file():
+    action_conditioning = json.loads(conditioning_path.read_text()).get("action_conditioning")
+subtask_interval = None
+if bool($SUBTASK_PREDICTION):
+    subtask_interval = 2 if action_conditioning == "subtask_only" else 1
 path = pathlib.Path("$PERSISTENT_OUTPUT/manifest.json")
 path.write_text(json.dumps({
     "run_id": "$RUN_ID",
@@ -485,7 +492,8 @@ path.write_text(json.dumps({
     "subtask_prediction": bool($SUBTASK_PREDICTION),
     "provided_subtask_as_prompt": bool($PROVIDED_SUBTASK_AS_PROMPT),
     "max_token_len": (200 if bool($PROVIDED_SUBTASK_AS_PROMPT) else 512 if bool($SUBTASK_PREDICTION) else None),
-    "subtask_interval": (1 if bool($SUBTASK_PREDICTION) else None),
+    "subtask_action_conditioning": action_conditioning,
+    "subtask_interval": subtask_interval,
     "subtask_temperature": (0.0 if bool($SUBTASK_PREDICTION) else None),
     "external_subtask_selector": selector,
     "selector_diagnostics": ({
@@ -539,7 +547,7 @@ if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ]]; then
             PI05_ENV="$PI05_ENV" SUBTASK_PREDICTION="$SUBTASK_PREDICTION" \
             PROVIDED_SUBTASK_AS_PROMPT="$PROVIDED_SUBTASK_AS_PROMPT" \
             EXTERNAL_SUBTASK_SELECTOR="$EXTERNAL_SUBTASK_SELECTOR" \
-            MAX_TOKEN_LEN="$POLICY_MAX_TOKEN_LEN" MAX_SUBTASK_LEN=64 SUBTASK_INTERVAL=1 SUBTASK_TEMPERATURE=0 \
+            MAX_TOKEN_LEN="$POLICY_MAX_TOKEN_LEN" MAX_SUBTASK_LEN=64 SUBTASK_TEMPERATURE=0 \
             PROMPT_MODE=whole_task MODE=public_test \
             SERVER_GPU="$worker" EVAL_GPU="$worker" PORT="$port" EVAL_ENV="$EVAL_ENV" \
             EVAL_RUNTIME_ROOT="$runtime_root" PI05_MEM_FRACTION="$PI05_MEM_FRACTION" \
@@ -618,7 +626,7 @@ else
             PI05_ENV="$PI05_ENV" SUBTASK_PREDICTION="$SUBTASK_PREDICTION" \
             PROVIDED_SUBTASK_AS_PROMPT="$PROVIDED_SUBTASK_AS_PROMPT" \
             EXTERNAL_SUBTASK_SELECTOR="$EXTERNAL_SUBTASK_SELECTOR" \
-            MAX_TOKEN_LEN="$POLICY_MAX_TOKEN_LEN" MAX_SUBTASK_LEN=64 SUBTASK_INTERVAL=1 SUBTASK_TEMPERATURE=0 \
+            MAX_TOKEN_LEN="$POLICY_MAX_TOKEN_LEN" MAX_SUBTASK_LEN=64 SUBTASK_TEMPERATURE=0 \
             PROMPT_MODE=whole_task MODE=public_test \
             SERVER_GPU=0 EVAL_GPU="$SERIAL_EVAL_GPU" PORT="$BASE_PORT" EVAL_ENV="$EVAL_ENV" \
             EVAL_RUNTIME_ROOT="$RUNTIME_ROOT/omnigibson-runtime" PI05_MEM_FRACTION="$PI05_MEM_FRACTION" \

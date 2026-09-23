@@ -346,6 +346,21 @@ def test_submit_script_requires_explicit_torch_checkpoint():
     assert "CHECKPOINT_SOURCE is required" in completed.stderr
 
 
+def test_worker_uses_checkpoint_factorized_interval():
+    source = WORKER_SCRIPT.read_text()
+
+    assert "SUBTASK_INTERVAL=1" not in source
+    assert 'action_conditioning == "subtask_only"' in source
+    assert '"subtask_interval": subtask_interval' in source
+
+
+def test_submit_script_supports_no_dependency_bootstrap():
+    source = SUBMIT_SCRIPT.read_text()
+
+    assert 'BOOTSTRAP_ENV_ARGS=("--env=PIP_NO_DEPS=1")' in source
+    assert '"nebula_pip_no_deps": nebula_pip_no_deps == "1"' in source
+
+
 def test_submit_script_rejects_torch_strict_prompt_mode():
     completed = run_shell(
         SUBMIT_SCRIPT,

@@ -15,6 +15,7 @@ ALGO_NAME="${ALGO_NAME:-pytorch2120}"
 AIHUB_MODEL_NAME="${AIHUB_MODEL_NAME:-behavior}"
 AI_HUB_CLI="${AI_HUB_CLI:-ai-hub-cli}"
 PI05_MODEL_FORMAT="${PI05_MODEL_FORMAT:-jax}"
+NEBULA_PIP_NO_DEPS="${NEBULA_PIP_NO_DEPS:-0}"
 case "$PI05_MODEL_FORMAT" in
     jax|torch) ;;
     *) echo "PI05_MODEL_FORMAT must be jax or torch" >&2; exit 2 ;;
@@ -123,6 +124,8 @@ KEEP_RUNTIME="${KEEP_RUNTIME:-0}"
 [[ "$NUM_ROLLOUTS" =~ ^[1-9][0-9]*$ ]] || { echo "NUM_ROLLOUTS must be a positive integer" >&2; exit 2; }
 [[ "$BASE_PORT" =~ ^[1-9][0-9]*$ ]] || { echo "BASE_PORT must be a positive integer" >&2; exit 2; }
 [[ "$MAX_FAILOVER_TIMES" =~ ^[0-9]+$ ]] || { echo "MAX_FAILOVER_TIMES must be a non-negative integer" >&2; exit 2; }
+[[ "$NEBULA_PIP_NO_DEPS" == 0 || "$NEBULA_PIP_NO_DEPS" == 1 ]] || {
+    echo "NEBULA_PIP_NO_DEPS must be 0 or 1" >&2; exit 2; }
 [[ "$WRITE_VIDEO" == 0 || "$WRITE_VIDEO" == 1 ]] || { echo "WRITE_VIDEO must be 0 or 1" >&2; exit 2; }
 [[ "$SUBTASK_PREDICTION" == 0 || "$SUBTASK_PREDICTION" == 1 ]] || { echo "SUBTASK_PREDICTION must be 0 or 1" >&2; exit 2; }
 [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 0 || "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]] || {
@@ -315,6 +318,10 @@ cp -a \
 cp -a "$REPO_ROOT/$CLUSTER_FILE" "$BUNDLE_DIR/$CLUSTER_FILE"
 find "$BUNDLE_DIR" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$BUNDLE_DIR" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+BOOTSTRAP_ENV_ARGS=()
+if [[ "$NEBULA_PIP_NO_DEPS" == 1 ]]; then
+    BOOTSTRAP_ENV_ARGS=("--env=PIP_NO_DEPS=1")
+fi
 
 write_setting() { printf 'export %s=%q\n' "$1" "$2"; }
 {
@@ -355,6 +362,7 @@ printf 'JOB_NAME: %s\n' "$JOB_NAME"
 printf 'RUN_ID: %s\n' "$RUN_ID"
 printf 'QUEUE: %s (%s)\n' "$QUEUE" "$GPU_CARD_TYPE"
 printf 'ALGO_NAME: %s\n' "$ALGO_NAME"
+printf 'NEBULA_PIP_NO_DEPS: %s\n' "$NEBULA_PIP_NO_DEPS"
 printf 'PROFILE: %s\n' "$EVAL_PROFILE"
 printf 'MODEL_FORMAT: %s\n' "$PI05_MODEL_FORMAT"
 printf 'CLUSTER: %s\n' "$CLUSTER_FILE"
@@ -431,6 +439,7 @@ set +e
     "--gpu_card_type=$GPU_CARD_TYPE" \
     "--oss_appendable=true" \
     "--max_failover_times=$MAX_FAILOVER_TIMES" \
+    "${BOOTSTRAP_ENV_ARGS[@]}" \
     "--debug_mode" \
     "--ignore=__pycache__,*.pyc,*.pyo" 2>&1 | tee "$CLI_OUTPUT_PATH"
 submit_status=${PIPESTATUS[0]}
@@ -438,7 +447,7 @@ set -e
 python3 - "$CLI_OUTPUT_PATH" "$RECEIPT_PATH" "$RUN_ID" "$JOB_NAME" \
     "$EVAL_PROFILE" "$PERSISTENT_OUTPUT" "$EXTERNAL_SUBTASK_SELECTOR" "$PI05_MODEL_FORMAT" \
     "$PI05_ENV_ARCHIVE" "$CHECKPOINT_SOURCE" "$SUBTASK_PREDICTION" \
-    "$PROVIDED_SUBTASK_AS_PROMPT" "$ALGO_NAME" "$submit_status" <<'PY'
+    "$PROVIDED_SUBTASK_AS_PROMPT" "$ALGO_NAME" "$NEBULA_PIP_NO_DEPS" "$submit_status" <<'PY'
 import json
 import re
 import sys
@@ -458,6 +467,7 @@ from pathlib import Path
     subtask_prediction,
     provided_subtask_as_prompt,
     algo_name,
+    nebula_pip_no_deps,
     exit_code,
 ) = sys.argv[1:]
 text = Path(output_path).read_text(errors="replace")
@@ -485,6 +495,7 @@ receipt = {
     "profile": profile,
     "model_format": model_format,
     "algo_name": algo_name,
+    "nebula_pip_no_deps": nebula_pip_no_deps == "1",
     "policy_env_archive": policy_env_archive,
     "checkpoint_source": checkpoint_source,
     "checkpoint_manifest_sha256": ready.get("manifest_sha256"),

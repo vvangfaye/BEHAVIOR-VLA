@@ -491,6 +491,9 @@ if [[ -n "${LR_DECAY_STEPS:-}" ]]; then
     fi
     TRAIN_DATA_ARGS+=(--lr-schedule.decay-steps "$LR_DECAY_STEPS")
 fi
+if [[ -n "${LR_WARMUP_STEPS:-}" ]]; then
+    TRAIN_DATA_ARGS+=(--lr-schedule.warmup-steps "$LR_WARMUP_STEPS")
+fi
 if [[ -n "$KEEP_PERIOD" ]]; then
     TRAIN_DATA_ARGS+=(--keep-period "$KEEP_PERIOD")
 fi
@@ -513,7 +516,17 @@ elif [[ "$SUBTASK_PREDICTION" == 0 && "$SUBTASK_EXECUTOR" == 0 && "$STRICT_SUBTA
     TRAIN_DATA_ARGS+=(--overwrite)
 fi
 
-python scripts/b1k/train_b1k.py pi05_b1k \
+TRAIN_PYTHON=(python)
+if [[ -n "${DEBUGPY_PORT:-}" ]]; then
+    python -c "import debugpy" >/dev/null 2>&1 || {
+        echo "DEBUGPY_PORT is set, but debugpy is not installed in $OPENPI_DIR/.venv" >&2
+        exit 2
+    }
+    TRAIN_PYTHON+=( -m debugpy --listen "127.0.0.1:$DEBUGPY_PORT" --wait-for-client )
+    echo "Waiting for VS Code debugger on 127.0.0.1:$DEBUGPY_PORT"
+fi
+
+"${TRAIN_PYTHON[@]}" scripts/b1k/train_b1k.py pi05_b1k \
     --exp-name "$EXP_NAME" \
     --assets-base-dir "$ASSETS_BASE_DIR" \
     --checkpoint-base-dir "$CHECKPOINT_BASE_DIR" \
