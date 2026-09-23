@@ -18,6 +18,13 @@ PROMPT_MODE="${PROMPT_MODE:-whole_task}"
 EXTERNAL_SUBTASK_SET="${EXTERNAL_SUBTASK+x}"
 EXTERNAL_SUBTASK="${EXTERNAL_SUBTASK:-}"
 EXTERNAL_SUBTASK_SELECTOR="${EXTERNAL_SUBTASK_SELECTOR:-}"
+SUBTASK_SAMPLE_PANEL="${PI05_SUBTASK_SAMPLE_PANEL:-}"
+SUBTASK_RAW_DATA_ROOT="${PI05_SUBTASK_RAW_DATA_ROOT:-}"
+SUBTASK_SAMPLE_MODE=0
+if [[ -n "$SUBTASK_SAMPLE_PANEL" ]]; then
+    SUBTASK_SAMPLE_MODE=1
+    : "${SUBTASK_RAW_DATA_ROOT:?set PI05_SUBTASK_RAW_DATA_ROOT with PI05_SUBTASK_SAMPLE_PANEL}"
+fi
 case "$PROMPT_MODE" in
     whole_task|oracle_unsatisfied_goal) ;;
     *) echo "PROMPT_MODE must be whole_task or oracle_unsatisfied_goal" >&2; exit 2 ;;
@@ -60,6 +67,10 @@ if [[ "$SUBTASK_PREDICTION" == 1 && "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
     echo "SUBTASK_PREDICTION and PROVIDED_SUBTASK_AS_PROMPT are mutually exclusive" >&2; exit 2
 fi
 EXTERNAL_SUBTASK_ARGS=()
+if (( SUBTASK_SAMPLE_MODE )) && [[ -n "$EXTERNAL_SUBTASK_SET" || -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
+    echo "PI05_SUBTASK_SAMPLE_PANEL supplies per-sample prompts and cannot be combined with EXTERNAL_SUBTASK or EXTERNAL_SUBTASK_SELECTOR" >&2
+    exit 2
+fi
 if [[ -n "$EXTERNAL_SUBTASK_SET" ]]; then
     if [[ ! "$EXTERNAL_SUBTASK" =~ [^[:space:]] ]]; then
         echo "EXTERNAL_SUBTASK must be a non-empty, non-whitespace string" >&2; exit 2
@@ -100,8 +111,8 @@ if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
         SUBTASK_SERVER_ARGS+=(--subtask-action-conditioning "$SUBTASK_ACTION_CONDITIONING")
     fi
 elif [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
-    if [[ -z "$EXTERNAL_SUBTASK_SET" && -z "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
-        echo "PROVIDED_SUBTASK_AS_PROMPT requires EXTERNAL_SUBTASK or EXTERNAL_SUBTASK_SELECTOR" >&2; exit 2
+    if [[ -z "$EXTERNAL_SUBTASK_SET" && -z "$EXTERNAL_SUBTASK_SELECTOR" && "$SUBTASK_SAMPLE_MODE" == 0 ]]; then
+        echo "PROVIDED_SUBTASK_AS_PROMPT requires EXTERNAL_SUBTASK, EXTERNAL_SUBTASK_SELECTOR, or PI05_SUBTASK_SAMPLE_PANEL" >&2; exit 2
     fi
     if [[ "${MAX_TOKEN_LEN:-200}" != 200 ]]; then
         echo "PROVIDED_SUBTASK_AS_PROMPT requires MAX_TOKEN_LEN=200" >&2; exit 2
@@ -129,6 +140,16 @@ if [[ -n "${PI05_EVAL_QUEUE_DB:-}" ]]; then
     QUEUE_LOG_DIR="${PI05_EVAL_QUEUE_LOG_ROOT:-$PI05_EVAL_QUEUE_ATTEMPT_ROOT/../logs}"
     QUEUE_LOG_DIR="$QUEUE_LOG_DIR/$PI05_EVAL_QUEUE_WORKER/generation-$PI05_EVAL_QUEUE_GENERATION"
     mkdir -p "$QUEUE_LOG_DIR"
+fi
+if (( SUBTASK_SAMPLE_MODE )); then
+    (( QUEUE_MODE )) || {
+        echo "PI05_SUBTASK_SAMPLE_PANEL requires PI05_EVAL_QUEUE_DB" >&2; exit 2; }
+    [[ "$NUM_ROLLOUTS" == 1 ]] || {
+        echo "PI05_SUBTASK_SAMPLE_PANEL requires NUM_ROLLOUTS=1" >&2; exit 2; }
+    [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]] || {
+        echo "PI05_SUBTASK_SAMPLE_PANEL requires PROVIDED_SUBTASK_AS_PROMPT=1" >&2; exit 2; }
+    [[ "${SUBTASK_SAMPLE_MAX_STEPS:-2048}" =~ ^[1-9][0-9]*$ ]] || {
+        echo "SUBTASK_SAMPLE_MAX_STEPS must be a positive integer" >&2; exit 2; }
 fi
 
 TASKS=("$@")
@@ -275,7 +296,15 @@ for task in "${TASKS[@]}"; do
     cd "$REPO_ROOT/BEHAVIOR-1K"
     EVAL_ARGS=("${EXTERNAL_SUBTASK_ARGS[@]}")
     EVAL_COMMAND=("$EVAL_ENV/bin/python" -m omnigibson.eval.eval)
-    if (( QUEUE_MODE )); then
+    if (( SUBTASK_SAMPLE_MODE )); then
+        EVAL_ARGS+=(
+            "${QUEUE_EVAL_ARGS[@]}"
+            --subtask-panel "$SUBTASK_SAMPLE_PANEL"
+            --raw-data-root "$SUBTASK_RAW_DATA_ROOT"
+            --sample-max-steps "${SUBTASK_SAMPLE_MAX_STEPS:-2048}"
+        )
+        EVAL_COMMAND=("$EVAL_ENV/bin/python" "$REPO_ROOT/scripts/eval_b1k_subtask_samples.py")
+    elif (( QUEUE_MODE )); then
         EVAL_ARGS+=("${QUEUE_EVAL_ARGS[@]}")
         EVAL_COMMAND=("$EVAL_ENV/bin/python" "$REPO_ROOT/scripts/eval_b1k_queue.py")
     fi

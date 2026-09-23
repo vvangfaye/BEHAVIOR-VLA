@@ -208,6 +208,162 @@ def test_publication_reconciliation_and_manifest(tmp_path):
     )
 
 
+def test_rollout_specs_require_dense_ids_exact_samples_and_eligible_video(tmp_path):
+    task = "carrying_in_groceries"
+    root = tmp_path / "artifacts"
+    json_dir = root / "json"
+    json_dir.mkdir(parents=True)
+    path = json_dir / f"{task}_301_0.json"
+    value = {
+        **result(task, 301, 0),
+        "sample_id": "wrong-sample",
+        "metric_eligible": False,
+        "result_state": "setup_excluded",
+    }
+    path.write_text(json.dumps(value))
+    specs = [
+        {
+            "rollout_id": 0,
+            "sample_id": "expected-sample",
+            "video": "required_if_eligible",
+        }
+    ]
+
+    with pytest.raises(ArtifactValidationError, match="sample_id"):
+        EvaluationQueue.validate_artifacts(
+            root, task=task, instance_id=301, rollout_specs=specs
+        )
+
+    value["sample_id"] = "expected-sample"
+    value["metric_eligible"] = True
+    value["result_state"] = "evaluated"
+    path.write_text(json.dumps(value))
+    with pytest.raises(ArtifactValidationError, match="video set mismatch"):
+        EvaluationQueue.validate_artifacts(
+            root, task=task, instance_id=301, rollout_specs=specs
+        )
+
+    value["metric_eligible"] = False
+    value["result_state"] = "setup_excluded"
+    path.write_text(json.dumps(value))
+    EvaluationQueue.validate_artifacts(
+        root, task=task, instance_id=301, rollout_specs=specs
+    )
+
+    value["result_state"] = "evaluated"
+    path.write_text(json.dumps(value))
+    with pytest.raises(ArtifactValidationError, match="conflicts"):
+        EvaluationQueue.validate_artifacts(
+            root, task=task, instance_id=301, rollout_specs=specs
+        )
+    value["result_state"] = "setup_excluded"
+    path.write_text(json.dumps(value))
+
+    with pytest.raises(ValueError, match="ordered dense"):
+        EvaluationQueue.validate_artifacts(
+            root,
+            task=task,
+            instance_id=301,
+            rollout_specs=[{"rollout_id": 1, "video": "required"}],
+        )
+
+
+def test_variable_rollout_specs_publish_reconcile_and_manifest(tmp_path):
+    task = "carrying_in_groceries"
+    queue = make_queue(tmp_path, [(task, 301), (task, 302)])
+    results_root = tmp_path / "results"
+    canonical = results_root / "pi05" / task
+    specs_by_job = {
+        (task, 301): [
+            {"rollout_id": 0, "sample_id": "sample-a", "video": "required"},
+            {
+                "rollout_id": 1,
+                "sample_id": "sample-b",
+                "video": "required_if_eligible",
+            },
+        ],
+        (task, 302): [
+            {
+                "rollout_id": 0,
+                "sample_id": "sample-c",
+                "video": "required_if_eligible",
+            }
+        ],
+    }
+
+    first = queue.claim(task, "worker", tmp_path / "attempts")
+    first.json_dir.mkdir(parents=True)
+    first.video_dir.mkdir(parents=True)
+    for spec in specs_by_job[(task, 301)]:
+        value = {
+            **result(task, 301, spec["rollout_id"]),
+            "sample_id": spec["sample_id"],
+            "metric_eligible": True,
+            "result_state": "evaluated",
+        }
+        first.result_path(spec["rollout_id"]).write_text(json.dumps(value))
+    first.video_path(0).write_bytes(b"video-0")
+
+    with pytest.raises(ArtifactValidationError, match="video set mismatch"):
+        queue.publish(first, canonical, rollout_specs=specs_by_job[(task, 301)])
+    assert not canonical.exists()
+
+    first.video_path(1).write_bytes(b"video-1")
+    queue.publish(first, canonical, rollout_specs=specs_by_job[(task, 301)])
+
+    second = queue.claim(task, "worker", tmp_path / "attempts")
+    second.json_dir.mkdir(parents=True)
+    second.result_path(0).write_text(
+        json.dumps(
+            {
+                **result(task, 302, 0),
+                "sample_id": "sample-c",
+                "metric_eligible": False,
+                "result_state": "setup_excluded",
+            }
+        )
+    )
+    staged = queue.validate_artifacts(
+        second.attempt_dir,
+        task=task,
+        instance_id=302,
+        rollout_specs=specs_by_job[(task, 302)],
+    )
+    for source, relative in staged:
+        queue._publish_one(source, canonical / relative)
+    assert queue.reconcile(
+        second, canonical, rollout_specs=specs_by_job[(task, 302)]
+    )
+
+    manifest = queue.create_result_manifest(
+        results_root,
+        tmp_path / "result_manifest.json",
+        model="pi05",
+        rollout_specs_by_job=specs_by_job,
+    )
+    assert manifest["rollout_count"] == 3
+    assert [item["sample_id"] for item in manifest["rollouts"]] == [
+        "sample-a",
+        "sample-b",
+        "sample-c",
+    ]
+    assert [item["video"] is not None for item in manifest["rollouts"]] == [
+        True,
+        True,
+        False,
+    ]
+
+    count_manifest = queue.create_result_manifest(
+        results_root,
+        tmp_path / "count_result_manifest.json",
+        model="pi05",
+        require_videos=False,
+        rollout_specs_by_job={(task, 301): 2, (task, 302): 1},
+    )
+    assert count_manifest["rollout_count"] == 3
+    assert queue.snapshot()["counts"]["succeeded"] == 2
+
+
 def manifest_args(tmp_path: Path, *extra: str):
     return dynamic.parse_args(
         [

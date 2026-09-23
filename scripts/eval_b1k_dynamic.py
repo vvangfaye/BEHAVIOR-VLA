@@ -352,7 +352,12 @@ def _assert_selected_gpus_idle(
         raise ValueError(f"selected GPUs already have compute processes: {occupied}")
 
 
-def verify_preflight(manifest: dict, *, resume: bool) -> None:
+def verify_preflight(
+    manifest: dict,
+    *,
+    resume: bool,
+    specs: list[WorkerSpec] | None = None,
+) -> None:
     checkpoint = Path(manifest["checkpoint"])
     repo_id = manifest["repo_id"]
     eval_env = Path(manifest["eval_env"])
@@ -387,7 +392,12 @@ def verify_preflight(manifest: dict, *, resume: bool) -> None:
             f"requested GPUs {sorted(requested)} are not all available; found {sorted(available)}"
         )
     _assert_selected_gpus_idle(manifest["gpus"], processes)
-    for spec in worker_specs(manifest["gpus"], manifest["base_port"]):
+    selected_specs = (
+        specs
+        if specs is not None
+        else worker_specs(manifest["gpus"], manifest["base_port"])
+    )
+    for spec in selected_specs:
         with socket.socket() as probe:
             try:
                 probe.bind(("127.0.0.1", spec.port))

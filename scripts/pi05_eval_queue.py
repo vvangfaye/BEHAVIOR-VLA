@@ -12,11 +12,14 @@ import sqlite3
 import tempfile
 import time
 import uuid
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 
 JOB_STATES = ("pending", "running", "succeeded", "exhausted")
 RESULT_REQUIRED_KEYS = {"task", "instance_id", "rollout_id", "steps", "success"}
+VIDEO_REQUIRED = "required"
+VIDEO_REQUIRED_IF_ELIGIBLE = "required_if_eligible"
+_LEGACY_VIDEO_OPTIONAL = "legacy_optional"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -400,6 +403,104 @@ class EvaluationQueue:
         if not math.isfinite(q_score):
             raise ArtifactValidationError("rollout q_score must be finite")
 
+    @staticmethod
+    def _normalize_rollout_specs(
+        *,
+        num_rollouts: int | None,
+        require_videos: bool | None,
+        rollout_specs: Sequence[Mapping[str, object]] | None,
+    ) -> list[dict[str, object]]:
+        """Normalize the explicit spec, or synthesize one from the legacy arguments.
+
+        Explicit specs use ``video="required"`` or
+        ``video="required_if_eligible"``. The latter only permits a missing video
+        when the result has ``metric_eligible=false`` or
+        ``result_state="setup_excluded"``.
+        """
+        if rollout_specs is None:
+            if (
+                isinstance(num_rollouts, bool)
+                or not isinstance(num_rollouts, int)
+                or num_rollouts <= 0
+            ):
+                raise ValueError("num_rollouts must be positive")
+            if not isinstance(require_videos, bool):
+                raise ValueError(
+                    "require_videos must be a boolean when rollout_specs is omitted"
+                )
+            video = VIDEO_REQUIRED if require_videos else _LEGACY_VIDEO_OPTIONAL
+            return [
+                {"rollout_id": rollout_id, "video": video}
+                for rollout_id in range(num_rollouts)
+            ]
+
+        if isinstance(rollout_specs, (str, bytes)) or not isinstance(
+            rollout_specs, Sequence
+        ):
+            raise ValueError("rollout_specs must be an ordered sequence of mappings")
+        if not rollout_specs:
+            raise ValueError("rollout_specs must not be empty")
+        if num_rollouts is not None:
+            if isinstance(num_rollouts, bool) or not isinstance(num_rollouts, int):
+                raise ValueError("num_rollouts must be a positive integer")
+            if num_rollouts != len(rollout_specs):
+                raise ValueError(
+                    "num_rollouts must match the number of rollout_specs when both are supplied"
+                )
+        if require_videos is not None and not isinstance(require_videos, bool):
+            raise ValueError("require_videos must be a boolean")
+
+        normalized = []
+        allowed_keys = {"rollout_id", "sample_id", "video"}
+        for expected_rollout_id, spec in enumerate(rollout_specs):
+            if not isinstance(spec, Mapping):
+                raise ValueError("each rollout spec must be a mapping")
+            unknown_keys = set(spec) - allowed_keys
+            if unknown_keys:
+                raise ValueError(
+                    f"rollout spec has unknown keys: {sorted(unknown_keys)}"
+                )
+            if "rollout_id" not in spec or "video" not in spec:
+                raise ValueError("each rollout spec requires rollout_id and video")
+            rollout_id = spec["rollout_id"]
+            if (
+                isinstance(rollout_id, bool)
+                or not isinstance(rollout_id, int)
+                or rollout_id != expected_rollout_id
+            ):
+                raise ValueError(
+                    "rollout_specs must have ordered dense rollout_id values starting at 0"
+                )
+            video = spec["video"]
+            if video not in (VIDEO_REQUIRED, VIDEO_REQUIRED_IF_ELIGIBLE):
+                raise ValueError(
+                    "rollout spec video must be 'required' or 'required_if_eligible'"
+                )
+            normalized_spec = {"rollout_id": rollout_id, "video": video}
+            if "sample_id" in spec:
+                sample_id = spec["sample_id"]
+                if not isinstance(sample_id, str) or not sample_id:
+                    raise ValueError("rollout spec sample_id must be a nonempty string")
+                normalized_spec["sample_id"] = sample_id
+            normalized.append(normalized_spec)
+        return normalized
+
+    @staticmethod
+    def _result_is_metric_eligible(value: dict) -> bool:
+        metric_eligible = value.get("metric_eligible")
+        result_state = value.get("result_state")
+        if not isinstance(metric_eligible, bool):
+            raise ArtifactValidationError("rollout metric_eligible must be a boolean")
+        if result_state not in ("evaluated", "setup_excluded"):
+            raise ArtifactValidationError(
+                "rollout result_state must be 'evaluated' or 'setup_excluded'"
+            )
+        if metric_eligible is not (result_state == "evaluated"):
+            raise ArtifactValidationError(
+                "rollout metric_eligible conflicts with result_state"
+            )
+        return metric_eligible
+
     @classmethod
     def validate_artifacts(
         cls,
@@ -407,17 +508,21 @@ class EvaluationQueue:
         *,
         task: str,
         instance_id: int,
-        num_rollouts: int,
-        require_videos: bool,
+        num_rollouts: int | None = None,
+        require_videos: bool | None = None,
+        rollout_specs: Sequence[Mapping[str, object]] | None = None,
     ) -> list[tuple[Path, Path]]:
-        if num_rollouts <= 0:
-            raise ValueError("num_rollouts must be positive")
+        specs = cls._normalize_rollout_specs(
+            num_rollouts=num_rollouts,
+            require_videos=require_videos,
+            rollout_specs=rollout_specs,
+        )
         root = Path(root)
         json_dir = root / "json"
         video_dir = root / "videos"
         expected_json = {
-            json_dir / f"{task}_{instance_id}_{rollout_id}.json"
-            for rollout_id in range(num_rollouts)
+            json_dir / f"{task}_{instance_id}_{spec['rollout_id']}.json"
+            for spec in specs
         }
         actual_json = (
             set(json_dir.glob(f"{task}_{instance_id}_*.json"))
@@ -431,7 +536,9 @@ class EvaluationQueue:
                 f"rollout JSON set mismatch: missing={missing}, unexpected={unexpected}"
             )
         artifacts = []
-        for rollout_id in range(num_rollouts):
+        results = {}
+        for spec in specs:
+            rollout_id = spec["rollout_id"]
             path = json_dir / f"{task}_{instance_id}_{rollout_id}.json"
             try:
                 value = json.loads(path.read_text())
@@ -440,26 +547,39 @@ class EvaluationQueue:
                     f"invalid rollout JSON {path}: {exc}"
                 ) from exc
             cls._validate_result(value, task, instance_id, rollout_id)
+            if "sample_id" in spec and value.get("sample_id") != spec["sample_id"]:
+                raise ArtifactValidationError(
+                    "rollout result sample_id does not match "
+                    f"expected value {spec['sample_id']!r}"
+                )
+            results[rollout_id] = value
             artifacts.append((path, Path("json") / path.name))
 
         expected_video = {
-            video_dir / f"{task}_{instance_id}_{rollout_id}.mp4"
-            for rollout_id in range(num_rollouts)
+            video_dir / f"{task}_{instance_id}_{spec['rollout_id']}.mp4"
+            for spec in specs
         }
+        required_video = set()
+        for spec in specs:
+            rollout_id = spec["rollout_id"]
+            if spec["video"] == VIDEO_REQUIRED or (
+                spec["video"] == VIDEO_REQUIRED_IF_ELIGIBLE
+                and cls._result_is_metric_eligible(results[rollout_id])
+            ):
+                required_video.add(
+                    video_dir / f"{task}_{instance_id}_{rollout_id}.mp4"
+                )
         actual_video = (
             set(video_dir.glob(f"{task}_{instance_id}_*.mp4"))
             if video_dir.is_dir()
             else set()
         )
-        if require_videos and actual_video != expected_video:
-            missing = sorted(str(path) for path in expected_video - actual_video)
-            unexpected = sorted(str(path) for path in actual_video - expected_video)
+        missing = sorted(str(path) for path in required_video - actual_video)
+        unexpected = sorted(str(path) for path in actual_video - expected_video)
+        if missing or unexpected:
             raise ArtifactValidationError(
                 f"rollout video set mismatch: missing={missing}, unexpected={unexpected}"
             )
-        if not require_videos and not actual_video.issubset(expected_video):
-            unexpected = sorted(str(path) for path in actual_video - expected_video)
-            raise ArtifactValidationError(f"unexpected rollout videos: {unexpected}")
         for path in sorted(actual_video):
             if path.stat().st_size <= 0:
                 raise ArtifactValidationError(f"rollout video is empty: {path}")
@@ -546,17 +666,22 @@ class EvaluationQueue:
         lease: JobLease,
         canonical_task_dir: str | Path,
         *,
-        num_rollouts: int,
-        require_videos: bool,
+        num_rollouts: int | None = None,
+        require_videos: bool | None = None,
+        rollout_specs: Sequence[Mapping[str, object]] | None = None,
         provenance: dict | None = None,
     ) -> None:
         canonical_task_dir = Path(canonical_task_dir).expanduser().resolve()
+        validation = {
+            "num_rollouts": num_rollouts,
+            "require_videos": require_videos,
+            "rollout_specs": rollout_specs,
+        }
         staged = self.validate_artifacts(
             lease.attempt_dir,
             task=lease.task,
             instance_id=lease.instance_id,
-            num_rollouts=num_rollouts,
-            require_videos=require_videos,
+            **validation,
         )
         with self._immediate() as connection:
             row = self._assert_lease(connection, lease)
@@ -566,8 +691,7 @@ class EvaluationQueue:
                 canonical_task_dir,
                 task=lease.task,
                 instance_id=lease.instance_id,
-                num_rollouts=num_rollouts,
-                require_videos=require_videos,
+                **validation,
             )
             self._mark_succeeded(connection, row, lease, provenance)
 
@@ -576,18 +700,23 @@ class EvaluationQueue:
         lease: JobLease,
         canonical_task_dir: str | Path,
         *,
-        num_rollouts: int,
-        require_videos: bool,
+        num_rollouts: int | None = None,
+        require_videos: bool | None = None,
+        rollout_specs: Sequence[Mapping[str, object]] | None = None,
         provenance: dict | None = None,
     ) -> bool:
         canonical_task_dir = Path(canonical_task_dir).expanduser().resolve()
+        validation = {
+            "num_rollouts": num_rollouts,
+            "require_videos": require_videos,
+            "rollout_specs": rollout_specs,
+        }
         try:
             self.validate_artifacts(
                 canonical_task_dir,
                 task=lease.task,
                 instance_id=lease.instance_id,
-                num_rollouts=num_rollouts,
-                require_videos=require_videos,
+                **validation,
             )
         except ArtifactValidationError:
             try:
@@ -595,16 +724,14 @@ class EvaluationQueue:
                     lease.attempt_dir,
                     task=lease.task,
                     instance_id=lease.instance_id,
-                    num_rollouts=num_rollouts,
-                    require_videos=require_videos,
+                    **validation,
                 )
             except ArtifactValidationError:
                 return False
             self.publish(
                 lease,
                 canonical_task_dir,
-                num_rollouts=num_rollouts,
-                require_videos=require_videos,
+                **validation,
                 provenance={"reconciled": True, **(provenance or {})},
             )
             return True
@@ -670,8 +797,12 @@ class EvaluationQueue:
         output_path: str | Path,
         *,
         model: str,
-        num_rollouts: int,
-        require_videos: bool,
+        num_rollouts: int | None = None,
+        require_videos: bool | None = None,
+        rollout_specs_by_job: Mapping[
+            tuple[str, int], int | Sequence[Mapping[str, object]]
+        ]
+        | None = None,
     ) -> dict:
         results_root = Path(results_root).expanduser().resolve()
         output_path = Path(output_path).expanduser().resolve()
@@ -681,25 +812,72 @@ class EvaluationQueue:
             raise RuntimeError(
                 f"cannot create result manifest with {len(incomplete)} incomplete jobs"
             )
+
+        job_keys = {(job["task"], job["instance_id"]) for job in snapshot["jobs"]}
+        if rollout_specs_by_job is not None:
+            provided_keys = set(rollout_specs_by_job)
+            if provided_keys != job_keys:
+                missing = sorted(job_keys - provided_keys)
+                unexpected = sorted(provided_keys - job_keys, key=repr)
+                raise ValueError(
+                    "rollout_specs_by_job keys do not match queue jobs: "
+                    f"missing={missing}, unexpected={unexpected}"
+                )
+
         rollouts = []
         for job in snapshot["jobs"]:
+            job_key = (job["task"], job["instance_id"])
+            if rollout_specs_by_job is None:
+                specs = self._normalize_rollout_specs(
+                    num_rollouts=num_rollouts,
+                    require_videos=require_videos,
+                    rollout_specs=None,
+                )
+                validation = {
+                    "num_rollouts": num_rollouts,
+                    "require_videos": require_videos,
+                }
+            else:
+                job_rollouts = rollout_specs_by_job[job_key]
+                if isinstance(job_rollouts, int) and not isinstance(job_rollouts, bool):
+                    specs = self._normalize_rollout_specs(
+                        num_rollouts=job_rollouts,
+                        require_videos=require_videos,
+                        rollout_specs=None,
+                    )
+                    validation = {
+                        "num_rollouts": job_rollouts,
+                        "require_videos": require_videos,
+                    }
+                else:
+                    specs = self._normalize_rollout_specs(
+                        num_rollouts=None,
+                        require_videos=None,
+                        rollout_specs=job_rollouts,
+                    )
+                    validation = {"rollout_specs": job_rollouts}
+
             task_dir = results_root / model / job["task"]
             self.validate_artifacts(
                 task_dir,
                 task=job["task"],
                 instance_id=job["instance_id"],
-                num_rollouts=num_rollouts,
-                require_videos=require_videos,
+                **validation,
             )
-            for rollout_id in range(num_rollouts):
+            for spec in specs:
+                rollout_id = spec["rollout_id"]
                 stem = f"{job['task']}_{job['instance_id']}_{rollout_id}"
+                json_path = task_dir / "json" / f"{stem}.json"
+                result = json.loads(json_path.read_text())
                 record = {
                     "task": job["task"],
                     "instance_id": job["instance_id"],
                     "rollout_id": rollout_id,
-                    "json": _artifact(task_dir / "json" / f"{stem}.json", results_root),
+                    "json": _artifact(json_path, results_root),
                     "provenance": job["provenance"],
                 }
+                if "sample_id" in result:
+                    record["sample_id"] = result["sample_id"]
                 video_path = task_dir / "videos" / f"{stem}.mp4"
                 record["video"] = (
                     _artifact(video_path, results_root) if video_path.exists() else None
