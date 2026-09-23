@@ -42,9 +42,26 @@ class Pi0Config(_model.BaseModelConfig):
     max_subtask_len: int = 64  # Includes EOS.
     subtask_loss_chunk_size: int = 8
 
+    # Historical SigLIP features modulate only the action expert (JAX).
+    framesamp_modul: bool = False
+    memory_num_frames: int = 32
+    memory_grid_size: int = 4
+    # Sample on the original control-step clock, independently of action chunks.
+    memory_frame_stride: int = 16
+    memory_camera: str = "base_0_rgb"
+
     pytorch_compile_mode: str | None = "max-autotune"
 
     def __post_init__(self):
+        if self.framesamp_modul:
+            if not self.pi05:
+                raise ValueError("FrameSamp + Modul requires pi05=True.")
+            if self.memory_num_frames < 1 or self.memory_frame_stride < 1:
+                raise ValueError("Memory frame count and stride must be positive.")
+            if self.memory_grid_size not in (1, 2, 4, 8, 16):
+                raise ValueError("memory_grid_size must divide the SigLIP 16x16 grid.")
+            if self.memory_camera not in _model.IMAGE_KEYS:
+                raise ValueError("Unknown memory_camera.")
         if self.subtask_action_conditioning not in ("task_and_subtask", "subtask_only"):
             raise ValueError("Unknown subtask_action_conditioning.")
         if self.max_token_len is None:
@@ -99,6 +116,16 @@ class Pi0Config(_model.BaseModelConfig):
                     "right_wrist_0_rgb": image_mask_spec,
                 },
                 state=jax.ShapeDtypeStruct([batch_size, self.action_dim], jnp.float32),
+                memory_features=(jax.ShapeDtypeStruct(
+                    [batch_size, self.memory_num_frames * self.memory_grid_size**2,
+                     _gemma.get_config(self.paligemma_variant).width], jnp.float32
+                ) if self.framesamp_modul else None),
+                memory_positions=(jax.ShapeDtypeStruct(
+                    [batch_size, self.memory_num_frames * self.memory_grid_size**2, 3], jnp.int32
+                ) if self.framesamp_modul else None),
+                memory_mask=(jax.ShapeDtypeStruct(
+                    [batch_size, self.memory_num_frames * self.memory_grid_size**2], jnp.bool_
+                ) if self.framesamp_modul else None),
                 tokenized_prompt=jax.ShapeDtypeStruct([batch_size, self.max_token_len], jnp.int32),
                 tokenized_prompt_mask=jax.ShapeDtypeStruct([batch_size, self.max_token_len], bool),
                 token_ar_mask=(

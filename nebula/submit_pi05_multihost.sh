@@ -175,6 +175,14 @@ EXPECTED_TASK_INDICES="${EXPECTED_TASK_INDICES:-}"
 EXPECTED_TRAINING_SAMPLES="${EXPECTED_TRAINING_SAMPLES:-}"
 RESUME="${RESUME:-0}"
 SUBTASK_ACTION_CONDITIONING="${SUBTASK_ACTION_CONDITIONING:-}"
+FRAMESAMP_MODUL="${FRAMESAMP_MODUL:-0}"
+MEMORY_CACHE_DIR="${MEMORY_CACHE_DIR:-}"
+if [[ "$FRAMESAMP_MODUL" != 0 && "$FRAMESAMP_MODUL" != 1 ]]; then
+    echo "FRAMESAMP_MODUL must be 0 or 1" >&2; exit 2
+fi
+if [[ "$FRAMESAMP_MODUL" == 1 && -z "$MEMORY_CACHE_DIR" ]]; then
+    echo "Set MEMORY_CACHE_DIR to a completed cache mounted at the same path on every worker." >&2; exit 2
+fi
 case "$SUBTASK_ACTION_CONDITIONING" in
     ""|task_and_subtask|subtask_only) ;;
     *) echo "SUBTASK_ACTION_CONDITIONING must be task_and_subtask or subtask_only" >&2; exit 2 ;;
@@ -363,6 +371,8 @@ cp -a \
 cp -a "$REPO_ROOT/openpi/scripts/compute_norm_stats.py" "$BUNDLE_DIR/openpi/scripts/"
 cp -a \
     "$REPO_ROOT/openpi/scripts/b1k/train_b1k.py" \
+    "$REPO_ROOT/openpi/scripts/b1k/cache_frame_memory.py" \
+    "$REPO_ROOT/openpi/scripts/b1k/check_frame_memory.py" \
     "$REPO_ROOT/openpi/scripts/b1k/check_subtask_data.py" \
     "$REPO_ROOT/openpi/scripts/b1k/distributed_preflight.py" \
     "$BUNDLE_DIR/openpi/scripts/b1k/"
@@ -395,6 +405,13 @@ write_setting() { printf 'export %s=%q\n' "$1" "$2"; }
     write_setting OUTPUT_ROOT "$OUTPUT_ROOT"
     write_setting RESUME "$RESUME"
     write_setting SUBTASK_ACTION_CONDITIONING "$SUBTASK_ACTION_CONDITIONING"
+    write_setting FRAMESAMP_MODUL "$FRAMESAMP_MODUL"
+    write_setting MEMORY_CACHE_DIR "$MEMORY_CACHE_DIR"
+    write_setting MEMORY_NUM_FRAMES "${MEMORY_NUM_FRAMES:-32}"
+    write_setting MEMORY_GRID_SIZE "${MEMORY_GRID_SIZE:-4}"
+    write_setting MEMORY_FRAME_STRIDE "${MEMORY_FRAME_STRIDE:-16}"
+    write_setting MEMORY_CAMERA "${MEMORY_CAMERA:-base_0_rgb}"
+    write_setting INIT_PARAMS "${INIT_PARAMS:-}"
     write_setting PROCESS_COUNT "$PROCESS_COUNT"
     write_setting EXPECTED_LOCAL_DEVICES "$EXPECTED_LOCAL_DEVICES"
     write_setting EXPECTED_GLOBAL_DEVICES "$EXPECTED_GLOBAL_DEVICES"

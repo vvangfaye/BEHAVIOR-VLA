@@ -17,6 +17,7 @@ from openpi import transforms as _transforms
 from openpi.models import model as _model
 from openpi.shared import array_typing as at
 from openpi.shared import nnx_utils
+from openpi.shared.frame_memory import FIELDS as MEMORY_FIELDS
 
 BasePolicy: TypeAlias = _base_policy.BasePolicy
 
@@ -54,6 +55,15 @@ class Policy(BasePolicy):
         self._metadata = metadata or {}
         self._is_pytorch_model = is_pytorch
         self._pytorch_device = pytorch_device
+        self._frame_memory = None
+        self._external_memory_observations = False
+        self._pending_memory_ms = 0.0
+        if getattr(model, "framesamp_modul", False):
+            if is_pytorch:
+                raise ValueError("FrameSamp + Modul is supported only by the JAX policy.")
+            from openpi.policies.frame_memory import FrameMemoryBuffer
+            self._frame_memory = FrameMemoryBuffer(model)
+            self._metadata = {**self._metadata, "framesamp_modul": True, "memory_frame_stride": model.memory_frame_stride}
 
         if self._is_pytorch_model:
             self._model = self._model.to(pytorch_device)
@@ -64,11 +74,38 @@ class Policy(BasePolicy):
             self._sample_actions = nnx_utils.module_jit(model.sample_actions)
             self._rng = rng if rng is not None else jax.random.key(0)
 
+    def reset(self):
+        if self._frame_memory is not None:
+            self._frame_memory.reset()
+        self._external_memory_observations = False
+        self._pending_memory_ms = 0.0
+
+    def observe_memory(self, obs, *, step):
+        """B1K supplies every control observation, including between action requests."""
+        if self._frame_memory is None:
+            return
+        camera_index = _model.IMAGE_KEYS.index(self._frame_memory.camera)
+        started = time.monotonic()
+        self._frame_memory.add(obs[f"observation/image_{camera_index}"], step)
+        self._pending_memory_ms += (time.monotonic() - started) * 1000
+        self._external_memory_observations = True
+
     @override
     def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
         # Make a copy since transformations may modify the inputs in place.
         inputs = jax.tree.map(lambda x: x, obs)
         inputs = self._input_transform(inputs)
+        memory_started = time.monotonic()
+        if self._frame_memory is not None:
+            supplied = [key in inputs for key in MEMORY_FIELDS]
+            if any(supplied) and not all(supplied):
+                raise ValueError("Provide all memory fields together for offline inference.")
+            if not any(supplied):
+                if not self._external_memory_observations:
+                    self._frame_memory.add(inputs["image"][self._frame_memory.camera], self._frame_memory.next_step)
+                inputs.update(self._frame_memory.pack())
+        memory_ms = (time.monotonic() - memory_started) * 1000 + self._pending_memory_ms
+        self._pending_memory_ms = 0.0
         if not self._is_pytorch_model:
             # Make a batch and convert to jax.Array.
             inputs = jax.tree.map(lambda x: jnp.asarray(x)[np.newaxis, ...], inputs)
@@ -105,6 +142,8 @@ class Policy(BasePolicy):
         outputs["policy_timing"] = {
             "infer_ms": model_time * 1000,
         }
+        if self._frame_memory is not None:
+            outputs["policy_timing"]["memory_ms"] = memory_ms
         return outputs
 
     @property
@@ -129,6 +168,13 @@ class PolicyRecorder(_base_policy.BasePolicy):
 
     def reset(self):
         self._policy.reset()
+
+    def observe_memory(self, obs, *, step):
+        self._policy.observe_memory(obs, step=step)
+
+    def reset_subtask(self):
+        if hasattr(self._policy, "reset_subtask"):
+            self._policy.reset_subtask()
 
     @override
     def infer(self, obs: dict) -> dict:  # type: ignore[misc]

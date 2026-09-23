@@ -34,6 +34,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
+from openpi.models.frame_memory import MemoryModulator
 import openpi.models.lora as lora
 import openpi.shared.array_typing as at
 import openpi.training.sharding as sharding
@@ -288,9 +289,10 @@ class Block(nn.Module):
 
     dropout: float = 0.0
     dropout_bdims: tuple[int, ...] = ()
+    framesamp_modul: bool = False
 
     @nn.compact
-    def __call__(self, xs, kv_cache, positions, attn_mask, adarms_cond, deterministic=True):  # noqa: FBT002
+    def __call__(self, xs, kv_cache, positions, attn_mask, adarms_cond, memory, memory_mask, deterministic=True):  # noqa: FBT002
         xs = sharding.activation_sharding_constraint(xs)
         drop = nn.Dropout(self.dropout, self.dropout_bdims) if self.dropout else lambda x, _: x
 
@@ -315,6 +317,10 @@ class Block(nn.Module):
         gates = []
         for i, (x, config) in enumerate(zip(xs, self.configs, strict=True)):
             if x is not None:
+                if self.framesamp_modul and i == len(self.configs) - 1:
+                    if memory is None or memory_mask is None:
+                        raise ValueError("Action expert requires memory features and mask.")
+                    x = MemoryModulator(config.width, name="memory_modulator")(x, memory, memory_mask)  # noqa: PLW2901
                 x, gate = RMSNorm(name=_name("pre_ffw_norm", i))(x, adarms_cond[i])  # noqa: PLW2901
                 x = lora.FeedForward(  # noqa: PLW2901
                     features=config.width,
@@ -346,6 +352,7 @@ class Module(nn.Module):
     dropout: float = 0.0
     dropout_bdims: tuple[int, ...] = ()  # Every float is dropped independently.
     adarms: bool = False
+    framesamp_modul: bool = False
 
     def setup(self):
         # all experts must have the same depth
@@ -359,7 +366,7 @@ class Module(nn.Module):
         block_cls = nn.remat(
             Block,
             prevent_cse=False,
-            static_argnums=(5,),  # 0=self, 6=deterministic
+            static_argnums=(7,),  # deterministic, after memory and memory_mask
             policy=jax.checkpoint_policies.nothing_saveable,
         )
         self.layers = nn.scan(
@@ -372,12 +379,15 @@ class Module(nn.Module):
                 nn.broadcast,
                 nn.broadcast,
                 nn.broadcast,
-            ),  # 0=kv_cache, 1=positions, 2=mask, 3=adarms_cond, 4=deterministic
+                nn.broadcast,
+                nn.broadcast,
+            ),  # kv_cache is scanned; positions/masks/conditioning/memory are broadcast.
             length=self.configs[0].depth,
         )(
             configs=self.configs,
             dropout=self.dropout,
             dropout_bdims=self.dropout_bdims,
+            framesamp_modul=self.framesamp_modul,
         )
         self.final_norms = [RMSNorm(name=_name("final_norm", i)) for i in range(len(self.configs))]
 
@@ -401,13 +411,15 @@ class Module(nn.Module):
         *,
         kv_cache: KVCache | None = None,
         deterministic: bool = True,
+        memory=None,
+        memory_mask=None,
     ) -> tuple[Sequence[at.Float[at.Array, "b _t _d"] | None], KVCache]:
         embedded = jax.tree.map(lambda e: e.astype(self.embed_dtype), embedded)
         mask = jnp.asarray(mask)[:, None, :, :]
         if adarms_cond is None:
             adarms_cond = [None] * len(self.configs)
 
-        embedded, kv_cache = self.layers(embedded, kv_cache, positions, mask, adarms_cond, deterministic)
+        embedded, kv_cache = self.layers(embedded, kv_cache, positions, mask, adarms_cond, memory, memory_mask, deterministic)
 
         assert all(e.dtype == jnp.dtype(self.embed_dtype) for e in embedded if e is not None)
 
@@ -423,6 +435,8 @@ class Module(nn.Module):
             jnp.zeros((1, len(self.configs)), dtype=jnp.int32),
             jnp.zeros((1, len(self.configs), len(self.configs)), dtype=bool),
             adarms_cond=[jnp.zeros((1, c.width)) if u else None for u, c in zip(use_adarms, self.configs, strict=True)],
+            memory=jnp.zeros((1, 1, self.configs[-1].width)) if self.framesamp_modul else None,
+            memory_mask=jnp.ones((1, 1), dtype=bool) if self.framesamp_modul else None,
         )
 
 

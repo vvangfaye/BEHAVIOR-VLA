@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import openpi.models.model as _model
 import openpi.policies.policy as _policy
 from openpi.policies.subtask_policy import SubtaskPolicy
+from openpi.shared import frame_memory
 from openpi.shared import subtask_contract
 import openpi.shared.download as download
 from openpi.training import checkpoints as _checkpoints
@@ -50,6 +51,18 @@ def create_trained_policy(
     """
     repack_transforms = repack_transforms or transforms.Group()
     checkpoint_dir = download.maybe_download(str(checkpoint_dir))
+    memory_contract = frame_memory.load(checkpoint_dir / "assets")
+    if memory_contract is not None:
+        expected = frame_memory.model_contract(train_config.model)
+        if expected is not None and any(memory_contract[key] != value for key, value in expected.items()):
+            raise ValueError("Requested memory settings disagree with checkpoint metadata.")
+        train_config = dataclasses.replace(train_config, model=dataclasses.replace(
+            train_config.model, framesamp_modul=True, memory_num_frames=memory_contract["num_frames"],
+            memory_grid_size=memory_contract["grid_size"], memory_frame_stride=memory_contract["frame_stride"],
+            memory_camera=memory_contract["camera"],
+        ))
+    elif getattr(train_config.model, "framesamp_modul", False):
+        raise ValueError("Memory inference requires a trained checkpoint with frame_memory.json metadata.")
 
     if getattr(train_config.model, "train_subtask_prediction", False):
         saved_mode = subtask_contract.load(checkpoint_dir / "assets")

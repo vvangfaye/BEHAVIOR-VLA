@@ -8,11 +8,13 @@ import jax
 import jax.numpy as jnp
 from typing_extensions import override
 
+from openpi.models import frame_memory
 from openpi.models import model as _model
 from openpi.models import pi0_config
 import openpi.models.gemma as _gemma
 import openpi.models.siglip as _siglip
 from openpi.shared import array_typing as at
+from openpi.shared import image_tools
 
 logger = logging.getLogger("openpi")
 
@@ -73,6 +75,11 @@ class Pi0(_model.BaseModel):
         self.subtask_loss_weight = config.subtask_loss_weight
         self.max_subtask_len = config.max_subtask_len
         self.subtask_loss_chunk_size = config.subtask_loss_chunk_size
+        self.framesamp_modul = config.framesamp_modul
+        self.memory_num_frames = config.memory_num_frames
+        self.memory_grid_size = config.memory_grid_size
+        self.memory_frame_stride = config.memory_frame_stride
+        self.memory_camera = config.memory_camera
         paligemma_config = _gemma.get_config(config.paligemma_variant)
         action_expert_config = _gemma.get_config(config.action_expert_variant)
         # TODO: rewrite gemma in NNX. For now, use bridge.
@@ -81,6 +88,7 @@ class Pi0(_model.BaseModel):
                 configs=[paligemma_config, action_expert_config],
                 embed_dtype=config.dtype,
                 adarms=config.pi05,
+                framesamp_modul=config.framesamp_modul,
             )
         )
         llm.lazy_init(rngs=rngs, method="init", use_adarms=[False, True] if config.pi05 else [False, False])
@@ -95,6 +103,10 @@ class Pi0(_model.BaseModel):
         )
         img.lazy_init(next(iter(config.fake_obs().images.values())), train=False, rngs=rngs)
         self.PaliGemma = nnx.Dict(llm=llm, img=img)
+        if self.framesamp_modul:
+            self.memory_pos_proj = nnx.Linear(768, 768, rngs=rngs, dtype=config.dtype)
+            self.memory_proj = nnx.Linear(paligemma_config.width + 768, action_expert_config.width,
+                                          rngs=rngs, dtype=config.dtype)
         self.action_in_proj = nnx.Linear(config.action_dim, action_expert_config.width, rngs=rngs)
         if config.pi05:
             self.time_mlp_in = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
@@ -107,6 +119,29 @@ class Pi0(_model.BaseModel):
 
         # This attribute gets automatically set by model.train() and model.eval().
         self.deterministic = True
+
+    def encode_memory_images(self, images):
+        """Frozen encoder shared by the cache exporter and online history buffer."""
+        if images.dtype == jnp.uint8:
+            images = images.astype(jnp.float32) / 127.5 - 1
+        images = image_tools.resize_with_pad(images, 224, 224)
+        features, _ = self.PaliGemma.img(images, train=False)
+        return jax.lax.stop_gradient(frame_memory.pool_tokens(features, self.memory_grid_size))
+
+    def embed_memory(self, observation):
+        if not self.framesamp_modul:
+            return {}
+        features, positions, mask = observation.memory_features, observation.memory_positions, observation.memory_mask
+        if features is None or positions is None or mask is None:
+            raise ValueError("FrameSamp + Modul requires memory_features, memory_positions and memory_mask.")
+        budget = self.memory_num_frames * self.memory_grid_size**2
+        if features.shape[1] != budget or mask.shape != features.shape[:2] or positions.shape != (*mask.shape, 3):
+            raise ValueError("Memory shapes disagree with the configured fixed token budget.")
+        features = jax.lax.stop_gradient(jnp.where(mask[..., None], features, 0))
+        positions = jnp.where(mask[..., None], positions, 0)
+        pos = nnx.silu(self.memory_pos_proj(frame_memory.position_features(positions)))
+        memory = self.memory_proj(jnp.concatenate([features, pos], axis=-1))
+        return {"memory": memory, "memory_mask": mask}
 
     @at.typecheck
     def embed_prefix(
@@ -247,7 +282,8 @@ class Pi0(_model.BaseModel):
         attn_mask = make_attn_mask(input_mask, ar_mask)
         positions = jnp.cumsum(input_mask, axis=1) - 1
         (prefix_out, suffix_out), _ = self.PaliGemma.llm(
-            [prefix_tokens, suffix_tokens], mask=attn_mask, positions=positions, adarms_cond=[None, adarms_cond]
+            [prefix_tokens, suffix_tokens], mask=attn_mask, positions=positions, adarms_cond=[None, adarms_cond],
+            **self.embed_memory(observation),
         )
         v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
 
@@ -429,6 +465,7 @@ class Pi0(_model.BaseModel):
         prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
         positions = jnp.cumsum(prefix_mask, axis=1) - 1
         _, kv_cache = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
+        memory_kwargs = self.embed_memory(observation)
 
         def step(carry):
             x_t, time = carry
@@ -458,6 +495,7 @@ class Pi0(_model.BaseModel):
                 positions=positions,
                 kv_cache=kv_cache,
                 adarms_cond=[None, adarms_cond],
+                **memory_kwargs,
             )
             assert prefix_out is None
             v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])

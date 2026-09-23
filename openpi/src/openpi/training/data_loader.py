@@ -218,6 +218,13 @@ def create_b1k_dataset(data_config: _config.DataConfig, action_horizon: int) -> 
 
     if data_config.frame_stride < 1:
         raise ValueError(f"frame_stride must be >= 1, got {data_config.frame_stride}")
+    if data_config.memory_contract is not None:
+        from openpi.training.frame_memory_data import CachedFrameMemory
+        if isinstance(data_config.repo_id, list) or not data_config.memory_cache_dir:
+            raise ValueError("FrameSamp training requires one dataset root and --data.memory-cache-dir.")
+        dataset = TransformedDataset(dataset, [CachedFrameMemory(
+            data_config.memory_cache_dir, data_config.memory_contract, data_config.dataset_root, data_config.episodes_index
+        )])
     if data_config.prompt_from_task:
         meta_root = (
             os.path.join(data_config.dataset_root, data_config.repo_id[0])

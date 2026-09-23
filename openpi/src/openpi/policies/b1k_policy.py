@@ -6,6 +6,7 @@ import numpy as np
 from openpi import transforms
 from openpi.configs.robots.base_config import RobotConfig
 from openpi.models import model as _model
+from openpi.shared.frame_memory import FIELDS as MEMORY_FIELDS
 
 
 def make_b1k_example() -> dict:
@@ -100,6 +101,9 @@ class B1KInputs(transforms.DataTransformFn):
             inputs["prompt"] = data["prompt"]
         if "subtask" in data:
             inputs["subtask"] = data["subtask"]
+        for key in MEMORY_FIELDS:
+            if key in data:
+                inputs[key] = data[key]
 
         return inputs
 

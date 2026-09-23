@@ -22,6 +22,8 @@ import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.b1k_policy as b1k_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
+from openpi.shared import frame_memory
+from openpi.shared import nnx_utils
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -120,6 +122,8 @@ class DataConfig:
     subtask_whole_task_prob: float = 0.0
     # Derived from the model config for the B1K loader. Keeps task and label separate.
     subtask_prediction: bool = False
+    memory_cache_dir: str | None = None
+    memory_contract: dict[str, Any] | None = None
 
 
 class GroupFactory(Protocol):
@@ -408,6 +412,7 @@ class LeRobotB1KDataConfig(DataConfigFactory):
     frame_stride: int = 1
     subtask_prompts_path: str | None = None
     subtask_whole_task_prob: float = 0.0
+    memory_cache_dir: str | None = None
 
     def _build_delta_mappings(self, robot_config) -> list[tuple[list[int], list[int]]]:
         state_slices = []
@@ -438,6 +443,12 @@ class LeRobotB1KDataConfig(DataConfigFactory):
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         robot_config = ROBOT_REGISTRY[self.robot_config_name]
         subtask_prediction = getattr(model_config, "train_subtask_prediction", False)
+        memory_contract = frame_memory.model_contract(model_config)
+        if memory_contract is not None and self.memory_cache_dir:
+            from openpi.training.frame_memory_data import read_manifest
+            manifest = read_manifest(self.memory_cache_dir)
+            memory_contract = {**memory_contract, "encoder_sha256": manifest["encoder_sha256"],
+                               "dataset_sha256": manifest["dataset_sha256"]}
         if subtask_prediction and self.subtask_whole_task_prob != 0:
             raise ValueError("Joint subtask training requires subtask_whole_task_prob=0.")
 
@@ -458,6 +469,8 @@ class LeRobotB1KDataConfig(DataConfigFactory):
         )
         if subtask_prediction:
             repack_mapping["subtask"] = "subtask"
+        if memory_contract is not None:
+            repack_mapping.update({key: key for key in frame_memory.FIELDS})
 
         repack_transform = _transforms.Group(inputs=[_transforms.RepackTransform(repack_mapping)])
 
@@ -505,6 +518,8 @@ class LeRobotB1KDataConfig(DataConfigFactory):
             subtask_prompts_path=subtask_path,
             subtask_whole_task_prob=self.subtask_whole_task_prob,
             subtask_prediction=subtask_prediction,
+            memory_cache_dir=self.memory_cache_dir,
+            memory_contract=memory_contract,
         )
 
 
@@ -719,6 +734,9 @@ class TrainConfig:
         return nnx.All(nnx.Param, nnx.Not(self.freeze_filter))
 
     def __post_init__(self) -> None:
+        if getattr(self.model, "framesamp_modul", False):
+            # Cached features must continue to match the live vision encoder.
+            object.__setattr__(self, "freeze_filter", nnx.Any(self.freeze_filter, nnx_utils.PathRegex("PaliGemma/img/.*")))
         if self.resume and self.overwrite:
             raise ValueError("Cannot resume and overwrite at the same time.")
         if self.val_log_interval is not None:

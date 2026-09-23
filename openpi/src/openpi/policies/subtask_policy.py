@@ -60,6 +60,10 @@ class SubtaskPolicy(Policy):
         self.reset()
 
     def reset(self):
+        super().reset()
+        self.reset_subtask()
+
+    def reset_subtask(self):
         self._cached_tokens = None
         self._last_prompt = None
         self._calls_since_generation = 0
@@ -80,9 +84,9 @@ class SubtaskPolicy(Policy):
             prompt = np.asarray(prompt).item()
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("A non-empty task prompt is required for subtask inference.")
-        if prompt != self._last_prompt:
+        if self._last_prompt is not None and prompt != self._last_prompt:
             self.reset()
-            self._last_prompt = prompt
+        self._last_prompt = prompt
         state = inputs["state"] if self._tokenizer_transform.discrete_state_input else None
         limit = self._tokenizer_transform.max_subtask_len
         generation_ms = 0.0

@@ -299,6 +299,12 @@ def init_train_state(
         return train_state_shape, state_sharding
 
     partial_params = _load_weights_and_validate(config.weight_loader, train_state_shape.params.to_pure_dict())
+    if getattr(config.model, "framesamp_modul", False):
+        from openpi.shared.frame_memory import encoder_fingerprint
+        from openpi.training.frame_memory_data import read_manifest
+        manifest = read_manifest(config.data.memory_cache_dir)
+        if encoder_fingerprint(partial_params["PaliGemma"]["img"]) != manifest["encoder_sha256"]:
+            raise ValueError("Historical features were cached with different SigLIP weights. Rebuild the cache from INIT_PARAMS.")
     replicated_sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
 
     # Initialize the train state and mix in the partial params.

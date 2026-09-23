@@ -29,6 +29,9 @@ joint 训练脚本现在默认 `SUBTASK_ACTION_CONDITIONING=subtask_only`，对�
 训练速度和峰值显存需要在实际 GPU 上测量。此改动对齐层级条件关系，不代表复现论文的
 完整预训练、多数据源混合配方，也不包含历史记忆或 subtask 完成判别器。
 
+可选的视觉历史记忆已经接入 JAX action expert，默认关闭。启用方法、缓存生成和
+训练/推理成本说明见 [FrameSamp + Modul](frame_memory_training.md)；它保留本文的 subtask 联合监督。
+
 ### 与旧 checkpoint 的兼容
 
 - 旧 joint 模式为 `SUBTASK_ACTION_CONDITIONING=task_and_subtask`，动作仍可见完整任务。

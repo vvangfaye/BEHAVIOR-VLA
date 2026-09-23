@@ -26,16 +26,17 @@ from openpi.training import checkpoints
 from openpi.training import config as config_lib
 from openpi.training import data_loader
 from openpi.training import utils
+from openpi.training.frame_memory_data import dataset_fingerprint
 from scripts import train
 from scripts.b1k import train_b1k
 
 pytest_plugins = ["openpi.models.subtask_test"]
 
 
-@pytest.mark.parametrize("framework", ["jax", "pytorch"])
+@pytest.mark.parametrize(("framework", "memory_enabled"), [("jax", False), ("pytorch", False), ("jax", True)])
 @pytest.mark.parametrize("conditioning", ["task_and_subtask", "subtask_only"])
 def test_b1k_pipeline_preserves_task_and_original_frame_indices(
-    tmp_path, monkeypatch, tokenizer, framework, conditioning
+    tmp_path, monkeypatch, tokenizer, framework, conditioning, memory_enabled
 ):
     if framework == "pytorch":
 
@@ -130,13 +131,30 @@ def test_b1k_pipeline_preserves_task_and_original_frame_indices(
         max_token_len=128,
         action_horizon=2,
         subtask_action_conditioning=conditioning,
+        framesamp_modul=memory_enabled,
+        memory_num_frames=3,
+        memory_grid_size=1,
+        memory_frame_stride=2,
     )
+    cache_dir = None
+    if memory_enabled:
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        manifest = {"version": 1, "pool": "mean", "dtype": "float16", "feature_width": 2048,
+                    "grid_size": 1, "frame_stride": 2, "camera": "base_0_rgb", "encoder_sha256": "a" * 64,
+                    "dataset_sha256": dataset_fingerprint(tmp_path)}
+        (cache_dir / "manifest.json").write_text(json.dumps(manifest))
+        (cache_dir / "episode_00000042.json").write_text(json.dumps(
+            {"episode_index": 42, "length": 10, "encoder_sha256": "a" * 64}))
+        np.save(cache_dir / "episode_00000042.npy", np.broadcast_to(
+            np.arange(0, 10, 2)[:, None, None], (5, 1, 2048)).astype(np.float16))
     factory = dataclasses.replace(
         config.data,
         repo_id="test/b1k",
         dataset_root=str(tmp_path),
         episodes_index=[42],
         frame_stride=3,
+        memory_cache_dir=str(cache_dir) if cache_dir else None,
         base_config=dataclasses.replace(config.data.base_config, data_cls=Frames),
     )
     data_config = factory.create(tmp_path / "assets", model_config)
@@ -150,6 +168,10 @@ def test_b1k_pipeline_preserves_task_and_original_frame_indices(
     assert converted["state"].shape == (32,)
     assert converted["actions"].shape == (2, 32)
     assert converted["token_loss_mask"].any()
+    if memory_enabled:
+        np.testing.assert_array_equal(converted["memory_positions"][:, 0], [0, 2, 6])
+        np.testing.assert_array_equal(converted["memory_features"][:, 0], [0, 2, 6])
+        assert converted["memory_mask"].all()
     if conditioning == "subtask_only":
         action_text = tokenizer.decode_subtask(
             converted["action_tokenized_prompt"][converted["action_tokenized_prompt_mask"]]

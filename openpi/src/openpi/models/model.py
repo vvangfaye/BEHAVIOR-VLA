@@ -109,6 +109,9 @@ class Observation(Generic[ArrayT]):
     # state + current subtask, never the complete task or contextualized caches.
     action_tokenized_prompt: at.Int[ArrayT, "*b l"] | None = None
     action_tokenized_prompt_mask: at.Bool[ArrayT, "*b l"] | None = None
+    memory_features: at.Float[ArrayT, "*b m d"] | None = None
+    memory_positions: at.Int[ArrayT, "*b m xyz"] | None = None
+    memory_mask: at.Bool[ArrayT, "*b m"] | None = None
 
     @classmethod
     def from_dict(cls, data: at.PyTree[ArrayT]) -> "Observation[ArrayT]":
@@ -134,6 +137,9 @@ class Observation(Generic[ArrayT]):
             token_loss_mask=data.get("token_loss_mask"),
             action_tokenized_prompt=data.get("action_tokenized_prompt"),
             action_tokenized_prompt_mask=data.get("action_tokenized_prompt_mask"),
+            memory_features=data.get("memory_features"),
+            memory_positions=data.get("memory_positions"),
+            memory_mask=data.get("memory_mask"),
         )
 
     def to_dict(self) -> at.PyTree[ArrayT]:
@@ -227,6 +233,9 @@ def preprocess_observation(
         token_loss_mask=observation.token_loss_mask,
         action_tokenized_prompt=observation.action_tokenized_prompt,
         action_tokenized_prompt_mask=observation.action_tokenized_prompt_mask,
+        memory_features=observation.memory_features,
+        memory_positions=observation.memory_positions,
+        memory_mask=observation.memory_mask,
     )
 
 
@@ -263,6 +272,8 @@ class BaseModelConfig(abc.ABC):
         return nnx.merge(graphdef, state)
 
     def load_pytorch(self, train_config, weight_path: str):
+        if getattr(self, "framesamp_modul", False):
+            raise ValueError("FrameSamp + Modul is currently implemented for JAX only.")
         logger.info(f"train_config: {train_config}")
         model = pi0_pytorch.PI0Pytorch(config=train_config.model)
         safetensors.torch.load_model(model, weight_path)

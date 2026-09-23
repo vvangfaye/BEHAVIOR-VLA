@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import argparse
 import collections
-from collections.abc import Callable, Collection, Sequence
 import dataclasses
 import hashlib
 import json
 import pathlib
 import time
+from collections.abc import Callable, Collection, Sequence
 from typing import Any
 
 import numpy as np
@@ -404,12 +404,29 @@ def build_pi05(args, episode_ids: list[int] | None):
     import openpi.training.config as _config  # noqa: PLC0415
     import openpi.training.data_loader as _dl  # noqa: PLC0415
     import openpi.transforms as _tf  # noqa: PLC0415
+    from openpi.shared import frame_memory  # noqa: PLC0415
+    from openpi.shared.download import maybe_download  # noqa: PLC0415
+    from openpi.training.frame_memory_data import read_manifest  # noqa: PLC0415
 
     cfg = _config.get_config("pi05_b1k")
     model = dataclasses.replace(
         cfg.model,
         train_subtask_prediction=args.subtask_conditioning == "provided",
     )
+    memory = frame_memory.load(maybe_download(str(args.pi05_ckpt)) / "assets")
+    cache_dir = getattr(args, "memory_cache_dir", None)
+    if memory is not None:
+        if cache_dir is None:
+            raise ValueError("Random-frame evaluation of a memory checkpoint requires --memory-cache-dir.")
+        manifest = read_manifest(cache_dir)
+        for key in ("encoder_sha256", "dataset_sha256"):
+            if manifest[key] != memory.get(key):
+                raise ValueError(f"Evaluation memory cache {key} disagrees with the checkpoint.")
+        model = dataclasses.replace(model, framesamp_modul=True, memory_num_frames=memory["num_frames"],
+                                    memory_grid_size=memory["grid_size"], memory_frame_stride=memory["frame_stride"],
+                                    memory_camera=memory["camera"])
+    elif cache_dir is not None:
+        raise ValueError("--memory-cache-dir requires a FrameSamp checkpoint.")
 
     if args.horizon > model.action_horizon:
         raise ValueError(f"--horizon cannot exceed the model action horizon ({model.action_horizon})")
@@ -423,6 +440,7 @@ def build_pi05(args, episode_ids: list[int] | None):
         frame_stride=1,
         subtask_prompts_path=str(args.subtask_prompts) if args.subtask_prompts else None,
         subtask_whole_task_prob=0.0,
+        memory_cache_dir=str(cache_dir) if cache_dir else None,
     )
     cfg = dataclasses.replace(cfg, data=data_factory, model=model)
     data_config = cfg.data.create(cfg.assets_dirs, cfg.model)
@@ -510,6 +528,8 @@ def main() -> None:
     parser.add_argument("--samples-per-subtask", type=int, default=2)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", type=pathlib.Path, required=True)
+    parser.add_argument("--memory-cache-dir", type=pathlib.Path,
+                        help="matching frozen vision cache; required for FrameSamp checkpoints")
     parser.add_argument(
         "--repo-id",
         default="behavior-1k/2026-challenge-demos",
@@ -576,7 +596,9 @@ def main() -> None:
 
         segments = None
         if args.subtask_conditioning != "none":
-            from openpi.training.subtask_data import SubtaskFromSegments  # noqa: PLC0415
+            from openpi.training.subtask_data import (
+                SubtaskFromSegments,  # noqa: PLC0415
+            )
 
             segments = SubtaskFromSegments.from_parquet(
                 args.subtask_prompts,
@@ -716,6 +738,7 @@ def main() -> None:
             "segments_file": artifact_record(args.subtask_prompts),
             "episodes_file": artifact_record(args.episodes_file),
             "sample_keys_file": artifact_record(args.sample_keys_file),
+            "memory_cache_manifest": artifact_record(args.memory_cache_dir / "manifest.json") if args.memory_cache_dir else None,
         },
         "episode_ids": sorted(requested_episode_ids) if requested_episode_ids is not None else None,
         "note": (

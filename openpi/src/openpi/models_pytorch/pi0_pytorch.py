@@ -84,6 +84,8 @@ def make_att_2d_masks(pad_masks, att_masks):
 
 class PI0Pytorch(nn.Module):
     def __init__(self, config):
+        if getattr(config, "framesamp_modul", False):
+            raise ValueError("FrameSamp + Modul is currently implemented for JAX only.")
         super().__init__()
         self.config = config
         self.pi05 = config.pi05

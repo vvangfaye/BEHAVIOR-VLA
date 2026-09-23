@@ -14,6 +14,7 @@ import orbax.checkpoint as ocp
 import orbax.checkpoint.future as future
 
 from openpi.shared import array_typing as at
+from openpi.shared import frame_memory
 from openpi.shared import subtask_contract
 import openpi.shared.normalize as _normalize
 import openpi.training.data_loader as _data_loader
@@ -116,6 +117,7 @@ def save_state(
         # Save the normalization stats.
         data_config = data_loader.data_config()
         subtask_contract.save(directory, subtask_contract.from_data_config(data_config))
+        frame_memory.save(directory, getattr(data_config, "memory_contract", None))
         norm_stats = data_config.norm_stats
         if norm_stats is not None and data_config.asset_id is not None:
             asset_id = data_config.asset_id if isinstance(data_config.asset_id, str) else data_config.asset_id[0]
@@ -139,6 +141,8 @@ def restore_state(
     step: int | None = None,
 ) -> training_utils.TrainState:
     restore_step = checkpoint_manager.latest_step() if step is None else step
+    frame_memory.check_resume(checkpoint_manager.directory / str(restore_step) / "assets",
+                              getattr(data_loader.data_config(), "memory_contract", None))
     subtask_contract.check_resume(
         checkpoint_manager.directory / str(restore_step) / "assets",
         subtask_contract.from_data_config(data_loader.data_config()),

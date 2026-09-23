@@ -21,6 +21,7 @@ from openpi.policies.b1k_policy import B1KOutputs
 from openpi.policies.policy import PolicyRecorder
 from openpi.policies.subtask_policy import SubtaskPolicy
 from openpi.serving import websocket_b1k_server
+from openpi.shared import frame_memory
 from openpi.shared import subtask_contract
 from openpi.shared.eval_b1k_wrapper import B1KPolicyWrapper
 from openpi.training import config as config_lib
@@ -98,29 +99,38 @@ def test_policy_auto_provided_refresh_reset_and_missing_eos(model_setup, tokeniz
 
 
 @pytest.mark.parametrize("conditioning", ["task_and_subtask", "subtask_only"])
+@pytest.mark.parametrize("memory_enabled", [False, True])
 def test_factory_uses_autonomous_policy_with_b1k_adapters_and_real_generation(
     model_setup,
     tokenizer,
     monkeypatch,
     tmp_path,
     conditioning,
+    memory_enabled,
 ):
     _, _, _, model_config = model_setup
-    model_config = dataclasses.replace(model_config, action_dim=32)
+    model_config = dataclasses.replace(model_config, action_dim=32, framesamp_modul=memory_enabled,
+                                       memory_num_frames=3, memory_grid_size=1)
     model = model_config.create(jax.random.key(0))
     model.subtask_action_conditioning = conditioning
     if conditioning == "subtask_only":
         subtask_contract.save(tmp_path / "assets", conditioning)
+    frame_memory.save(tmp_path / "assets", frame_memory.model_contract(model_config))
     word = tokenizer._tokenizer.encode("press")[0]
 
     def head(self, hidden):
         return jnp.zeros((*hidden.shape[:2], 64)).at[..., word].set(5).at[..., 1].set(10)
 
     monkeypatch.setattr(gemma.Module, "deembed", head)
-    monkeypatch.setattr(pi0_config.Pi0Config, "load", lambda *a, **kw: model)
+    def load(config, *args, **kwargs):
+        assert config.framesamp_modul == memory_enabled
+        return model
+    monkeypatch.setattr(pi0_config.Pi0Config, "load", load)
     monkeypatch.setattr(model_lib, "restore_params", lambda *a, **kw: {})
     monkeypatch.setattr(tokenizer_lib, "PaligemmaTokenizer", lambda max_len: tokenizer)
-    config = dataclasses.replace(config_lib.get_config("pi05_b1k"), model=model_config)
+    # The service reconstructs memory settings from checkpoint metadata.
+    config = dataclasses.replace(config_lib.get_config("pi05_b1k"),
+                                 model=dataclasses.replace(model_config, framesamp_modul=False))
     policy = policy_config.create_trained_policy(
         config, tmp_path, norm_stats={}, default_prompt="turn on radio", sample_kwargs={"num_steps": 2}
     )
@@ -133,6 +143,12 @@ def test_factory_uses_autonomous_policy_with_b1k_adapters_and_real_generation(
     assert result["subtask_source"] == "generated"
     assert np.isfinite(result["actions"]).all()
     assert policy.metadata["subtask_generation"]
+    if memory_enabled:
+        assert policy.metadata["framesamp_modul"]
+        assert result["policy_timing"]["memory_ms"] > 0
+        assert len(policy._frame_memory.features) == 1
+        policy.reset()
+        assert len(policy._frame_memory.features) == 0
     assert policy.metadata["subtask_action_conditioning"] == conditioning
     assert policy.metadata["subtask_interval"] == (2 if conditioning == "subtask_only" else 1)
     if conditioning == "subtask_only":

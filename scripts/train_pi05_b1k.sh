@@ -17,6 +17,15 @@ SUBTASK_PROMPTS="${SUBTASK_PROMPTS:-}"
 FRAME_STRIDE="${FRAME_STRIDE:-1}"
 EPISODES_FILE="${EPISODES_FILE:-}"
 SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-0}"
+FRAMESAMP_MODUL="${FRAMESAMP_MODUL:-0}"
+if [[ "$FRAMESAMP_MODUL" != 0 && "$FRAMESAMP_MODUL" != 1 ]]; then
+    echo "FRAMESAMP_MODUL must be 0 or 1" >&2
+    exit 2
+fi
+if [[ "$FRAMESAMP_MODUL" == 1 && ! -f "${MEMORY_CACHE_DIR:-}/manifest.json" ]]; then
+    echo "FRAMESAMP_MODUL=1 requires MEMORY_CACHE_DIR with a cache_frame_memory.py manifest." >&2
+    exit 2
+fi
 EXPECTED_TASK_INDICES="${EXPECTED_TASK_INDICES:-}"
 VAL_EPISODES_FILE="${VAL_EPISODES_FILE:-}"
 VAL_REPO_ID="${VAL_REPO_ID:-}"
@@ -266,9 +275,21 @@ PY
         fi
         echo "Validation preflight retained ${#VAL_EPISODES_INDEX[@]} episodes: $VALIDATED_VAL_EPISODES_FILE"
     fi
-    if [[ "${PREFLIGHT_ONLY:-0}" == 1 ]]; then
-        exit 0
+fi
+
+if [[ "$FRAMESAMP_MODUL" == 1 ]]; then
+    MEMORY_CHECK_ARGS=(
+        --dataset-root "$DATASET_ROOT" --cache-dir "$MEMORY_CACHE_DIR"
+        --num-frames "${MEMORY_NUM_FRAMES:-32}" --grid-size "${MEMORY_GRID_SIZE:-4}"
+        --frame-stride "${MEMORY_FRAME_STRIDE:-16}" --camera "${MEMORY_CAMERA:-base_0_rgb}"
+    )
+    if (( ${#EPISODES_INDEX[@]} )); then
+        MEMORY_CHECK_ARGS+=(--episodes-index "${EPISODES_INDEX[@]}" "${VAL_EPISODES_INDEX[@]}")
     fi
+    python scripts/b1k/check_frame_memory.py "${MEMORY_CHECK_ARGS[@]}"
+fi
+if [[ "${PREFLIGHT_ONLY:-0}" == 1 ]]; then
+    exit 0
 fi
 
 NORM_FILE="$ASSETS_BASE_DIR/pi05_b1k/$REPO_ID/norm_stats.json"
@@ -338,6 +359,17 @@ if (( FRAME_STRIDE > 1 )); then
     TRAIN_DATA_ARGS+=(--data.frame-stride "$FRAME_STRIDE")
 fi
 
+if [[ "$FRAMESAMP_MODUL" == 1 ]]; then
+    TRAIN_DATA_ARGS+=(
+        --model.framesamp-modul
+        --model.memory-num-frames "${MEMORY_NUM_FRAMES:-32}"
+        --model.memory-grid-size "${MEMORY_GRID_SIZE:-4}"
+        --model.memory-frame-stride "${MEMORY_FRAME_STRIDE:-16}"
+        --model.memory-camera "${MEMORY_CAMERA:-base_0_rgb}"
+        --data.memory-cache-dir "$MEMORY_CACHE_DIR"
+    )
+fi
+
 # CosineDecaySchedule defaults to decay_steps=30_000 regardless of
 # --num-train-steps, so a longer run silently spends everything past 30k at the
 # 2.5e-6 floor. Set LR_DECAY_STEPS to the real run length to stretch the cosine.
@@ -369,7 +401,7 @@ if [[ "${RESUME:-0}" == 1 && "${OVERWRITE:-0}" == 1 ]]; then
 fi
 if [[ "${RESUME:-0}" == 1 ]]; then
     TRAIN_DATA_ARGS+=(--resume)
-elif [[ "$SUBTASK_PREDICTION" == 0 || "${OVERWRITE:-0}" == 1 ]]; then
+elif [[ ( "$SUBTASK_PREDICTION" == 0 && "$FRAMESAMP_MODUL" == 0 ) || "${OVERWRITE:-0}" == 1 ]]; then
     TRAIN_DATA_ARGS+=(--overwrite)
 fi
 

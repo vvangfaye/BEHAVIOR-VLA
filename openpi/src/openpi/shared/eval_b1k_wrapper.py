@@ -47,6 +47,7 @@ class B1KPolicyWrapper:
         self._last_subtask = None
         self.last_subtasks = {}
         self.last_subtask_sources = {}
+        self._memory_control_step = 0
 
     def _clear_action_buffers(self):
         self.batch_size = None
@@ -65,6 +66,7 @@ class B1KPolicyWrapper:
         return self.text_prompt
 
     def reset(self):
+        self._memory_control_step = 0
         self._clear_action_buffers()
         self._last_prompt = None
         self._last_subtask = None
@@ -108,6 +110,8 @@ class B1KPolicyWrapper:
         if prop_state.ndim == 1:
             prop_state = prop_state[None, :]  # Add batch dimension
         batch_size = prop_state.shape[0]
+        if batch_size > 1 and getattr(self.policy, "metadata", {}).get("framesamp_modul", False):
+            raise ValueError("FrameSamp history requires a separate policy per B1K environment.")
         if batch_size > 1 and getattr(self.policy, "metadata", {}).get("subtask_interval", 1) > 1:
             raise ValueError("Batched B1K environments require subtask_interval=1 or separate policy instances.")
         prompt = self._resolve_prompt(obs)
@@ -136,6 +140,9 @@ class B1KPolicyWrapper:
         if "subtask" in obs:
             for item in processed_input:
                 item["subtask"] = obs["subtask"]
+        if getattr(self.policy, "metadata", {}).get("framesamp_modul", False):
+            self.policy.observe_memory(processed_input[0], step=self._memory_control_step)
+            self._memory_control_step += 1
         return processed_input
 
     def _get_current_actions(
@@ -406,7 +413,11 @@ class B1KPolicyWrapper:
         if self._last_prompt is not None and (prompt != self._last_prompt or subtask != self._last_subtask):
             logger.info("Policy instruction changed; clearing action buffers for immediate replanning.")
             self._clear_action_buffers()
-            self.policy.reset()
+            if prompt != self._last_prompt or not getattr(self.policy, "metadata", {}).get("framesamp_modul", False):
+                self.policy.reset()
+                self._memory_control_step = 0
+            elif hasattr(self.policy, "reset_subtask"):
+                self.policy.reset_subtask()
         self._last_prompt = prompt
         self._last_subtask = subtask
         input_obs = dict(input_obs)
