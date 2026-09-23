@@ -763,7 +763,7 @@ def test_completion_monitor_setup_excludes_invalid_initial_predicate(
     assert monitor.result()["setup_evidence"]
 
 
-def test_completion_monitor_resolves_exact_annotated_rose(monkeypatch):
+def test_completion_monitor_scores_rose_increment_over_any_rose(monkeypatch):
     rose_1 = "rose.n.01_1"
     rose_2 = "rose.n.01_2"
     vase = "vase.n.01_1"
@@ -793,13 +793,43 @@ def test_completion_monitor_resolves_exact_annotated_rose(monkeypatch):
     )
 
     assert monitor.metric_eligible
-    assert monitor.active_rose == rose_2
+    assert monitor.active_rose == rose_2  # provenance only
+    assert monitor.initial_resolved_count == 0
+    # A rose other than the annotated one still completes "place rose in vase".
     signals.inside[(rose_1, vase)] = True
     assert not monitor.refresh(1)
-    signals.inside[(rose_2, vase)] = True
     assert not monitor.refresh(2)
-    assert not monitor.refresh(3)
-    assert monitor.refresh(4)
+    assert monitor.refresh(3)
+    assert monitor.satisfied
+
+
+def test_completion_monitor_scores_pick_rose_over_any_rose(monkeypatch):
+    rose_1 = "rose.n.01_1"
+    rose_2 = "rose.n.01_2"
+    monkeypatch.setattr(runner, "_symbol_ids", lambda: {})
+    signals = _FakeSignals(distances={rose_1: 2.0, rose_2: 3.0})
+    selector = _FakeSelector(signals, phase="pick_rose")
+    selector.adapter.task_name = "make_rose_centerpieces"
+    selector.adapter.rose_ids = (rose_1, rose_2)
+    selector.adapter.target_ids = {rose_1: rose_1, rose_2: rose_2}
+    selector.adapter.resolved_object_names = {rose_1: "rose_80", rose_2: "rose_79"}
+
+    monitor = runner.CompletionMonitor(
+        object(),
+        {"kind": "grasped", "target": "active_rose"},
+        {"manipulating_object_ids": ["rose"], "object_ids": ["rose"]},
+        selector=selector,
+        near_distance=1.0,
+        tilt_threshold=1.0,
+    )
+
+    assert monitor.metric_eligible
+    # Grasping any runtime rose satisfies the generic "pick up rose" instruction.
+    signals.grasped = frozenset({rose_1})
+    assert not monitor.refresh(1)
+    assert not monitor.refresh(2)
+    assert monitor.refresh(3)
+    assert monitor.satisfied
 
 
 def test_completion_monitor_uses_locked_rose_for_generic_annotation(monkeypatch):
@@ -1105,6 +1135,7 @@ def _valid_result(sample: dict, fingerprint: str) -> dict:
         "setup_evidence": setup_evidence,
         "steps": 3,
         "success": True,
+        "terminal_credit": False,
         "failure_reason": None,
         "terminated": False,
         "truncated": False,
@@ -1123,6 +1154,7 @@ def _valid_result(sample: dict, fingerprint: str) -> dict:
         "monitor": {
             "predicate": sample["predicate"],
             "dwell": 3,
+            "satisfied": True,
             "debounce_steps": 3,
             "metric_eligible": True,
             "setup_exclusion_reason": None,
@@ -1383,6 +1415,55 @@ def test_strict_summary_excludes_setup_and_unsupported_from_denominator(tmp_path
     )
     assert not missing["complete"]
     assert len(missing["missing_results"]) == 1
+
+
+def test_strict_summary_accepts_terminal_completion_credit(tmp_path):
+    sample = _sample()
+    panel = _summary_panel([sample])
+    results = tmp_path / "results"
+    result = _valid_result(sample, panel["fingerprint"])
+    # A whole-task terminal condition ended the episode on the same step the
+    # subtask predicate first held, so the debounce window could not accrue.
+    result.update({"steps": 5, "terminated": True, "terminal_credit": True})
+    result["monitor"].update({"dwell": 1, "satisfied": True})
+    result["observed_subtasks"] = [sample["subtask"]] * 5
+    result["observed_subtask_sources"] = ["provided"] * 5
+    _write_summary_result(results, sample, result)
+    video = (
+        results
+        / "pi05"
+        / sample["task"]
+        / "videos"
+        / f"{sample['task']}_{sample['task_instance_id']}_0.mp4"
+    )
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"video")
+
+    summary = summarize(
+        panel,
+        results,
+        checkpoint="/checkpoint",
+        require_videos=True,
+        run_manifest=_summary_manifest(panel),
+    )
+    assert summary["complete"]
+    assert summary["successes"] == 1
+
+    # Credit without a satisfied predicate at termination is rejected.
+    result["monitor"]["satisfied"] = False
+    _write_summary_result(results, sample, result)
+    rejected = summarize(
+        panel,
+        results,
+        checkpoint="/checkpoint",
+        require_videos=True,
+        run_manifest=_summary_manifest(panel),
+    )
+    assert not rejected["complete"]
+    assert any(
+        "terminal completion credit" in error
+        for error in rejected["invalid_results"][0]["errors"]
+    )
 
 
 def test_panel_shell_mode_requires_queue(tmp_path):

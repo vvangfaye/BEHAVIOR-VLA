@@ -206,7 +206,10 @@ class CompletionMonitor:
         self.final_snapshot: dict[str, Any] = {}
         self.initial_recoveries = 0
         self.active_rose: str | None = None
+        self.rose_ids: tuple[str, ...] = ()
+        self.initial_resolved_count = 0
         self.dwell = 0
+        self.satisfied = False
         self.metric_eligible = False
         self.setup_exclusion_reason: str | None = None
         self.setup_evidence: dict[str, Any] = {}
@@ -215,6 +218,7 @@ class CompletionMonitor:
                 self.selector = selector_factory(
                     evaluator.env, robot=evaluator.robot
                 )
+            self.rose_ids = tuple(getattr(self.selector.adapter, "rose_ids", ()))
             self.initial_snapshot = self.selector.refresh(0)
             self.final_snapshot = self.initial_snapshot
             self.initial_recoveries = int(
@@ -222,6 +226,10 @@ class CompletionMonitor:
             )
             self.active_rose = self._active_rose()
             initial_signals = self.selector.adapter.observe()
+            if self.predicate.get("kind") == "rose_resolved_increment":
+                self.initial_resolved_count = self._resolved_rose_count(
+                    initial_signals
+                )
             initial_value = self._predicate_value(initial_signals)
             initial_phase = self.initial_snapshot.get("phase")
             try:
@@ -259,6 +267,12 @@ class CompletionMonitor:
         return "".join(character for character in text if character.isalnum())
 
     def _active_rose(self) -> str | None:
+        """Best-effort provenance of the annotated rose.
+
+        Rose subtask instructions ("pick up rose", "place rose in vase") are
+        generic, so completion is scored over any runtime rose. This resolves the
+        specific annotated rose only for provenance and never gates eligibility.
+        """
         if self.predicate.get("target") != "active_rose" and self.predicate.get(
             "kind"
         ) != "rose_resolved_increment":
@@ -291,25 +305,11 @@ class CompletionMonitor:
                     matches.add(rose)
             if len(matches) == 1:
                 return matches.pop()
-            specific_roses = {
-                value
-                for value in normalized_annotations
-                if value.startswith("rose") and value != "rose"
-            }
-            if matches or specific_roses:
-                raise PredicateObservabilityError(
-                    "Could not uniquely resolve annotated rose from "
-                    f"{annotated_ids!r}; matches={sorted(matches)!r}"
-                )
 
         locked_external = self.initial_snapshot.get("locked_object")
         reverse = {value: key for key, value in target_ids.items()}
         active = reverse.get(locked_external, locked_external)
-        if active not in roses:
-            raise PredicateObservabilityError(
-                f"Could not resolve active rose from {locked_external!r}"
-            )
-        return active
+        return active if active in roses else None
 
     def _resolve(self, name: str | None) -> str | None:
         if name is None:
@@ -360,7 +360,10 @@ class CompletionMonitor:
 
     def _predicate_value(self, signals: object) -> bool:
         kind = self.predicate.get("kind")
-        target = self._resolve(self.predicate.get("target"))
+        raw_target = self.predicate.get("target")
+        if raw_target == "active_rose":
+            return self._rose_target_value(signals, kind)
+        target = self._resolve(raw_target)
         reference = self._resolve(self.predicate.get("reference"))
         if kind == "near":
             value = float(self._mapping_value(signals, "distances", target))
@@ -402,21 +405,52 @@ class CompletionMonitor:
                 raise PredicateObservabilityError(
                     "rose_resolved_increment only supports value 1"
                 )
-            vase = _symbol_ids()["vase"]
-            inside = self._boolean_signal(
-                self._mapping_value(
-                    signals, "inside", (self.active_rose, vase)
-                ),
-                f"inside[{(self.active_rose, vase)!r}]",
-            )
-            return inside and self.active_rose not in self._grasped(signals)
+            return self._resolved_rose_count(signals) > self.initial_resolved_count
         raise PredicateObservabilityError(f"Unsupported predicate kind: {kind!r}")
+
+    def _rose_target_value(self, signals: object, kind: str | None) -> bool:
+        """Score an ``active_rose`` predicate over any runtime rose."""
+        if not self.rose_ids:
+            raise PredicateObservabilityError("No runtime rose objects are available")
+        if kind == "near":
+            best = math.inf
+            for rose in self.rose_ids:
+                value = float(self._mapping_value(signals, "distances", rose))
+                if not math.isfinite(value):
+                    raise PredicateObservabilityError(
+                        f"Predicate distance for {rose!r} is non-finite"
+                    )
+                best = min(best, value)
+            return best <= self.near_distance
+        if kind == "grasped":
+            grasped = self._grasped(signals)
+            return any(rose in grasped for rose in self.rose_ids)
+        raise PredicateObservabilityError(
+            f"Unsupported active_rose predicate kind: {kind!r}"
+        )
+
+    def _resolved_rose_count(self, signals: object) -> int:
+        """Count runtime roses resting inside the vase and not grasped."""
+        if not self.rose_ids:
+            raise PredicateObservabilityError("No runtime rose objects are available")
+        vase = _symbol_ids()["vase"]
+        grasped = self._grasped(signals)
+        count = 0
+        for rose in self.rose_ids:
+            inside = self._boolean_signal(
+                self._mapping_value(signals, "inside", (rose, vase)),
+                f"inside[{(rose, vase)!r}]",
+            )
+            if inside and rose not in grasped:
+                count += 1
+        return count
 
     def refresh(self, step: int) -> bool:
         if not self.metric_eligible:
             return False
         self.final_snapshot = self.selector.refresh(step)
-        if self._predicate_value(self.selector.adapter.observe()):
+        self.satisfied = self._predicate_value(self.selector.adapter.observe())
+        if self.satisfied:
             self.dwell += 1
         else:
             self.dwell = 0
@@ -431,8 +465,11 @@ class CompletionMonitor:
         return {
             "predicate": copy.deepcopy(self.predicate),
             "active_rose": self.active_rose,
+            "rose_ids": list(self.rose_ids),
+            "initial_resolved_rose_count": self.initial_resolved_count,
             "debounce_steps": DEBOUNCE_STEPS,
             "dwell": self.dwell,
+            "satisfied": self.satisfied,
             "metric_eligible": self.metric_eligible,
             "setup_exclusion_reason": self.setup_exclusion_reason,
             "setup_evidence": copy.deepcopy(self.setup_evidence),
@@ -1096,6 +1133,7 @@ def run_sample(
     success = False
     terminated = False
     truncated = False
+    terminal_credit = False
     failure_reason = monitor.setup_exclusion_reason
     steps = 0
     recording_started = False
@@ -1113,11 +1151,19 @@ def run_sample(
                 if success:
                     break
                 if terminated or truncated:
-                    failure_reason = (
-                        "environment_terminated"
-                        if terminated
-                        else "environment_truncated"
-                    )
+                    # A whole-task terminal condition can end the episode on the
+                    # same step the subtask predicate is first satisfied, before
+                    # the debounce window accrues. Credit that terminal step
+                    # instead of scoring a completed subtask as a failure.
+                    if terminated and monitor.satisfied:
+                        success = True
+                        terminal_credit = True
+                    else:
+                        failure_reason = (
+                            "environment_terminated"
+                            if terminated
+                            else "environment_truncated"
+                        )
                     break
             if not success and failure_reason is None:
                 failure_reason = "sample_timeout"
@@ -1153,6 +1199,7 @@ def run_sample(
             "setup_evidence": copy.deepcopy(monitor.setup_evidence),
             "steps": steps,
             "success": success,
+            "terminal_credit": terminal_credit,
             "failure_reason": failure_reason,
             "terminated": bool(terminated),
             "truncated": bool(truncated),

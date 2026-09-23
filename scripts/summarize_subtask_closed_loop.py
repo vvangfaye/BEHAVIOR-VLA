@@ -330,10 +330,30 @@ def _validate_result(
         ):
             errors.append("monitor snapshots are invalid")
         dwell = monitor.get("dwell")
+        satisfied = monitor.get("satisfied")
+        terminal_credit = result.get("terminal_credit")
+        if not isinstance(terminal_credit, bool):
+            errors.append("terminal_credit is not boolean")
+        elif terminal_credit is True and eligible is not True:
+            errors.append("terminal_credit requires an evaluated result")
         if isinstance(dwell, bool) or not isinstance(dwell, int) or dwell < 0:
             errors.append("monitor dwell is invalid")
-        elif eligible is True and (dwell >= DEBOUNCE_STEPS) is not (success is True):
-            errors.append("success does not match debounced monitor state")
+        elif eligible is True:
+            debounced = dwell >= DEBOUNCE_STEPS
+            if terminal_credit is True:
+                # The whole-task terminal condition ended the episode on the same
+                # step the subtask predicate first held, so the debounce window
+                # could not accrue. Require a satisfied predicate at a genuine
+                # termination to substantiate the credit.
+                if not (
+                    success is True
+                    and result.get("terminated") is True
+                    and satisfied is True
+                    and dwell >= 1
+                ):
+                    errors.append("terminal completion credit is not substantiated")
+            elif debounced is not (success is True):
+                errors.append("success does not match debounced monitor state")
         recoveries = monitor.get("diagnostic_recoveries")
         if (
             isinstance(recoveries, bool)
