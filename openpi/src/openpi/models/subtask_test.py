@@ -247,20 +247,6 @@ def test_factorized_tokenizer_context_and_observation_round_trip(tokenizer):
     np.testing.assert_array_equal(restored.for_subtask_actions().tokenized_prompt, first["action_tokenized_prompt"])
 
 
-def test_jax_masked_action_reduction_and_no_mask_regression():
-    temporal_loss = jnp.asarray([[1.0, 3.0, 100.0], [2.0, 50.0, 70.0]])
-    mask = jnp.asarray([[True, True, False], [True, False, False]])
-    masked, metrics = pi0.reduce_action_loss(temporal_loss, mask)
-
-    np.testing.assert_allclose(masked, [[1.5, 4.5, 0.0], [6.0, 0.0, 0.0]])
-    np.testing.assert_allclose(metrics["action_loss"], 2.0)
-    np.testing.assert_allclose(metrics["valid_action_fraction"], 0.5)
-    unmasked, unmasked_metrics = pi0.reduce_action_loss(temporal_loss, None)
-    np.testing.assert_array_equal(unmasked, temporal_loss)
-    np.testing.assert_allclose(unmasked_metrics["action_loss"], temporal_loss.mean())
-    assert set(unmasked_metrics) == {"action_loss"}
-
-
 def test_action_only_api_and_parameter_shapes_are_compatible(model_setup):
     model, obs, actions, config = model_setup
     conditioned = nnx_utils.module_jit(model.sample_actions)(jax.random.key(1), obs, num_steps=2)
@@ -277,36 +263,6 @@ def test_action_only_api_and_parameter_shapes_are_compatible(model_setup):
     assert np.isfinite(loss).all()
     assert sampled.shape == (2, 2, 4)
     assert np.isfinite(sampled).all()
-
-    executor_config = dataclasses.replace(config, train_subtask_prediction=False, train_subtask_executor=True)
-    executor = executor_config.create(jax.random.key(0))
-    assert jax.tree.structure(nnx.state(executor)) == jax.tree.structure(nnx.state(plain))
-    assert executor_config.inputs_spec()[0].action_loss_mask.shape == (1, 2)
-    executor_obs = dataclasses.replace(obs, action_loss_mask=jnp.asarray([[True, False], [True, True]]))
-    executor_loss, metrics = nnx_utils.module_jit(executor.compute_loss_with_metrics)(
-        jax.random.key(1), executor_obs, actions
-    )
-    assert executor_loss.shape == (2, 2)
-    np.testing.assert_allclose(executor_loss[0, 1], 0.0)
-    assert set(metrics) == {"action_loss", "valid_action_fraction"}
-    np.testing.assert_allclose(metrics["valid_action_fraction"], 0.75)
-
-
-def test_executor_valid_loss_is_independent_of_masked_future_targets(model_setup):
-    _, obs, actions, config = model_setup
-    executor = dataclasses.replace(config, train_subtask_prediction=False, train_subtask_executor=True).create(
-        jax.random.key(0)
-    )
-    mask = jnp.asarray([[True, False], [True, False]])
-    executor_obs = dataclasses.replace(obs, token_ar_mask=None, token_loss_mask=None, action_loss_mask=mask)
-    changed_actions = actions.at[:, 1, :].add(1000.0)
-
-    original = executor.compute_loss(jax.random.key(11), executor_obs, actions)
-    changed = executor.compute_loss(jax.random.key(11), executor_obs, changed_actions)
-
-    np.testing.assert_allclose(original[:, 0], changed[:, 0], rtol=1e-5, atol=1e-6)
-    np.testing.assert_allclose(original[:, 1], 0.0)
-    np.testing.assert_allclose(changed[:, 1], 0.0)
 
 
 def test_pi0_continuous_state_prefix_mask_regression(model_setup):

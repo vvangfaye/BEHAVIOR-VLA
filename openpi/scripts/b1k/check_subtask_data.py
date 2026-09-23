@@ -12,8 +12,6 @@ import pyarrow.parquet as pq
 
 from openpi.configs import ROBOT_REGISTRY
 from openpi.models.tokenizer import PaligemmaTokenizer
-from openpi.training.subtask_data import StrictSubtaskActionIndex
-from openpi.training.subtask_data import SubtaskActionIndex
 from openpi.training.subtask_data import SubtaskFromSegments
 from openpi.training.subtask_data import episode_lengths_in_dataset_order
 
@@ -92,11 +90,6 @@ def check_dataset(
     epochs: int | None = None,
     expected_tasks: int | None = None,
     expected_task_indices: list[int] | None = None,
-    action_horizon: int = 32,
-    subtask_executor: bool = False,
-    max_samples_per_segment: int | None = None,
-    strict_subtask_action_chunks: bool = False,
-    conditioning_mode: Literal["joint", "subtask_only"] = "joint",
 ) -> dict:
     all_lengths, task_indices = episode_metadata(dataset_root)
     lengths = episode_lengths_in_dataset_order(dataset_root, episodes_index)
@@ -109,7 +102,6 @@ def check_dataset(
         segments_path,
         episodes_index=list(lengths),
         empty_label_policy=empty_label_policy,
-        require_role_provenance=subtask_executor,
     )
     lengths = {ep: length for ep, length in lengths.items() if ep not in labels.dropped_episodes}
     if not lengths:
@@ -118,14 +110,6 @@ def check_dataset(
         )
     if frame_stride < 1:
         raise ValueError("frame_stride must be positive.")
-    if action_horizon < 1:
-        raise ValueError("action_horizon must be positive.")
-    if max_samples_per_segment is not None and max_samples_per_segment < 1:
-        raise ValueError("max_samples_per_segment must be positive when set.")
-    if subtask_executor and strict_subtask_action_chunks:
-        raise ValueError("Masked subtask executor and strict full-horizon filtering are mutually exclusive.")
-    if (subtask_executor or strict_subtask_action_chunks) and conditioning_mode != "subtask_only":
-        raise ValueError("Strict subtask action preflight requires conditioning_mode='subtask_only'.")
     if process_count < 1:
         raise ValueError("process_count must be positive.")
     if epochs is not None and epochs < 1:
@@ -149,63 +133,30 @@ def check_dataset(
         if retained_task_indices != expected_indices:
             raise ValueError(f"Expected retained task indices {expected_indices}, found {retained_task_indices}.")
 
-    vocabulary = {
-        text
-        for ep in lengths
-        for text, annotated in zip(labels.segments[ep][2], labels.annotation_flags(ep), strict=True)
-        if text and (annotated or not (subtask_executor or strict_subtask_action_chunks))
-    }
+    vocabulary = {text for ep in lengths for text in labels.segments[ep][2]}
     if not vocabulary:
         raise ValueError("No annotated subtask text remains for preflight.")
     robot_config = ROBOT_REGISTRY[robot]
     state_dim = sum(1 if p.is_eef else len(p.indices) for p in robot_config.proprio)
     state = np.ones(state_dim, dtype=np.float32)
     tokenizer = PaligemmaTokenizer(max_token_len)
-    token_report = {}
-    if conditioning_mode == "joint":
-        instructions = task_texts(dataset_root)
-        longest_task = max(instructions, key=lambda text: tokenizer.subtask_token_lengths(text, "x", state)[0])
-        longest_label = max(vocabulary, key=lambda text: tokenizer.subtask_token_lengths("x", text, state)[1])
-        prefix_len, label_len, cue_len = tokenizer.subtask_token_lengths(longest_task, longest_label, state)
-        tokenizer.tokenize_subtask_training(longest_task, longest_label, state, max_subtask_len=max_subtask_len)
-        tokenizer.tokenize_subtask_prefix(longest_task, state, max_subtask_len=max_subtask_len)
-        token_report = {
-            "max_prefix_tokens": prefix_len,
-            "max_label_tokens_including_eos": label_len,
-            "action_cue_tokens": cue_len,
-            "conservative_sequence_tokens": prefix_len + label_len + cue_len,
-            "generation_sequence_budget": prefix_len + max_subtask_len + cue_len,
-            "max_subtask_len": max_subtask_len,
-        }
-    else:
-        prompt_lengths = {}
-        for text in vocabulary:
-            _, mask = tokenizer.tokenize(text, state)
-            prompt_lengths[text] = int(mask.sum())
-        longest_label = max(prompt_lengths, key=prompt_lengths.get)
-        prompt_len = prompt_lengths[longest_label]
-        if prompt_len >= max_token_len:
-            raise ValueError(f"Subtask-only prompt reaches max_token_len={max_token_len} and may be truncated.")
-        token_report = {"max_prompt_tokens": prompt_len}
+    instructions = task_texts(dataset_root)
+    longest_task = max(instructions, key=lambda text: tokenizer.subtask_token_lengths(text, "x", state)[0])
+    longest_label = max(vocabulary, key=lambda text: tokenizer.subtask_token_lengths("x", text, state)[1])
+    prefix_len, label_len, cue_len = tokenizer.subtask_token_lengths(longest_task, longest_label, state)
+    tokenizer.tokenize_subtask_training(longest_task, longest_label, state, max_subtask_len=max_subtask_len)
+    tokenizer.tokenize_subtask_prefix(longest_task, state, max_subtask_len=max_subtask_len)
+    token_report = {
+        "max_prefix_tokens": prefix_len,
+        "max_label_tokens_including_eos": label_len,
+        "action_cue_tokens": cue_len,
+        "conservative_sequence_tokens": prefix_len + label_len + cue_len,
+        "generation_sequence_budget": prefix_len + max_subtask_len + cue_len,
+        "max_subtask_len": max_subtask_len,
+    }
 
     frames = sum(lengths.values())
-    action_index = None
-    if strict_subtask_action_chunks:
-        action_index = StrictSubtaskActionIndex.from_segments(
-            labels, lengths, action_horizon=action_horizon, frame_stride=frame_stride
-        )
-        strided_samples = len(action_index)
-    elif subtask_executor:
-        action_index = SubtaskActionIndex.from_segments(
-            labels,
-            lengths,
-            action_horizon=action_horizon,
-            frame_stride=frame_stride,
-            max_samples_per_segment=max_samples_per_segment,
-        )
-        strided_samples = len(action_index)
-    else:
-        strided_samples = math.ceil(frames / frame_stride)
+    strided_samples = math.ceil(frames / frame_stride)
     contract = {
         "annotation_sha256": _sha256(segments_path),
         "episode_list_sha256": _episode_list_sha256(selected_episodes),
@@ -218,31 +169,6 @@ def check_dataset(
     }
     role_counts = labels.role_counts(selected_episodes)
     provenance_counts = labels.provenance_counts(selected_episodes)
-    if strict_subtask_action_chunks:
-        contract.update(
-            action_horizon=action_horizon,
-            boundary_rejected_anchors=action_index.boundary_rejected_anchors,
-            conditioning_mode=conditioning_mode,
-            eligible_action_anchors=action_index.eligible_anchors,
-            retained_task_indices=retained_task_indices,
-            strict_subtask_action_chunks=True,
-        )
-        contract.update(role_counts)
-    elif subtask_executor:
-        contract.update(
-            action_horizon=action_horizon,
-            annotation_role_column=labels.annotation_column,
-            capped_sample_count=action_index.capped_sample_count,
-            conditioning_mode=conditioning_mode,
-            eligible_action_anchors=action_index.eligible_anchors,
-            max_samples_per_segment=max_samples_per_segment,
-            provenance_column=labels.provenance_column,
-            provenance_counts=provenance_counts,
-            retained_task_indices=retained_task_indices,
-            subtask_executor=True,
-            valid_action_step_distribution=action_index.valid_action_step_distribution(),
-        )
-        contract.update(role_counts)
     if global_batch_size is not None:
         local_batch_size = global_batch_size // process_count
         samples_per_process = strided_samples // process_count
@@ -283,8 +209,6 @@ def check_dataset(
         "provenance_column": labels.provenance_column,
         "provenance_counts": provenance_counts,
         **role_counts,
-        "capped_sample_count": action_index.capped_sample_count if subtask_executor else strided_samples,
-        "valid_action_step_distribution": (action_index.valid_action_step_distribution() if subtask_executor else None),
         "state_dim": state_dim,
         "max_token_len": max_token_len,
         **token_report,
@@ -309,11 +233,6 @@ def main():
     parser.add_argument("--epochs", type=int)
     parser.add_argument("--expected-tasks", type=int)
     parser.add_argument("--expected-task-indices", type=int, nargs="+")
-    parser.add_argument("--action-horizon", type=int, default=32)
-    parser.add_argument("--subtask-executor", action="store_true")
-    parser.add_argument("--max-samples-per-segment", type=int)
-    parser.add_argument("--strict-subtask-action-chunks", action="store_true")
-    parser.add_argument("--conditioning-mode", choices=("joint", "subtask_only"), default="joint")
     parser.add_argument("--report-file", type=Path)
     parser.add_argument(
         "--write-episodes-file", type=Path, help="Write the validated original episode IDs for training."
@@ -333,11 +252,6 @@ def main():
         epochs=args.epochs,
         expected_tasks=args.expected_tasks,
         expected_task_indices=args.expected_task_indices,
-        action_horizon=args.action_horizon,
-        subtask_executor=args.subtask_executor,
-        max_samples_per_segment=args.max_samples_per_segment,
-        strict_subtask_action_chunks=args.strict_subtask_action_chunks,
-        conditioning_mode=args.conditioning_mode,
     )
     text = json.dumps(report, ensure_ascii=False, indent=2)
     if args.report_file:

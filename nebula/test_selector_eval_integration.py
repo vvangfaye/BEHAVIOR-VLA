@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -265,17 +266,25 @@ def run_shell(
         "EXTERNAL_SUBTASK_SELECTOR",
         "PI05_CKPT",
         "PI05_MODEL_FORMAT",
-        "PROVIDED_SUBTASK_AS_PROMPT",
     ):
         env.pop(name, None)
     env.update(overrides)
-    return subprocess.run(
-        ["bash", str(script), *args],
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    with tempfile.TemporaryDirectory() as temporary:
+        if script == SUBMIT_SCRIPT:
+            # Validation tests must not depend on a developer's private Nebula credentials.
+            nebula_dir = Path(temporary) / "nebula"
+            nebula_dir.mkdir()
+            copied_script = nebula_dir / script.name
+            shutil.copy(script, copied_script)
+            (nebula_dir / "config.sh").write_text("")
+            script = copied_script
+        return subprocess.run(
+            ["bash", str(script), *args],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
 
 @pytest.mark.parametrize(
@@ -293,16 +302,7 @@ def run_shell(
         (
             {"EXTERNAL_SUBTASK_SELECTOR": SELECTOR, "SUBTASK_PREDICTION": "0"},
             TASK,
-            "requires a subtask conditioning mode",
-        ),
-        (
-            {
-                "EXTERNAL_SUBTASK_SELECTOR": SELECTOR,
-                "SUBTASK_PREDICTION": "1",
-                "PROVIDED_SUBTASK_AS_PROMPT": "1",
-            },
-            TASK,
-            "mutually exclusive",
+            "requires SUBTASK_PREDICTION=1",
         ),
         (
             {
@@ -330,20 +330,6 @@ def test_eval_script_rejects_invalid_selector_configuration(overrides, task, mes
 
     assert completed.returncode == 2
     assert message in completed.stderr
-
-
-def test_eval_script_accepts_strict_selector_configuration():
-    completed = run_shell(
-        EVAL_SCRIPT,
-        TASK,
-        EXTERNAL_SUBTASK_SELECTOR=SELECTOR,
-        SUBTASK_PREDICTION="0",
-        PROVIDED_SUBTASK_AS_PROMPT="1",
-        PI05_CKPT="/missing",
-    )
-
-    assert completed.returncode == 1
-    assert "checkpoint not found: /missing" in completed.stderr
 
 
 def test_submit_script_rejects_selector_outside_supported_profiles():
@@ -385,33 +371,6 @@ def test_submit_script_supports_no_dependency_bootstrap():
 
     assert 'BOOTSTRAP_ENV_ARGS=("--env=PIP_NO_DEPS=1")' in source
     assert '"nebula_pip_no_deps": nebula_pip_no_deps == "1"' in source
-
-
-def test_submit_script_rejects_torch_strict_prompt_mode():
-    completed = run_shell(
-        SUBMIT_SCRIPT,
-        EVAL_PROFILE="smoke",
-        PI05_MODEL_FORMAT="torch",
-        SUBTASK_PREDICTION="0",
-        PROVIDED_SUBTASK_AS_PROMPT="1",
-        EXTERNAL_SUBTASK_SELECTOR=SELECTOR,
-    )
-
-    assert completed.returncode == 2
-    assert "supports JAX checkpoints only" in completed.stderr
-
-
-def test_submit_script_rejects_joint_and_strict_prompt_modes_together():
-    completed = run_shell(
-        SUBMIT_SCRIPT,
-        EVAL_PROFILE="smoke",
-        SUBTASK_PREDICTION="1",
-        PROVIDED_SUBTASK_AS_PROMPT="1",
-        EXTERNAL_SUBTASK_SELECTOR=SELECTOR,
-    )
-
-    assert completed.returncode == 2
-    assert "mutually exclusive" in completed.stderr
 
 
 def test_worker_rejects_selector_outside_supported_profiles(tmp_path):

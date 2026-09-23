@@ -15,11 +15,7 @@ import openpi.models.model as _model
 import openpi.training.config as _config
 from openpi.training.droid_rlds_dataset import DroidRldsDataset
 import openpi.training.lerobot_compat as _lerobot_compat
-from openpi.training.subtask_data import PureSubtaskExecutor
-from openpi.training.subtask_data import StrictSubtaskActionIndex
-from openpi.training.subtask_data import SubtaskActionIndex
 from openpi.training.subtask_data import SubtaskFromSegments
-from openpi.training.subtask_data import episode_lengths_in_dataset_order
 import openpi.transforms as _transforms
 
 T_co = TypeVar("T_co", covariant=True)
@@ -101,45 +97,6 @@ class StridedDataset(Dataset[T_co]):
 
     def __len__(self) -> int:
         return self._len
-
-
-def _hf_episode_frame_indices(dataset: Dataset) -> tuple[np.ndarray, np.ndarray]:
-    """Read only scalar index columns from the selected HuggingFace dataset."""
-    hf_dataset = getattr(dataset, "hf_dataset", None)
-    if hf_dataset is None:
-        raise ValueError("Pure subtask executor mode requires the LeRobot dataset's hf_dataset index view.")
-    try:
-        index_view = hf_dataset.select_columns(["episode_index", "frame_index"])
-        episode_indices = np.asarray(index_view["episode_index"])
-        frame_indices = np.asarray(index_view["frame_index"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError("Could not read episode_index/frame_index from the selected HF dataset.") from exc
-    return episode_indices, frame_indices
-
-
-class SubtaskActionDataset(Dataset[T_co]):
-    def __init__(self, dataset: Dataset, action_index: SubtaskActionIndex | StrictSubtaskActionIndex):
-        if len(dataset) != action_index.raw_frames:
-            raise ValueError(
-                f"LeRobot dataset has {len(dataset)} selected frames, expected {action_index.raw_frames} from metadata."
-            )
-        self._dataset = dataset
-        self._action_index = action_index
-
-    def __getitem__(self, index: SupportsIndex) -> T_co:
-        dataset_index, expected_episode, expected_frame = self._action_index.resolve(int(index))
-        sample = self._dataset[dataset_index]
-        episode = int(np.asarray(sample["episode_index"]).item())
-        frame = int(np.asarray(sample["frame_index"]).item())
-        if (episode, frame) != (expected_episode, expected_frame):
-            raise RuntimeError(
-                "Subtask executor index does not match LeRobot row: "
-                f"expected episode={expected_episode}, frame={expected_frame}; got episode={episode}, frame={frame}."
-            )
-        return sample
-
-    def __len__(self) -> int:
-        return len(self._action_index)
 
 
 class IterableTransformedDataset(IterableDataset[T_co]):
@@ -225,23 +182,19 @@ class FakeDataset(Dataset):
 
 def create_b1k_dataset(data_config: _config.DataConfig, action_horizon: int) -> Dataset:
     """Create a behavior dataset for training."""
-    strict_action_chunks = data_config.strict_subtask_action_chunks
     subtask_transform = None
-    if data_config.subtask_prediction or data_config.subtask_executor or strict_action_chunks:
+    if data_config.subtask_prediction:
         if isinstance(data_config.repo_id, list):
             raise ValueError("Subtask supervision requires one dataset root with globally unique episode indices.")
         if not data_config.subtask_prompts_path:
-            raise ValueError("Strict subtask supervision requires a subtask segment table.")
-        if data_config.subtask_prediction and not data_config.prompt_from_task:
+            raise ValueError("Subtask prediction requires a subtask segment table.")
+        if not data_config.prompt_from_task:
             raise ValueError("Subtask prediction requires task prompts.")
-        if strict_action_chunks and not data_config.prompt_from_task:
-            raise ValueError("Strict subtask action training requires prompt_from_task=True.")
         if data_config.subtask_whole_task_prob != 0:
-            raise ValueError("subtask_whole_task_prob must be 0 for strict subtask supervision.")
+            raise ValueError("subtask_whole_task_prob must be 0 for joint subtask supervision.")
         subtask_transform = SubtaskFromSegments.from_parquet(
             data_config.subtask_prompts_path,
             episodes_index=data_config.episodes_index,
-            require_role_provenance=data_config.subtask_executor,
         )
     if isinstance(data_config.repo_id, list):
         dataset_meta = _lerobot_compat.LeRobotDatasetMetadata(
@@ -265,39 +218,7 @@ def create_b1k_dataset(data_config: _config.DataConfig, action_horizon: int) -> 
 
     if data_config.frame_stride < 1:
         raise ValueError(f"frame_stride must be >= 1, got {data_config.frame_stride}")
-    if strict_action_chunks:
-        episode_lengths = episode_lengths_in_dataset_order(data_config.dataset_root, data_config.episodes_index)
-        action_index = StrictSubtaskActionIndex.from_segments(
-            typing.cast(SubtaskFromSegments, subtask_transform),
-            episode_lengths,
-            action_horizon=action_horizon,
-            frame_stride=data_config.frame_stride,
-        )
-        dataset = SubtaskActionDataset(dataset, action_index)
-    elif data_config.subtask_executor:
-        episode_indices, frame_indices = _hf_episode_frame_indices(dataset)
-        action_index = SubtaskActionIndex.from_episode_frame_indices(
-            typing.cast(SubtaskFromSegments, subtask_transform),
-            episode_indices,
-            frame_indices,
-            action_horizon=action_horizon,
-            frame_stride=data_config.frame_stride,
-            max_samples_per_segment=data_config.subtask_executor_max_samples_per_segment,
-        )
-        dataset = SubtaskActionDataset(dataset, action_index)
-        action_key = data_config.action_sequence_keys[0]
-        dataset = TransformedDataset(
-            dataset,
-            [
-                PureSubtaskExecutor(
-                    typing.cast(SubtaskFromSegments, subtask_transform),
-                    action_horizon=action_horizon,
-                    action_pad_key=f"{action_key}_is_pad",
-                )
-            ],
-        )
-
-    if data_config.prompt_from_task and not data_config.subtask_executor:
+    if data_config.prompt_from_task:
         meta_root = (
             os.path.join(data_config.dataset_root, data_config.repo_id[0])
             if isinstance(data_config.repo_id, list)
@@ -308,10 +229,6 @@ def create_b1k_dataset(data_config: _config.DataConfig, action_horizon: int) -> 
             dataset = TransformedDataset(
                 dataset, [_transforms.PromptFromLeRobotTask(tasks), typing.cast(SubtaskFromSegments, subtask_transform)]
             )
-        elif strict_action_chunks:
-            dataset = TransformedDataset(
-                dataset, [typing.cast(SubtaskFromSegments, subtask_transform), _transforms.UseSubtaskAsPrompt()]
-            )
         elif data_config.subtask_prompts_path:
             prompt_tf = _transforms.PromptFromSubtask.from_parquet(
                 data_config.subtask_prompts_path, tasks, data_config.subtask_whole_task_prob
@@ -320,7 +237,7 @@ def create_b1k_dataset(data_config: _config.DataConfig, action_horizon: int) -> 
         else:
             dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(tasks)])
 
-    if data_config.frame_stride > 1 and not data_config.subtask_executor and not strict_action_chunks:
+    if data_config.frame_stride > 1:
         dataset = StridedDataset(dataset, data_config.frame_stride)
 
     return dataset

@@ -473,20 +473,19 @@ def test_worker_allocation_and_child_environment(tmp_path, monkeypatch):
 def test_conditioning_cli_is_validated_and_recorded(tmp_path):
     args = manifest_args(
         tmp_path,
-        "--provided-subtask-as-prompt",
+        "--subtask-prediction",
         "--external-subtask-selector",
         "state_machine_v1",
         "--max-token-len",
-        "200",
+        "512",
     )
     manifest = dynamic.create_manifest(args)
     assert manifest["conditioning"] == {
-        "subtask_prediction": False,
-        "provided_subtask_as_prompt": True,
+        "subtask_prediction": True,
         "external_subtask_selector": "state_machine_v1",
-        "max_token_len": 200,
+        "max_token_len": 512,
     }
-    assert manifest["child_environment"]["PROVIDED_SUBTASK_AS_PROMPT"] == "1"
+    assert manifest["child_environment"]["SUBTASK_PREDICTION"] == "1"
     assert dynamic.validate_manifest(manifest) == manifest
 
 
@@ -495,17 +494,7 @@ def test_conditioning_cli_is_validated_and_recorded(tmp_path):
     [
         (
             {
-                "subtask_prediction": True,
-                "provided_subtask_as_prompt": True,
-                "external_subtask_selector": "state_machine_v1",
-                "max_token_len": 200,
-            },
-            "mutually exclusive",
-        ),
-        (
-            {
                 "subtask_prediction": False,
-                "provided_subtask_as_prompt": False,
                 "external_subtask_selector": "state_machine_v1",
                 "max_token_len": 512,
             },
@@ -513,26 +502,7 @@ def test_conditioning_cli_is_validated_and_recorded(tmp_path):
         ),
         (
             {
-                "subtask_prediction": False,
-                "provided_subtask_as_prompt": True,
-                "external_subtask_selector": None,
-                "max_token_len": 200,
-            },
-            "requires EXTERNAL_SUBTASK_SELECTOR",
-        ),
-        (
-            {
-                "subtask_prediction": False,
-                "provided_subtask_as_prompt": True,
-                "external_subtask_selector": "state_machine_v1",
-                "max_token_len": 201,
-            },
-            "MAX_TOKEN_LEN=200",
-        ),
-        (
-            {
                 "subtask_prediction": True,
-                "provided_subtask_as_prompt": False,
                 "external_subtask_selector": "other",
                 "max_token_len": 512,
             },

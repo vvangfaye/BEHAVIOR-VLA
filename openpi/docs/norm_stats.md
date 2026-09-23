@@ -30,17 +30,10 @@
 | --- | --- | --- |
 | 普通 π0.5 | 指定训练 episode；未指定则全数据 | 直接复用 |
 | Joint | 空标签预检后的训练 episode | 直接复用，不自动核对段表哈希 |
-| Strict | 预检后的 episode，且应用 frame stride / 完整动作块筛选 | 直接复用，需自行核对是否对应筛选配置 |
-| Pure executor | 预检后的训练 episode | 核对 provenance；缺失或不一致则停止 |
-
-Pure executor 的 `norm_stats.provenance.json` 记录 episode 名单、段表及统计文件 SHA-256，
-启动时校验这些字段。统计使用训练 episode 的数据，并不是只对最终 capped anchors 中
-通过 action mask 的位置统计。不要将这两种采样范围混为一谈。
-需要重算时选择新的 assets 路径或标识，避免把不匹配文件强行复用。
 
 `NORM_MAX_FRAMES` 可限制统计样本量，属于近似统计；使用时记录该配置。
 验证 loader 使用训练集统计，不应为验证集重新拟合。传入预检前的名单或复用包含验证集的
-旧 assets，会破坏这项隔离；joint / strict 的文件存在检查不会自动发现这类问题。
+旧 assets，会破坏这项隔离；本地 joint 的文件存在检查不会自动发现这类问题。
 
 ## 手动计算普通训练的统计
 
@@ -56,10 +49,6 @@ CUDA_VISIBLE_DEVICES=0 .venv/bin/python scripts/compute_norm_stats.py \
   --assets-base-dir ./outputs/assets \
   --batch-size 1 --num-workers 0
 ```
-
-Strict 的手动计算还需传 `--strict-subtask-action-chunks`、`--subtask-prompts-path`，
-并匹配 `--frame-stride` 和 `--action-horizon`。Pure executor 请使用其训练包装脚本管理
-provenance，而不是只生成一个没有 sidecar 的 JSON。
 
 ## checkpoint 与推理
 

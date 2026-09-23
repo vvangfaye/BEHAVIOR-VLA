@@ -15,7 +15,7 @@
 - 共约 **406,341 个技能片段**，**35 种技能**，3 大类型。
 
 > 本文保留标注结构和历史数据统计，计数不是当前过滤后训练集的大小。
-> 当前 π0.5 支持 joint、strict subtask-only 与 pure executor，
+> 当前 π0.5 支持普通动作训练和 joint 联合训练，
 > 请以 [subtask 训练与推理指南](docs/subtask_training.md) 为准。
 
 ---
@@ -141,10 +141,6 @@ Joint 高层保留完整任务，以 GT subtask 计算文本 CE；当前启动�
 - 闭环评测：设置 `SUBTASK_PREDICTION=1`，运行 `scripts/eval_b1k.sh`。
 - 联合训练默认以 `drop_episode` 过滤包含空标注的 episode；这与历史上仅替换 prompt、
   缺标注时回退整任务的条件化训练不同。
-
-Strict 使用 `STRICT_SUBTASK_ACTION_CHUNKS=1`，只监督同一段内的完整动作块；pure executor
-使用 `train_pi05_subtask_executor_b1k.sh`，允许段尾起点并 mask 无效动作。
-这两种模式只训练动作，闭环需要外部 subtask，不会自动生成技能。
 
 完整参数、checkpoint 配置和标注预检说明见
 [当前指南](docs/subtask_training.md)。

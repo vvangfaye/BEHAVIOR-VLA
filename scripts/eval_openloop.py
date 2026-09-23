@@ -7,9 +7,9 @@ rollouts.
 
 Examples:
   ./scripts/eval_openloop.py --model pi05 --samples-per-task 2 --out eval_results/openloop_pi05.json
-  ./scripts/eval_openloop.py --model pi05 --subtask-conditioning prompt \
+  ./scripts/eval_openloop.py --model pi05 --subtask-conditioning provided \
       --subtask-prompts /path/to/subtask_segments.parquet --episodes-file /path/to/val_episodes.txt \
-      --samples-per-subtask 2 --out eval_results/openloop_executor.json
+      --samples-per-subtask 2 --out eval_results/openloop_joint_provided.json
 """
 
 from __future__ import annotations
@@ -399,18 +399,16 @@ def _scalar_int(sample: dict, key: str) -> int:
     return int(value.item())
 
 
-def build_pi05(args, episode_ids: list[int] | None, segments):
+def build_pi05(args, episode_ids: list[int] | None):
     import openpi.policies.policy_config as _policy_config  # noqa: PLC0415
     import openpi.training.config as _config  # noqa: PLC0415
     import openpi.training.data_loader as _dl  # noqa: PLC0415
-    from openpi.training.subtask_data import PureSubtaskExecutor  # noqa: PLC0415
     import openpi.transforms as _tf  # noqa: PLC0415
 
     cfg = _config.get_config("pi05_b1k")
     model = dataclasses.replace(
         cfg.model,
         train_subtask_prediction=args.subtask_conditioning == "provided",
-        train_subtask_executor=args.subtask_conditioning == "prompt",
     )
 
     if args.horizon > model.action_horizon:
@@ -429,24 +427,7 @@ def build_pi05(args, episode_ids: list[int] | None, segments):
     cfg = dataclasses.replace(cfg, data=data_factory, model=model)
     data_config = cfg.data.create(cfg.assets_dirs, cfg.model)
 
-    executor_transform = None
-    dataset_config = data_config
-    if args.subtask_conditioning == "prompt":
-        # Sampling is controlled by this script. Build the filtered raw LeRobot
-        # view, then apply the same strict executor transform to the chosen row.
-        dataset_config = dataclasses.replace(
-            data_config,
-            prompt_from_task=False,
-            subtask_prompts_path=None,
-            subtask_executor=False,
-            subtask_prediction=False,
-        )
-        executor_transform = PureSubtaskExecutor(
-            segments,
-            action_horizon=cfg.model.action_horizon,
-            action_pad_key=f"{data_config.action_sequence_keys[0]}_is_pad",
-        )
-    dataset = _dl.create_b1k_dataset(dataset_config, cfg.model.action_horizon)
+    dataset = _dl.create_b1k_dataset(data_config, cfg.model.action_horizon)
     repack = _tf.compose(data_config.repack_transforms.inputs)
     policy = _policy_config.create_trained_policy(cfg, args.pi05_ckpt)
 
@@ -464,13 +445,8 @@ def build_pi05(args, episode_ids: list[int] | None, segments):
                 f"expected episode/frame/global={expected}, got {observed} at relative row {key.dataset_index}"
             )
 
-        if executor_transform is not None:
-            sample = executor_transform(sample)
-        if args.subtask_conditioning != "none":
-            if sample.get("prompt") != key.subtask and args.subtask_conditioning == "prompt":
-                raise RuntimeError("Pure executor did not use the strict current subtask as its sole prompt")
-            if sample.get("subtask") != key.subtask and args.subtask_conditioning == "provided":
-                raise RuntimeError("Joint evaluation sample did not receive the strict current subtask")
+        if args.subtask_conditioning == "provided" and sample.get("subtask") != key.subtask:
+            raise RuntimeError("Joint evaluation sample did not receive the current subtask")
 
         packed = repack(sample)
         is_pad = np.asarray(sample[f"{data_config.action_sequence_keys[0]}_is_pad"], dtype=np.bool_)
@@ -480,10 +456,6 @@ def build_pi05(args, episode_ids: list[int] | None, segments):
             segment_end=key.segment_end,
             horizon=args.horizon,
         )
-        if args.subtask_conditioning == "prompt":
-            executor_mask = np.asarray(sample["action_loss_mask"], dtype=np.bool_)[: args.horizon]
-            if not np.array_equal(valid, executor_mask):
-                raise RuntimeError("Offline scoring mask disagrees with the pure executor action_loss_mask")
         if not valid.any():
             raise RuntimeError(f"Selected anchor has no valid action targets: {key}")
         return {
@@ -552,14 +524,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--subtask-conditioning",
-        choices=("none", "prompt", "provided"),
+        choices=("none", "provided"),
         default="none",
-        help="none=whole task; prompt=pure executor; provided=joint model with an explicit oracle subtask",
+        help="none=whole task; provided=joint model with an explicit oracle subtask",
     )
     parser.add_argument(
         "--subtask-prompts",
         type=pathlib.Path,
-        help="strict half-open subtask segment parquet (required for prompt/provided)",
+        help="strict half-open subtask segment parquet (required for provided)",
     )
     parser.add_argument(
         "--episodes-file",
@@ -588,9 +560,9 @@ def main() -> None:
     if args.samples_per_task < 1 or args.samples_per_subtask < 1:
         parser.error("sample counts must be positive")
     if args.subtask_conditioning != "none" and args.subtask_prompts is None:
-        parser.error("--subtask-prompts is required for prompt/provided conditioning")
+        parser.error("--subtask-prompts is required for provided conditioning")
     if args.subtask_conditioning == "none" and args.subtask_prompts is not None:
-        parser.error("--subtask-prompts requires explicit --subtask-conditioning prompt or provided")
+        parser.error("--subtask-prompts requires explicit --subtask-conditioning provided")
     if args.sample_keys_file is not None and (args.subtask_conditioning == "none" or args.episodes_file is None):
         parser.error("--sample-keys-file requires subtask conditioning and --episodes-file")
 
@@ -609,7 +581,6 @@ def main() -> None:
             segments = SubtaskFromSegments.from_parquet(
                 args.subtask_prompts,
                 episodes_index=[episode.episode_index for episode in metadata],
-                require_role_provenance=args.subtask_conditioning == "prompt",
             )
         if args.sample_keys_file is not None:
             samples = replay_samples(args.sample_keys_file, metadata, segments)
@@ -631,7 +602,7 @@ def main() -> None:
     )
 
     try:
-        predict, get_sample = build_pi05(args, requested_episode_ids, segments)
+        predict, get_sample = build_pi05(args, requested_episode_ids)
     except ValueError as error:
         parser.error(str(error))
 

@@ -326,7 +326,7 @@ def train_step(
     def loss_fn(
         model: _model.BaseModel, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions
     ):
-        if getattr(model, "train_subtask_prediction", False) or getattr(model, "train_subtask_executor", False):
+        if getattr(model, "train_subtask_prediction", False):
             chunked_loss, metrics = model.compute_loss_with_metrics(rng, observation, actions, train=True)
         else:
             chunked_loss = model.compute_loss(rng, observation, actions, train=True)
@@ -487,11 +487,8 @@ def main(config: _config.TrainConfig):
             if require_finite_metrics:
                 required = {"loss", "action_loss", "grad_norm", "param_norm"}
                 train_subtask_prediction = getattr(config.model, "train_subtask_prediction", False)
-                train_subtask_executor = getattr(config.model, "train_subtask_executor", False)
                 if train_subtask_prediction:
                     required.update({"subtask_loss", "subtask_token_accuracy", "subtask_tokens"})
-                if train_subtask_executor:
-                    required.add("valid_action_fraction")
                 missing = required - reduced_info.keys()
                 if missing:
                     raise RuntimeError(f"Distributed smoke is missing metrics: {sorted(missing)}")
@@ -551,12 +548,7 @@ def main(config: _config.TrainConfig):
                         "conditioning_mode": (
                             "joint"
                             if getattr(config.model, "train_subtask_prediction", False)
-                            else (
-                                "subtask_only"
-                                if getattr(config.model, "train_subtask_executor", False)
-                                or data_loader.data_config().strict_subtask_action_chunks
-                                else "task"
-                            )
+                            else "task"
                         ),
                         "contract_sha256": os.environ.get("OPENPI_TRAINING_CONTRACT_SHA256"),
                         "epochs": int(expected_epochs) if expected_epochs is not None else None,
@@ -564,8 +556,6 @@ def main(config: _config.TrainConfig):
                         "mesh": dict(mesh.shape),
                         "processes": jax.process_count(),
                         "restored_step": restored_step,
-                        "strict_subtask_action_chunks": data_loader.data_config().strict_subtask_action_chunks,
-                        "subtask_executor": data_loader.data_config().subtask_executor,
                     },
                     sort_keys=True,
                 )

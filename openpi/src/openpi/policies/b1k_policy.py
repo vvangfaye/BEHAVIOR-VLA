@@ -100,8 +100,6 @@ class B1KInputs(transforms.DataTransformFn):
             inputs["prompt"] = data["prompt"]
         if "subtask" in data:
             inputs["subtask"] = data["subtask"]
-        if "action_loss_mask" in data:
-            inputs["action_loss_mask"] = np.asarray(data["action_loss_mask"], dtype=np.bool_)
 
         return inputs
 

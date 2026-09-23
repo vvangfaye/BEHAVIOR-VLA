@@ -4,21 +4,18 @@
 的联合监督方式，接入本仓库已有的 BEHAVIOR 2026 段表。
 
 本文以 JAX 为主，普通 π0.5 的环境与启动方式见[仓库 README](../README.md)。
-当前支持三种互斥的 subtask 训练模式：
+Subtask 监督使用 joint 联合训练：
 
 | 模式 | 监督目标 | 动作块边界处理 | 启动开关 |
 | --- | --- | --- | --- |
 | Joint predictor | subtask 文本 CE + 动作 flow matching | 不自动过滤跨段动作块 | `SUBTASK_PREDICTION=1` |
-| Strict subtask-only | 当前 subtask 替换任务 prompt，仅动作 loss | 只保留完整动作块位于同一段内的起点 | `STRICT_SUBTASK_ACTION_CHUNKS=1` |
-| Pure executor（mask） | 当前 subtask 替换任务 prompt，仅动作 loss | 保留段尾起点，mask 边界外和 padding 的动作 | `SUBTASK_EXECUTOR=1` |
 
 Joint 的 `SUBTASK_ACTION_CONDITIONING=subtask_only` 只控制其动作分支的语言输入，
-不等同于 strict 模式。后两种模式不训练 subtask 生成，闭环推理需要外部技能来源。
+高层仍然学习根据完整任务和观测预测 subtask。
 
 ```text
 joint 高层: Task + State + image → Subtask tokens (CE)
 joint 低层: Subtask + State + image → action chunk (flow matching)
-executor: Subtask + State + image → boundary-masked action chunk
 ```
 
 joint 训练脚本现在默认 `SUBTASK_ACTION_CONDITIONING=subtask_only`，对应
@@ -49,7 +46,7 @@ joint 训练脚本现在默认 `SUBTASK_ACTION_CONDITIONING=subtask_only`，对�
 需要现有训练环境 `openpi/.venv`、BEHAVIOR 2026 LeRobot v3 数据、原始 annotations
 或已生成的段表，以及 π0.5 基础权重。使用既有 OpenPI 环境；无需升级生产环境依赖。
 
-从 BEHAVIOR-VLAs 根目录生成段表（已有有效段表可跳过）。默认 `legacy` 保持旧 checkpoint 的标签语义；pure executor 使用显式 role-aware 格式并写到新文件：
+从 BEHAVIOR-VLAs 根目录生成段表（已有有效段表可跳过）。默认 `legacy` 保持旧 checkpoint 的标签语义；也可生成包含角色和来源信息的 role-aware 格式并写到新文件：
 
 ```bash
 openpi/.venv/bin/python scripts/gen_subtask_prompts.py \
@@ -58,7 +55,7 @@ openpi/.venv/bin/python scripts/gen_subtask_prompts.py \
 openpi/.venv/bin/python scripts/gen_subtask_prompts.py \
   --dataset /path/to/2026-challenge-demos \
   --label-format role_aware_v1 \
-  --output /path/to/role_aware_v1.parquet
+  --out /path/to/role_aware_v1.parquet
 ```
 
 核心列仍为 `episode_index | start | end | subtask`。区间为 **[start, end)**，帧号是
@@ -66,13 +63,11 @@ episode 内的局部帧号，episode id 必须是原始 LeRobot id；选子集�
 时不能重编号。role-aware 表还保存对象角色、原始 annotation 路径、source segment/skill id、
 `is_annotated` 和 `provenance`。role-aware 格式保留相邻同文本的不同原始标注段；
 legacy 格式仍会合并相邻同文本区间。两者均不会从 segment end 虚构 completion、success
-或 recovery 标签。strict 筛选遵循所选段表的边界，因此标签格式也会影响其可用起点。
+或 recovery 标签。
 
-所有保留 episode 的 segment 必须精确覆盖 `[0, length)`。legacy/joint 模式下，空的监督标签仍按
-`SUBTASK_EMPTY_LABEL_POLICY` 报错或剔除整条 episode。role-aware executor 允许
-`is_annotated=false` 的空 imputed 段作为 coverage-only 区间，但这些帧不会成为训练 anchor；
-`is_annotated=true` 的空标签仍会报错或导致整条 episode 被剔除。不会用整任务、相邻 subtask
-或 EOS-only 目标填补缺失监督，原段表和传入的 EPISODES_FILE 均不修改。
+所有保留 episode 的 segment 必须精确覆盖 `[0, length)`，并具有非空文本标签。
+空标签（包括 imputed 区间）按 `SUBTASK_EMPTY_LABEL_POLICY` 报错或剔除整条 episode。
+不会用整任务、相邻 subtask 或 EOS-only 目标填补缺失监督；原段表和传入的 EPISODES_FILE 均不修改。
 
 如需遇到空标签立即停止，设置 `SUBTASK_EMPTY_LABEL_POLICY=error`。直接调用预检 CLI
 或 trainer 仍默认严格报错；自动筛选由启动脚本组织。未知 episode、缺少全部标注、
@@ -105,8 +100,8 @@ EXP_NAME=pi05_subtask_two_tasks_check \
 若这份子集恰好有 78 个 episode 含空标签，报告应显示 requested=400、dropped=78、
 episodes=322；这是按所述数据情况推算，需以实际生成的报告为准。`full` 和 `smoke`
 也会执行同一预检，并将最终名单自动用于归一化统计（需要新计算时）和训练器。
-joint 模式保持旧的 normalization stats 复用行为；executor 模式要求 sidecar provenance 与当前
-训练 episode 和段表哈希一致，否则停止并要求使用新的 assets 目录。
+joint 保留已有 normalization stats 的复用行为；切换数据子集时使用独立 assets 目录或 REPO_ID，
+自行核对统计来源，避免复用包含验证集的统计。
 
 ```bash
 DATASET_ROOT=/path/to/2026-challenge-demos \
@@ -123,7 +118,7 @@ smoke 默认只用原始 episodes 0 和 1。可通过 EPISODES_FILE 指定每行
 subtask 训练默认不会覆盖已有同名实验；使用新的 EXP_NAME，或者明确选择 RESUME=1。
 只有明确要替换旧实验时才设置 OVERWRITE=1，不能与 RESUME=1 同用。
 
-## 3. Joint 与 strict 训练
+## 3. Joint 训练
 
 ### Joint 联合训练
 
@@ -163,35 +158,7 @@ vocabulary]` logits；减小 chunk size 可降低这一部分的临时显存，�
 若直接运行 trainer，必须把预检报告中的最终名单作为 `--data.episodes-index` 传入；
 仅生成名单文件而不传给 trainer，不会改变它的采样范围。
 
-### Strict subtask-only：完整动作块监督
-
-从仓库根目录运行，其他 subtask 模式开关必须关闭：
-
-```bash
-DATASET_ROOT=/path/to/2026-challenge-demos \
-EPISODES_FILE=/path/to/train_episodes.txt \
-SUBTASK_PREDICTION=0 SUBTASK_EXECUTOR=0 STRICT_SUBTASK_ACTION_CHUNKS=1 \
-PREFLIGHT_ONLY=1 ACTION_HORIZON=32 MAX_TOKEN_LEN=200 BATCH_SIZE=1 \
-EXP_NAME=pi05_strict_check \
-  bash scripts/train_pi05_b1k.sh full
-
-DATASET_ROOT=/path/to/2026-challenge-demos \
-EPISODES_FILE=/path/to/train_episodes.txt \
-INIT_PARAMS=/path/to/pi05_base/params REPO_ID=behavior-1k/strict_v1 \
-SUBTASK_PREDICTION=0 SUBTASK_EXECUTOR=0 STRICT_SUBTASK_ACTION_CHUNKS=1 \
-ACTION_HORIZON=32 MAX_TOKEN_LEN=200 \
-NUM_GPUS=1 CUDA_DEVICES=0 BATCH_SIZE=1 \
-TRAIN_STEPS=50000 LR_DECAY_STEPS=50000 EXP_NAME=pi05_strict_full \
-  bash scripts/train_pi05_b1k.sh full
-```
-
-公共入口只接受 `smoke` / `full`；strict 预检通过 `PREFLIGHT_ONLY=1` 启用。
-训练使用普通 π0.5 tokenizer：`Task: 当前subtask, State: ...; Action:`，没有文本 CE。
-只保留 `[t, t + ACTION_HORIZON)` 完整位于当前标注段内且不含 episode padding 的起点。
-短于动作窗口的段可能没有可用起点，实际样本数量以预检为准。
-这与下面保留段尾并 mask 部分动作的 executor 不同。
-
-## 4. 纯 subtask executor
+## 4. 训练与验证集划分
 
 先按 `(task_index, task_instance_id)` 分组切分，保证同一初始状态的全部轨迹只出现在一侧：
 
@@ -208,31 +175,23 @@ openpi/.venv/bin/python openpi/scripts/b1k/split_subtask_episodes.py \
 
 ```bash
 DATASET_ROOT=/path/to/2026-challenge-demos \
-SUBTASK_PROMPTS=/path/to/role_aware_v1.parquet \
+SUBTASK_PROMPTS=/path/to/subtask_segments.parquet \
 EPISODES_FILE=/path/to/split/train_episodes.txt \
 VAL_EPISODES_FILE=/path/to/split/val_episodes.txt \
 INIT_PARAMS=/path/to/pi05_base/params \
-REPO_ID=behavior-1k/executor_two_tasks_s1 \
-EXP_NAME=pi05_b1k_executor_two_tasks_s1 \
+REPO_ID=behavior-1k/joint_two_tasks_s1 \
+EXP_NAME=pi05_b1k_joint_two_tasks_s1 \
 NUM_GPUS=4 CUDA_DEVICES=0,1,2,3 BATCH_SIZE=64 \
 TRAIN_STEPS=50000 LR_DECAY_STEPS=50000 \
-  bash scripts/train_pi05_subtask_executor_b1k.sh full
+  bash scripts/train_pi05_subtask_b1k.sh full
 ```
 
 首次运行先将 `full` 改为 `check` 检查数据，再用小 batch 和 `TRAIN_STEPS=2` 跑 `smoke`。
 上例按步数训练；若设置 `TRAIN_EPOCHS`，脚本会校验 `TRAIN_STEPS` 是否等于预检报告
 `training_contract.train_steps`，不会自动代填。计算时必须使用同一段表、episode 子集、
-frame stride、segment cap 和全局 batch，并将 `LR_DECAY_STEPS` 设为相同总步数。
+frame stride 和全局 batch，并将 `LR_DECAY_STEPS` 设为相同总步数。
 
-executor 默认每个 annotated segment 最多均匀选择 64 个不同 anchor；短 segment 全保留，
-可用 `MAX_SAMPLES_PER_SEGMENT` 调整。允许从段尾不足完整动作窗口的位置采样，
-`action_loss_mask = within_current_segment & ~episode_padding`。边界外 action 输入被替换为与目标
-无关的噪声并从 action attention keys 中屏蔽；loss 先对动作维求均值，再按每个样本的有效
-时间步归一化，最后对 batch 等权平均。日志中的 `valid_action_fraction` 用于核对 mask 生效。
-
-归一化统计只使用训练 episode。executor 若发现已有 norm stats 缺少匹配的 episode/annotation
-SHA-256 provenance 会直接停止，避免误用包含验证集的统计。验证 loader 使用相同训练统计、独立
-episode 列表和确定性 RNG；显式启用 validation 后的创建或读取错误不会被静默忽略。
+验证 loader 使用训练统计、独立 episode 列表和确定性 RNG；显式启用 validation 后的错误不会被静默忽略。
 
 ## 5. 离线全技能评测
 
@@ -240,16 +199,16 @@ episode 列表和确定性 RNG；显式启用 validation 后的创建或读取�
 openpi/.venv/bin/python scripts/eval_openloop.py \
   --dataset /path/to/2026-challenge-demos \
   --pi05-ckpt /path/to/checkpoint \
-  --repo-id behavior-1k/executor_two_tasks_s1 \
+  --repo-id behavior-1k/joint_two_tasks_s1 \
   --episodes-file /path/to/split/val_episodes.txt \
   --subtask-prompts /path/to/role_aware_v1.parquet \
-  --subtask-conditioning prompt \
+  --subtask-conditioning provided \
   --samples-per-subtask 32 \
   --out /path/to/result.json
 ```
 
-`--repo-id` 必须与 checkpoint `assets/` 下保存 norm stats 的目录名一致。strict / pure executor 使用
-`prompt`；joint predictor 的外部标签审计使用 `provided` 并逐样本断言来源为 `provided`。
+`--repo-id` 必须与 checkpoint `assets/` 下保存 norm stats 的目录名一致。joint predictor 的外部标签审计
+使用 `provided` 并逐样本断言来源为 `provided`。
 后者使用 GT 标签，不测量模型自主生成技能的准确率。报告只在
 segment 内且非 episode padding 的动作位置计算 L1/RMSE，并按 task、canonical subtask、action
 group 和 chunk position 汇总，同时记录 checkpoint、段表和 split 哈希。
@@ -270,7 +229,6 @@ Joint 日志除总 loss 外还包含：
 
 先检查小数据切片上 subtask CE 下降、token 准确率上升，并同时观察动作损失。token 准确率
 是使用真实前文时的指标，不是自由生成文本正确率，也不等于机器人任务成功率。
-Strict / pure executor 没有这些文本指标；pure executor 额外记录 `valid_action_fraction`。
 
 ## 7. 自动生成 subtask 的在线推理
 
@@ -330,14 +288,12 @@ OUTPUT_ROOT=/path/to/subtask-evaluation \
 期间始终用最新图像/状态和缓存的 subtask 重建低层输入。可用 interval=1/2/4 做闭环消融，
 较慢高层刷新可能延迟技能切换，不能保证提高成功率。
 默认 greedy 解码（temperature=0）；请给预测 subtask 与 oracle 评测使用不同输出目录。
-星云 eval worker 当前显式设置 interval=1，不能把 policy factory 的默认值 2 当作平台实际值；
-以运行参数和 rollout metadata 为准。
+星云 eval worker 根据 checkpoint 条件模式选择刷新间隔；以运行参数和 rollout metadata 为准。
 
 ### 给定 subtask 的对比推理
 
-固定外部 subtask 使用 `EXTERNAL_SUBTASK`，需设置 `PROMPT_MODE=whole_task` 并选择一种
-服务模式。Joint checkpoint 使用 `SUBTASK_PREDICTION=1`；strict checkpoint 使用
-`SUBTASK_PREDICTION=0 PROVIDED_SUBTASK_AS_PROMPT=1 MAX_TOKEN_LEN=200`。
+固定外部 subtask 使用 `EXTERNAL_SUBTASK`，需设置 `PROMPT_MODE=whole_task`，
+并使用 joint checkpoint 和 `SUBTASK_PREDICTION=1`。
 例如 joint 的单实例 smoke：
 
 ```bash
@@ -354,22 +310,21 @@ Evaluator 会在每次新 observation 上重新注入该文本，并要求服务
 rollout metadata 记录 `external_fixed`、`provided`、`oracle=false`。这只评测给定初始技能的
 执行能力，不代表完整任务调度能力。
 
-### Strict checkpoint + 外部技能 selector
+### Joint checkpoint + 外部技能 selector
 
 ```bash
-MODEL=pi05 SUBTASK_PREDICTION=0 PROVIDED_SUBTASK_AS_PROMPT=1 \
-PROMPT_MODE=whole_task MAX_TOKEN_LEN=200 \
+MODEL=pi05 SUBTASK_PREDICTION=1 \
+PROMPT_MODE=whole_task MAX_TOKEN_LEN=512 \
 EXTERNAL_SUBTASK_SELECTOR=state_machine_v1 \
-PI05_CKPT=/path/to/strict-checkpoint/step \
-PI05_REPO_ID=behavior-1k/strict_v1 \
+PI05_CKPT=/path/to/joint-checkpoint/step \
+PI05_REPO_ID=behavior-1k/joint_v1 \
 INSTANCE_INDICES=0 NUM_ROLLOUTS=1 \
-OUTPUT_ROOT=/path/to/strict-selector-evaluation \
+OUTPUT_ROOT=/path/to/joint-selector-evaluation \
   bash scripts/eval_b1k.sh carrying_in_groceries make_rose_centerpieces
 ```
 
-此模式使用普通 `Policy`，由 `UseSubtaskAsPrompt` 把外部 `subtask` 替换为语言 prompt，
-动作模型不接收完整任务。缺失或空技能会报错，技能变化时清空动作缓存，来源记录为 `provided`。
-当前入口仅支持 JAX，要求 200-token 配置；不能用它加载 joint 模型来代替 joint 的两阶段推理。
+此模式向 `SubtaskPolicy` 提供外部 subtask，跳过本次技能生成，来源记录为 `provided`。
+低层输入继续遵循 checkpoint 的 joint 动作条件配置。
 
 `state_machine_v1` 仅支持上面两个任务，外部 BEHAVIOR evaluator 必须实现
 `--external-subtask-selector`。它使用仿真特权状态，结果标记
@@ -396,8 +351,8 @@ JAX_PLATFORMS=cpu .venv/bin/python -m pytest -q \
   scripts/b1k/check_subtask_data_test.py
 ```
 
-回归测试覆盖段表边界/缺标注、role-aware provenance、segment cap、输入透传、EOS/首词监督、
-因果注意力、边界外 target 隔离、真实 Pi0/Gemma 接口的
+回归测试覆盖段表边界/缺标注、role-aware provenance、输入透传、EOS/首词监督、
+因果注意力、真实 Pi0/Gemma 接口的
 联合反向传播、验证集隔离、外部 subtask 来源传输及原动作 API。模型测试使用小词表和轻量
 图像编码器；真实数据 preflight 不解码视频，也不代表完整 checkpoint 已完成收敛或闭环验证。
 

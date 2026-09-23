@@ -12,12 +12,10 @@
 
 | 模式 | 模型输入与监督 | 动作块边界处理 | 训练开关 |
 | --- | --- | --- | --- |
-| 普通 π0.5 | 观测 + 完整任务 → 动作；仅动作 loss | 原始动作块 | 三个 subtask 模式开关均为 `0` |
+| 普通 π0.5 | 观测 + 完整任务 → 动作；仅动作 loss | 原始动作块 | `SUBTASK_PREDICTION=0`（不设置 `SUBTASK_PROMPTS`） |
 | Joint predictor | 高层预测 subtask；动作层使用 GT subtask；文本 CE + 动作 loss | 不自动过滤跨 subtask 边界的动作块 | `SUBTASK_PREDICTION=1` |
-| Strict subtask-only | 当前 subtask 替换任务 prompt；仅动作 loss，不生成 subtask | 只保留完整动作块落在同一标注段内的起点 | `STRICT_SUBTASK_ACTION_CHUNKS=1` |
-| Pure executor（mask） | 当前 subtask 作为 prompt；仅动作 loss，不生成 subtask | 保留段尾起点，对边界外和 episode padding 的动作做 mask | `SUBTASK_EXECUTOR=1` |
 
-三个 subtask 模式开关互斥。只设置 `SUBTASK_PROMPTS` 不等于开启 joint 或 strict 模式；
+只设置 `SUBTASK_PROMPTS` 不等于开启 joint 模式；
 普通入口还保留按概率混合完整任务与 subtask prompt 的旧用法。
 
 新版 joint 启动脚本默认 `SUBTASK_ACTION_CONDITIONING=subtask_only`：
@@ -31,7 +29,7 @@
 ```
 
 高低层共享模型参数；训练时复用不含语言信息的 SigLIP 输出，动作分支不复用高层的
-语言隐藏状态或 KV cache。**joint 中的 `subtask_only` 是动作条件配置，不是 strict 训练模式。**
+语言隐藏状态或 KV cache。**joint 中的 `subtask_only` 控制动作分支的语言输入，高层仍训练 subtask 预测。**
 `Pi0Config` 本身为兼容旧权重保留 `task_and_subtask` 默认值；绕过 shell 直接运行 Python
 trainer 时，新 joint 模式需要显式传入 `--model.subtask-action-conditioning subtask_only`。
 当前未实现历史记忆或独立的 subtask 完成判别器。
@@ -54,14 +52,13 @@ JAX 的数据读取仍使用 PyTorch `DataLoader`，共享环境中的 Torch/视
 
 | 用途 | 入口 | 参数或开关 |
 | --- | --- | --- |
-| 普通 / strict 动作训练 | [train_pi05_b1k.sh](scripts/train_pi05_b1k.sh) | `smoke` / `full`；strict 使用上表开关 |
+| 普通动作训练 | [train_pi05_b1k.sh](scripts/train_pi05_b1k.sh) | `smoke` / `full` |
 | Joint 联合训练 | [train_pi05_subtask_b1k.sh](scripts/train_pi05_subtask_b1k.sh) | `check` / `smoke` / `full` |
-| Pure executor 训练 | [train_pi05_subtask_executor_b1k.sh](scripts/train_pi05_subtask_executor_b1k.sh) | `check` / `smoke` / `full` |
-| 数据预检 | [check_subtask_data.py](openpi/scripts/b1k/check_subtask_data.py) | 段表、episode 子集、token / 动作预算 |
+| 数据预检 | [check_subtask_data.py](openpi/scripts/b1k/check_subtask_data.py) | 段表、episode 子集、token 预算 |
 | 在线策略服务 | [serve_b1k.py](openpi/scripts/b1k/serve_b1k.py) | checkpoint、任务和条件模式 |
 | 闭环评测 | [eval_b1k.sh](scripts/eval_b1k.sh) | 任务名；自动启动策略服务和仿真 |
 | 多任务评测 | [eval_sweep.sh](scripts/eval_sweep.sh) | `TASK_FILE`、`WORKERS` |
-| 离线动作误差诊断 | [eval_openloop.py](scripts/eval_openloop.py) | `--subtask-conditioning none/prompt/provided` |
+| 离线动作误差诊断 | [eval_openloop.py](scripts/eval_openloop.py) | `--subtask-conditioning none/provided` |
 | 闭环结果汇总 | [summarize_closed_loop.py](scripts/summarize_closed_loop.py) | 不同 checkpoint 的结果目录 |
 
 ## 3. JAX 训练
@@ -83,7 +80,7 @@ export REPO_ID=behavior-1k/2026-challenge-demos
 ### 普通 π0.5
 
 ```bash
-SUBTASK_PREDICTION=0 SUBTASK_EXECUTOR=0 STRICT_SUBTASK_ACTION_CHUNKS=0 \
+SUBTASK_PREDICTION=0 \
 NUM_GPUS=1 CUDA_DEVICES=0 BATCH_SIZE=1 NUM_WORKERS=0 \
 EXP_NAME=pi05_ordinary_smoke \
   bash scripts/train_pi05_b1k.sh smoke
@@ -114,36 +111,14 @@ joint 新模式增加高层语言前向，显存和吞吐应在实际训练机�
 `TRAIN_STEPS` 不会自动改变学习率衰减长度；默认 `LR_DECAY_STEPS` 对应配置中的 30000 步，
 需要按整个训练周期衰减时，应像示例一样显式设置。
 
-### Strict subtask-only：完整动作块不跨技能边界
-
-```bash
-# strict 的预检由公共入口的 PREFLIGHT_ONLY 开关启用
-SUBTASK_PREDICTION=0 SUBTASK_EXECUTOR=0 STRICT_SUBTASK_ACTION_CHUNKS=1 \
-PREFLIGHT_ONLY=1 ACTION_HORIZON=32 MAX_TOKEN_LEN=200 BATCH_SIZE=1 \
-EXP_NAME=pi05_strict_check \
-  bash scripts/train_pi05_b1k.sh full
-
-SUBTASK_PREDICTION=0 SUBTASK_EXECUTOR=0 STRICT_SUBTASK_ACTION_CHUNKS=1 \
-ACTION_HORIZON=32 MAX_TOKEN_LEN=200 \
-NUM_GPUS=1 CUDA_DEVICES=0 BATCH_SIZE=1 \
-TRAIN_STEPS=50000 LR_DECAY_STEPS=50000 EXP_NAME=pi05_strict_full \
-  bash scripts/train_pi05_b1k.sh full
-```
-
-Strict 训练使用普通 π0.5 tokenizer，格式为 `Task: 当前subtask, State: ...; Action:`。
-它不会训练高层技能生成，需要在推理时提供当前技能。
-Pure executor 是另一种边界处理方式：使用显式 role-aware 段表和动作 mask，入口为
-`train_pi05_subtask_executor_b1k.sh`；数据准备、段内采样和 train/val 划分见
-[详细指南](docs/subtask_training.md#4-纯-subtask-executor)。
-
 ### 预检、保存与恢复
 
 - 段表默认是 `$DATASET_ROOT/meta/subtask_segments.parquet`，可用 `SUBTASK_PROMPTS` 覆盖。
   `[start, end)` 使用 episode 内局部帧号，episode ID 保留原始 LeRobot 编号。
-- Joint / strict 默认 `SUBTASK_EMPTY_LABEL_POLICY=drop_episode`，含空监督标签的整个 episode
+- Joint 默认 `SUBTASK_EMPTY_LABEL_POLICY=drop_episode`，含空监督标签的整个 episode
   从训练名单中剔除；设置 `error` 则停止。报告和最终名单写入
   `openpi/outputs/subtask_preflight/`，原数据与输入名单不修改。
-- 归一化统计通常复用已有文件；需要新计算时使用预检后的 episode 子集，strict 还使用动作块筛选。
+- 归一化统计通常复用已有文件；需要新计算时使用预检后的 episode 子集。
   切换数据子集时核对已有统计，使用独立 `REPO_ID` 或 `ASSETS_BASE_DIR` 管理不同实验的数据资产。
 - checkpoint 默认写入 `openpi/outputs/checkpoints/pi05_b1k/<EXP_NAME>/<step>/`，评测要传具体 step 目录。
   `ASSETS_BASE_DIR`、`CHECKPOINT_BASE_DIR` 可覆盖默认路径。
@@ -164,7 +139,7 @@ Pure executor 是另一种边界处理方式：使用显式 role-aware 段表和
 ```bash
 PI05_CKPT=/path/to/checkpoint/step \
 PI05_REPO_ID=behavior-1k/2026-challenge-demos \
-SUBTASK_PREDICTION=1 PROVIDED_SUBTASK_AS_PROMPT=0 \
+SUBTASK_PREDICTION=1 \
 INSTANCE_INDICES=0 NUM_ROLLOUTS=1 \
 OUTPUT_ROOT=/path/to/results/joint_generated \
   bash scripts/eval_b1k.sh carrying_in_groceries
@@ -172,7 +147,7 @@ OUTPUT_ROOT=/path/to/results/joint_generated \
 
 `PI05_REPO_ID` 必须匹配 checkpoint 的 `assets/<REPO_ID>/norm_stats.json`。
 自主生成时不设置 `EXTERNAL_SUBTASK`、`EXTERNAL_SUBTASK_SELECTOR`。
-普通 π0.5 使用同一入口，设置 `SUBTASK_PREDICTION=0 PROVIDED_SUBTASK_AS_PROMPT=0`。
+普通 π0.5 使用同一入口，设置 `SUBTASK_PREDICTION=0`。
 
 | 参数 | 含义与默认值 |
 | --- | --- |
@@ -186,25 +161,12 @@ OUTPUT_ROOT=/path/to/results/joint_generated \
 复用技能期间仍读取最新图像和状态；这不是历史记忆，也不是完成检测。
 指令变化和 episode reset 会清理相关缓存。
 
-### Strict checkpoint + 外部 selector
+### Joint + 外部 selector 诊断
 
-```bash
-PI05_CKPT=/path/to/strict_checkpoint/step \
-PI05_REPO_ID=训练时使用的REPO_ID \
-SUBTASK_PREDICTION=0 PROVIDED_SUBTASK_AS_PROMPT=1 \
-EXTERNAL_SUBTASK_SELECTOR=state_machine_v1 MAX_TOKEN_LEN=200 \
-INSTANCE_INDICES=0 NUM_ROLLOUTS=1 \
-OUTPUT_ROOT=/path/to/results/strict_selector \
-  bash scripts/eval_b1k.sh carrying_in_groceries make_rose_centerpieces
-```
-
-该路径使用普通动作 Policy，把 selector 提供的 `subtask` 替换为语言 `prompt`，与 strict
-训练输入一致。它与 `SUBTASK_PREDICTION=1` 互斥。固定技能调试可改用
-`EXTERNAL_SUBTASK="move to paper bag"`，不能和 selector 同时设置。
-
-当前 selector 仅支持上述两个任务；结果标记为 `oracle=true`、`privileged=true`、
-`official_benchmark=false`，用于诊断动作执行能力。Joint 也可接收外部 subtask，
-但使用 joint 路径并保留完整任务 prompt，不能与 strict 的 prompt 替换混用。
+设置 `SUBTASK_PREDICTION=1 EXTERNAL_SUBTASK_SELECTOR=state_machine_v1`，运行同一评测入口。
+当前 selector 仅支持 `carrying_in_groceries` 和 `make_rose_centerpieces`，向 joint 提供外部技能。
+结果标记为 `oracle=true`、`privileged=true`、`official_benchmark=false`，用于诊断动作执行能力。
+固定技能调试可改用 `EXTERNAL_SUBTASK="move to paper bag"`，不能与 selector 同时设置。
 
 ### 仿真与结果
 
@@ -213,8 +175,8 @@ OUTPUT_ROOT=/path/to/results/strict_selector \
 `OMNIGIBSON_DATA_PATH` 指向资产目录。结果默认位于 `eval_results/pi05/<task>/`。
 `INSTANCE_INDICES` 是评测 split 内的实例索引，不是训练 episode ID；不设置时 evaluator 默认运行全部实例。
 
-离线 [eval_openloop.py](scripts/eval_openloop.py) 的 `none` 模式使用完整任务，`prompt` 模式
-用于给定 subtask 的动作模型，`provided` 用于给 joint 提供 GT subtask。
+离线 [eval_openloop.py](scripts/eval_openloop.py) 的 `none` 模式使用完整任务，
+`provided` 用于给 joint 提供 GT subtask。
 它报告 demonstration action error，不验证自主技能生成或闭环成功率。
 
 ## 5. 星云入口
@@ -228,9 +190,8 @@ OUTPUT_ROOT=/path/to/results/strict_selector \
 | 多机 / 指定硬件训练 | [submit_pi05_multihost.sh](nebula/submit_pi05_multihost.sh) | `MODE=discover/preflight/smoke/full`、`DATASET_PROFILE` |
 | 闭环评测 | [submit_pi05_eval.sh](nebula/submit_pi05_eval.sh) | `EVAL_PROFILE=smoke/speed/two_tasks/reduced/full` |
 
-训练 profiles 包括 `two_tasks`、`two_tasks_joint_h200`、`two_tasks_subtask_only`、
-`two_tasks_subtask_only_h200` 和 `full100`。名称带 `subtask_only` 的 profile 使用 **strict 动作训练**，
-其余使用 joint。H200 profiles 有固定设备数、batch 和 epoch / 数据校验，
+训练 profiles 包括 `two_tasks`、`two_tasks_joint_h200` 和 `full100`，均使用 joint。
+H200 profiles 有固定设备数、batch 和 epoch / 数据校验，
 这些是提交配置，不代表新版 joint 已测得的显存上限。
 
 ```bash
@@ -250,7 +211,7 @@ CHECKPOINT_SOURCE=/path/to/checkpoint/step PI05_REPO_ID=训练时使用的REPO_I
 评测 worker 对 `smoke/reduced/full` 要求至少 2 张 L20，`speed/two_tasks` 使用 4 个 worker
 及至少 4 张 L20；`full` 还要求 `CONFIRM_FULL=1`。`two_tasks` 默认运行
 2 个任务 × 20 个实例 × 3 次 rollout = 120 条结果；启用 selector 时它们是诊断结果。
-**星云 joint 评测 worker 当前显式设置 `SUBTASK_INTERVAL=1`**，与直接评测入口的自动默认值不同。
+星云 joint 评测 worker 同样根据 checkpoint 条件模式选择刷新间隔，并记录到运行 metadata。
 
 ## 6. 理解代码的阅读路径
 
@@ -260,7 +221,7 @@ CHECKPOINT_SOURCE=/path/to/checkpoint/step PI05_REPO_ID=训练时使用的REPO_I
 | --- | --- | --- |
 | 1. 启动 | [train_pi05_b1k.sh](scripts/train_pi05_b1k.sh) | 环境变量如何选择模式，组织预检、norm stats 和 Python 参数 |
 | 2. 配置 | [config.py](openpi/src/openpi/training/config.py)：`pi05_b1k`、`LeRobotB1KDataConfig`；[Pi0Config](openpi/src/openpi/models/pi0_config.py) | 数据配置、动作块长度、文本预算、EMA、模型开关 |
-| 3. 样本 | [data_loader.py](openpi/src/openpi/training/data_loader.py)：`create_b1k_dataset()`、`transform_dataset()`；[subtask_data.py](openpi/src/openpi/training/subtask_data.py) | 当前帧如何匹配标签，strict 如何筛选起点，executor 如何构造 mask |
+| 3. 样本 | [data_loader.py](openpi/src/openpi/training/data_loader.py)：`create_b1k_dataset()`、`transform_dataset()`；[subtask_data.py](openpi/src/openpi/training/subtask_data.py) | 当前帧如何匹配标签，episode 子集与 frame stride 如何确定采样起点 |
 | 4. 输入 | [b1k_policy.py](openpi/src/openpi/policies/b1k_policy.py)；[transforms.py](openpi/src/openpi/transforms.py)；[tokenizer.py](openpi/src/openpi/models/tokenizer.py) | 图像/状态/动作字段、归一化、GT 标签、EOS 和高低层 token 序列 |
 | 5. 模型 | [pi0.py](openpi/src/openpi/models/pi0.py)：`embed_prefix()`、`embed_suffix()`、`compute_loss_with_metrics()` | π0.5 也在此文件；先看动作 flow matching，再看 `factorized` 分支和文本 CE |
 | 6. 更新与保存 | [train_b1k.py](openpi/scripts/b1k/train_b1k.py)：`init_train_state()`、`train_step()`、`main()`；[checkpoints.py](openpi/src/openpi/training/checkpoints.py) | 梯度、优化器、EMA、训练状态与推理权重的区别 |

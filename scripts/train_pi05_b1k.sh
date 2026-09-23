@@ -17,10 +17,6 @@ SUBTASK_PROMPTS="${SUBTASK_PROMPTS:-}"
 FRAME_STRIDE="${FRAME_STRIDE:-1}"
 EPISODES_FILE="${EPISODES_FILE:-}"
 SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-0}"
-SUBTASK_EXECUTOR="${SUBTASK_EXECUTOR:-0}"
-STRICT_SUBTASK_ACTION_CHUNKS="${STRICT_SUBTASK_ACTION_CHUNKS:-0}"
-ACTION_HORIZON="${ACTION_HORIZON:-32}"
-MAX_SAMPLES_PER_SEGMENT="${MAX_SAMPLES_PER_SEGMENT:-}"
 EXPECTED_TASK_INDICES="${EXPECTED_TASK_INDICES:-}"
 VAL_EPISODES_FILE="${VAL_EPISODES_FILE:-}"
 VAL_REPO_ID="${VAL_REPO_ID:-}"
@@ -42,50 +38,15 @@ if [[ "$SUBTASK_PREDICTION" != 0 && "$SUBTASK_PREDICTION" != 1 ]]; then
     echo "SUBTASK_PREDICTION must be 0 or 1" >&2
     exit 2
 fi
-if [[ "$SUBTASK_EXECUTOR" != 0 && "$SUBTASK_EXECUTOR" != 1 ]]; then
-    echo "SUBTASK_EXECUTOR must be 0 or 1" >&2
-    exit 2
-fi
-if [[ "$STRICT_SUBTASK_ACTION_CHUNKS" != 0 && "$STRICT_SUBTASK_ACTION_CHUNKS" != 1 ]]; then
-    echo "STRICT_SUBTASK_ACTION_CHUNKS must be 0 or 1" >&2
-    exit 2
-fi
-if (( SUBTASK_PREDICTION + SUBTASK_EXECUTOR + STRICT_SUBTASK_ACTION_CHUNKS > 1 )); then
-    echo "SUBTASK_PREDICTION, SUBTASK_EXECUTOR, and STRICT_SUBTASK_ACTION_CHUNKS are mutually exclusive" >&2
-    exit 2
-fi
-if [[ "$SUBTASK_PREDICTION" == 1 || "$SUBTASK_EXECUTOR" == 1 || "$STRICT_SUBTASK_ACTION_CHUNKS" == 1 ]]; then
+if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
     SUBTASK_PROMPTS="${SUBTASK_PROMPTS:-$DATASET_ROOT/meta/subtask_segments.parquet}"
     SUBTASK_EMPTY_LABEL_POLICY="${SUBTASK_EMPTY_LABEL_POLICY:-drop_episode}"
     MAX_SUBTASK_LEN="${MAX_SUBTASK_LEN:-64}"
-fi
-if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
     MAX_TOKEN_LEN="${MAX_TOKEN_LEN:-512}"
-    CONDITIONING_MODE="joint"
     if [[ "${WHOLE_TASK_PROB:-0}" != 0 && "${WHOLE_TASK_PROB:-0}" != 0.0 ]]; then
         echo "Subtask prediction preserves the whole task; WHOLE_TASK_PROB must be 0." >&2
         exit 2
     fi
-elif [[ "$SUBTASK_EXECUTOR" == 1 ]]; then
-    MAX_TOKEN_LEN="${MAX_TOKEN_LEN:-200}"
-    CONDITIONING_MODE="subtask_only"
-    if [[ "${WHOLE_TASK_PROB:-0}" != 0 && "${WHOLE_TASK_PROB:-0}" != 0.0 ]]; then
-        echo "Pure subtask executor training requires WHOLE_TASK_PROB=0." >&2
-        exit 2
-    fi
-    if [[ -n "$MAX_SAMPLES_PER_SEGMENT" && ! "$MAX_SAMPLES_PER_SEGMENT" =~ ^[1-9][0-9]*$ ]]; then
-        echo "MAX_SAMPLES_PER_SEGMENT must be a positive integer when set." >&2
-        exit 2
-    fi
-elif [[ "$STRICT_SUBTASK_ACTION_CHUNKS" == 1 ]]; then
-    MAX_TOKEN_LEN="${MAX_TOKEN_LEN:-200}"
-    CONDITIONING_MODE="subtask_only"
-    if [[ "${WHOLE_TASK_PROB:-0}" != 0 && "${WHOLE_TASK_PROB:-0}" != 0.0 ]]; then
-        echo "Strict subtask action training requires WHOLE_TASK_PROB=0." >&2
-        exit 2
-    fi
-else
-    CONDITIONING_MODE="joint"
 fi
 
 if [[ ! -f "$DATASET_ROOT/meta/info.json" ]]; then
@@ -194,7 +155,7 @@ set -u
 # must be restricted before the norm-stats step too, not just for training.
 export CUDA_VISIBLE_DEVICES="$CUDA_DEVICES"
 
-if [[ "$SUBTASK_PREDICTION" == 1 || "$SUBTASK_EXECUTOR" == 1 || "$STRICT_SUBTASK_ACTION_CHUNKS" == 1 ]]; then
+if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
     PREFLIGHT_OUTPUT_DIR="${PREFLIGHT_OUTPUT_DIR:-outputs/subtask_preflight}"
     mkdir -p "$PREFLIGHT_OUTPUT_DIR"
     VALIDATED_EPISODES_FILE="$PREFLIGHT_OUTPUT_DIR/$EXP_NAME.episodes.txt"
@@ -206,19 +167,9 @@ if [[ "$SUBTASK_PREDICTION" == 1 || "$SUBTASK_EXECUTOR" == 1 || "$STRICT_SUBTASK
         --max-subtask-len "$MAX_SUBTASK_LEN"
         --empty-label-policy "$SUBTASK_EMPTY_LABEL_POLICY"
         --frame-stride "$FRAME_STRIDE"
-        --action-horizon "$ACTION_HORIZON"
-        --conditioning-mode "$CONDITIONING_MODE"
         --report-file "$PREFLIGHT_REPORT_FILE"
         --write-episodes-file "$VALIDATED_EPISODES_FILE"
     )
-    if [[ "$SUBTASK_EXECUTOR" == 1 ]]; then
-        PREFLIGHT_ARGS+=(--subtask-executor)
-        if [[ -n "$MAX_SAMPLES_PER_SEGMENT" ]]; then
-            PREFLIGHT_ARGS+=(--max-samples-per-segment "$MAX_SAMPLES_PER_SEGMENT")
-        fi
-    elif [[ "$STRICT_SUBTASK_ACTION_CHUNKS" == 1 ]]; then
-        PREFLIGHT_ARGS+=(--strict-subtask-action-chunks)
-    fi
     if [[ -n "$TRAIN_EPOCHS" ]]; then
         PREFLIGHT_ARGS+=(
             --global-batch-size "$BATCH_SIZE"
@@ -300,20 +251,10 @@ PY
             --max-subtask-len "$MAX_SUBTASK_LEN"
             --empty-label-policy "$SUBTASK_EMPTY_LABEL_POLICY"
             --frame-stride "$FRAME_STRIDE"
-            --action-horizon "$ACTION_HORIZON"
-            --conditioning-mode "$CONDITIONING_MODE"
             --episodes-index "${VAL_EPISODES_INDEX[@]}"
             --report-file "$VAL_PREFLIGHT_REPORT_FILE"
             --write-episodes-file "$VALIDATED_VAL_EPISODES_FILE"
         )
-        if [[ "$SUBTASK_EXECUTOR" == 1 ]]; then
-            VAL_PREFLIGHT_ARGS+=(--subtask-executor)
-            if [[ -n "$MAX_SAMPLES_PER_SEGMENT" ]]; then
-                VAL_PREFLIGHT_ARGS+=(--max-samples-per-segment "$MAX_SAMPLES_PER_SEGMENT")
-            fi
-        elif [[ "$STRICT_SUBTASK_ACTION_CHUNKS" == 1 ]]; then
-            VAL_PREFLIGHT_ARGS+=(--strict-subtask-action-chunks)
-        fi
         python scripts/b1k/check_subtask_data.py "${VAL_PREFLIGHT_ARGS[@]}"
         VAL_EPISODES_INDEX=()
         while IFS= read -r EPISODE_INDEX || [[ -n "$EPISODE_INDEX" ]]; do
@@ -331,42 +272,6 @@ PY
 fi
 
 NORM_FILE="$ASSETS_BASE_DIR/pi05_b1k/$REPO_ID/norm_stats.json"
-NORM_PROVENANCE_FILE="$ASSETS_BASE_DIR/pi05_b1k/$REPO_ID/norm_stats.provenance.json"
-if [[ "$SUBTASK_EXECUTOR" == 1 ]]; then
-    read -r NORM_EPISODE_SHA NORM_ANNOTATION_SHA NORM_CONTRACT_SHA < <(
-        python - "$PREFLIGHT_REPORT_FILE" <<'PY'
-import json
-import sys
-
-report = json.load(open(sys.argv[1]))
-contract = report["training_contract"]
-print(contract["episode_list_sha256"], contract["annotation_sha256"], report["training_contract_sha256"])
-PY
-    )
-    if [[ -f "$NORM_FILE" ]]; then
-        [[ -f "$NORM_PROVENANCE_FILE" ]] || {
-            echo "Executor norm stats exist without provenance: $NORM_PROVENANCE_FILE" >&2
-            exit 2
-        }
-        python - "$NORM_PROVENANCE_FILE" "$NORM_FILE" "$NORM_EPISODE_SHA" "$NORM_ANNOTATION_SHA" <<'PY'
-import hashlib
-import json
-import sys
-
-provenance_path, norm_path, episode_sha, annotation_sha = sys.argv[1:]
-provenance = json.load(open(provenance_path))
-actual_norm_sha = hashlib.sha256(open(norm_path, "rb").read()).hexdigest()
-expected = {
-    "norm_stats_sha256": actual_norm_sha,
-    "episode_list_sha256": episode_sha,
-    "annotation_sha256": annotation_sha,
-}
-for key, value in expected.items():
-    if provenance.get(key) != value:
-        raise SystemExit(f"Executor norm stats provenance mismatch for {key}: {provenance.get(key)!r} != {value!r}")
-PY
-    fi
-fi
 if [[ ! -f "$NORM_FILE" ]]; then
     echo "Computing normalization statistics..."
     NORM_ARGS=(
@@ -383,38 +288,7 @@ if [[ ! -f "$NORM_FILE" ]]; then
     if (( ${#EPISODES_INDEX[@]} )); then
         NORM_ARGS+=(--episodes-index "${EPISODES_INDEX[@]}")
     fi
-    if [[ "$STRICT_SUBTASK_ACTION_CHUNKS" == 1 ]]; then
-        NORM_ARGS+=(
-            --frame-stride "$FRAME_STRIDE"
-            --subtask-prompts-path "$SUBTASK_PROMPTS"
-            --action-horizon "$ACTION_HORIZON"
-            --strict-subtask-action-chunks
-        )
-    fi
     python scripts/compute_norm_stats.py "${NORM_ARGS[@]}"
-    if [[ "$SUBTASK_EXECUTOR" == 1 ]]; then
-        python - "$NORM_FILE" "$NORM_PROVENANCE_FILE" "$NORM_EPISODE_SHA" "$NORM_ANNOTATION_SHA" "$NORM_CONTRACT_SHA" <<'PY'
-import hashlib
-import json
-import os
-import sys
-
-norm_path, provenance_path, episode_sha, annotation_sha, contract_sha = sys.argv[1:]
-with open(norm_path, "rb") as file:
-    norm_sha = hashlib.sha256(file.read()).hexdigest()
-payload = {
-    "annotation_sha256": annotation_sha,
-    "episode_list_sha256": episode_sha,
-    "norm_stats_sha256": norm_sha,
-    "training_contract_sha256": contract_sha,
-}
-temporary = provenance_path + ".tmp"
-with open(temporary, "w") as file:
-    json.dump(payload, file, sort_keys=True, indent=2)
-    file.write("\n")
-os.replace(temporary, provenance_path)
-PY
-    fi
 fi
 
 echo "Starting π0.5 $MODE run: $EXP_NAME"
@@ -456,23 +330,6 @@ if [[ -n "$SUBTASK_PROMPTS" ]]; then
             --model.subtask-loss-weight "${SUBTASK_LOSS_WEIGHT:-1.0}"
             --model.subtask-loss-chunk-size "${SUBTASK_LOSS_CHUNK_SIZE:-8}"
         )
-    elif [[ "$SUBTASK_EXECUTOR" == 1 ]]; then
-        TRAIN_DATA_ARGS+=(
-            --data.subtask-whole-task-prob 0
-            --model.train-subtask-executor
-            --model.action-horizon "$ACTION_HORIZON"
-            --model.max-token-len "$MAX_TOKEN_LEN"
-        )
-        if [[ -n "$MAX_SAMPLES_PER_SEGMENT" ]]; then
-            TRAIN_DATA_ARGS+=(--data.subtask-executor-max-samples-per-segment "$MAX_SAMPLES_PER_SEGMENT")
-        fi
-    elif [[ "$STRICT_SUBTASK_ACTION_CHUNKS" == 1 ]]; then
-        TRAIN_DATA_ARGS+=(
-            --data.subtask-whole-task-prob 0
-            --data.strict-subtask-action-chunks
-            --model.action-horizon "$ACTION_HORIZON"
-            --model.max-token-len "$MAX_TOKEN_LEN"
-        )
     else
         TRAIN_DATA_ARGS+=(--data.subtask-whole-task-prob "${WHOLE_TASK_PROB:-0.15}")
     fi
@@ -512,7 +369,7 @@ if [[ "${RESUME:-0}" == 1 && "${OVERWRITE:-0}" == 1 ]]; then
 fi
 if [[ "${RESUME:-0}" == 1 ]]; then
     TRAIN_DATA_ARGS+=(--resume)
-elif [[ "$SUBTASK_PREDICTION" == 0 && "$SUBTASK_EXECUTOR" == 0 && "$STRICT_SUBTASK_ACTION_CHUNKS" == 0 || "${OVERWRITE:-0}" == 1 ]]; then
+elif [[ "$SUBTASK_PREDICTION" == 0 || "${OVERWRITE:-0}" == 1 ]]; then
     TRAIN_DATA_ARGS+=(--overwrite)
 fi
 

@@ -8,7 +8,6 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/eval_job.env"
 EXTERNAL_SUBTASK_SELECTOR="${EXTERNAL_SUBTASK_SELECTOR:-}"
 PI05_MODEL_FORMAT="${PI05_MODEL_FORMAT:-jax}"
-PROVIDED_SUBTASK_AS_PROMPT="${PROVIDED_SUBTASK_AS_PROMPT:-0}"
 SMOKE_TASK="${SMOKE_TASK:-turning_on_radio}"
 SMOKE_EVAL_GPU="${SMOKE_EVAL_GPU:-1}"
 
@@ -37,25 +36,14 @@ fi
 [[ "$BASE_PORT" =~ ^[1-9][0-9]*$ ]] || fail "BASE_PORT must be a positive integer"
 [[ "$WRITE_VIDEO" == 0 || "$WRITE_VIDEO" == 1 ]] || fail "WRITE_VIDEO must be 0 or 1"
 [[ "$SUBTASK_PREDICTION" == 0 || "$SUBTASK_PREDICTION" == 1 ]] || fail "SUBTASK_PREDICTION must be 0 or 1"
-[[ "$PROVIDED_SUBTASK_AS_PROMPT" == 0 || "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]] \
-    || fail "PROVIDED_SUBTASK_AS_PROMPT must be 0 or 1"
 [[ "$SMOKE_EVAL_GPU" =~ ^[0-9]+$ ]] || fail "SMOKE_EVAL_GPU must be a non-negative integer"
-if [[ "$SUBTASK_PREDICTION" == 1 && "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
-    fail "SUBTASK_PREDICTION and PROVIDED_SUBTASK_AS_PROMPT are mutually exclusive"
-fi
-if [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
-    [[ "$PI05_MODEL_FORMAT" == jax ]] || fail "PROVIDED_SUBTASK_AS_PROMPT currently supports JAX checkpoints only"
-    [[ "$SUBTASK_PREDICTION" == 0 ]] || fail "PROVIDED_SUBTASK_AS_PROMPT requires SUBTASK_PREDICTION=0"
-    [[ "$EXTERNAL_SUBTASK_SELECTOR" == state_machine_v1 ]] \
-        || fail "PROVIDED_SUBTASK_AS_PROMPT requires EXTERNAL_SUBTASK_SELECTOR=state_machine_v1"
-fi
 if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     [[ "$EXTERNAL_SUBTASK_SELECTOR" == state_machine_v1 ]] \
         || fail "EXTERNAL_SUBTASK_SELECTOR must be state_machine_v1"
     [[ "$EVAL_PROFILE" == smoke || "$EVAL_PROFILE" == two_tasks ]] \
         || fail "EXTERNAL_SUBTASK_SELECTOR is supported only for EVAL_PROFILE=smoke or two_tasks"
-    [[ "$SUBTASK_PREDICTION" == 1 || "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]] \
-        || fail "EXTERNAL_SUBTASK_SELECTOR requires a subtask conditioning mode"
+    [[ "$SUBTASK_PREDICTION" == 1 ]] \
+        || fail "EXTERNAL_SUBTASK_SELECTOR requires SUBTASK_PREDICTION=1"
     if [[ "$EVAL_PROFILE" == smoke ]]; then
         case "$SMOKE_TASK" in
             carrying_in_groceries|make_rose_centerpieces) ;;
@@ -73,11 +61,7 @@ if [[ "$EVAL_PROFILE" == two_tasks ]]; then
     [[ "$WRITE_VIDEO" == 1 ]] || fail "two_tasks profile requires WRITE_VIDEO=1"
     [[ -z "$MAX_STEPS" ]] || fail "two_tasks profile requires a full task timeout"
 fi
-if [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
-    POLICY_MAX_TOKEN_LEN=200
-else
-    POLICY_MAX_TOKEN_LEN=512
-fi
+POLICY_MAX_TOKEN_LEN=512
 
 GLIBC_VERSION="$(ldd --version 2>&1 | sed -n '1{s/.* //;p;}')"
 IFS=. read -r GLIBC_MAJOR GLIBC_MINOR _ <<< "$GLIBC_VERSION"
@@ -104,7 +88,7 @@ else
     require_file "$CHECKPOINT_SOURCE/params/_METADATA"
     [[ ! -e "$CHECKPOINT_SOURCE/model.safetensors" ]] || fail "JAX checkpoint must not contain model.safetensors"
 fi
-if [[ "$EVAL_PROFILE" == two_tasks || "$PI05_MODEL_FORMAT" == torch || "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
+if [[ "$EVAL_PROFILE" == two_tasks || "$PI05_MODEL_FORMAT" == torch ]]; then
     require_file "$CHECKPOINT_SOURCE/_CHECKPOINT_METADATA"
     require_file "$CHECKPOINT_SOURCE/SHA256SUMS.inference"
     require_file "$CHECKPOINT_SOURCE/_READY"
@@ -112,25 +96,6 @@ if [[ "$EVAL_PROFILE" == two_tasks || "$PI05_MODEL_FORMAT" == torch || "$PROVIDE
         cd "$CHECKPOINT_SOURCE"
         sha256sum -c SHA256SUMS.inference
     )
-fi
-if [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
-    python3 - "$CHECKPOINT_SOURCE/_READY" "$PI05_REPO_ID" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-ready = json.loads(Path(sys.argv[1]).read_text())
-expected = {
-    "conditioning_mode": "subtask_only",
-    "strict_subtask_action_chunks": True,
-    "subtask_executor": False,
-    "action_horizon": 32,
-    "repo_id": sys.argv[2],
-}
-for key, value in expected.items():
-    if ready.get(key) != value:
-        raise SystemExit(f"Strict checkpoint metadata mismatch for {key}: expected {value!r}, got {ready.get(key)!r}")
-PY
 fi
 (
     cd "$ASSET_ROOT"
@@ -157,7 +122,6 @@ check_free_gb /var/tmp 120
 log "run id: $RUN_ID"
 log "profile: $EVAL_PROFILE"
 log "model format: $PI05_MODEL_FORMAT"
-log "provided subtask as prompt: $PROVIDED_SUBTASK_AS_PROMPT"
 log "checkpoint: $CHECKPOINT_SOURCE"
 log "policy environment: $PI05_ENV_ARCHIVE"
 log "persistent output: $PERSISTENT_OUTPUT"
@@ -278,7 +242,7 @@ if [[ -f "$CHECKPOINT_SOURCE/_CHECKPOINT_METADATA" ]]; then
     cp "$CHECKPOINT_SOURCE/_CHECKPOINT_METADATA" "$LOCAL_CHECKPOINT/"
 fi
 require_file "$LOCAL_CHECKPOINT/assets/$PI05_REPO_ID/norm_stats.json"
-if [[ "$EVAL_PROFILE" == two_tasks || "$PI05_MODEL_FORMAT" == torch || "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
+if [[ "$EVAL_PROFILE" == two_tasks || "$PI05_MODEL_FORMAT" == torch ]]; then
     cp "$CHECKPOINT_SOURCE/SHA256SUMS.inference" "$LOCAL_CHECKPOINT/"
     (
         cd "$LOCAL_CHECKPOINT"
@@ -332,7 +296,7 @@ else
 fi
 IMPORT_CHECK_RUNTIME="$RUNTIME_ROOT/omnigibson-import-check"
 IMPORT_CHECK_GPU=1
-if [[ "$EVAL_PROFILE" == smoke && ( "$PI05_MODEL_FORMAT" == torch || "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ) ]]; then
+if [[ "$EVAL_PROFILE" == smoke && "$PI05_MODEL_FORMAT" == torch ]]; then
     IMPORT_CHECK_GPU="$SMOKE_EVAL_GPU"
 fi
 mkdir -p "$IMPORT_CHECK_RUNTIME"
@@ -520,15 +484,12 @@ path.write_text(json.dumps({
     "policy_env_archive": "$PI05_ENV_ARCHIVE",
     "repo_id": "$PI05_REPO_ID",
     "conditioning_mode": (
-        "provided_subtask_as_prompt"
-        if bool($PROVIDED_SUBTASK_AS_PROMPT)
-        else "joint_subtask_prediction"
+        "joint_subtask_prediction"
         if bool($SUBTASK_PREDICTION)
         else "whole_task"
     ),
     "subtask_prediction": bool($SUBTASK_PREDICTION),
-    "provided_subtask_as_prompt": bool($PROVIDED_SUBTASK_AS_PROMPT),
-    "max_token_len": (200 if bool($PROVIDED_SUBTASK_AS_PROMPT) else 512 if bool($SUBTASK_PREDICTION) else None),
+    "max_token_len": (512 if bool($SUBTASK_PREDICTION) else None),
     "subtask_action_conditioning": action_conditioning,
     "subtask_interval": subtask_interval,
     "subtask_temperature": (0.0 if bool($SUBTASK_PREDICTION) else None),
@@ -555,7 +516,7 @@ path.write_text(json.dumps({
     "max_steps": (int("${MAX_STEPS_VALUE}") if "${MAX_STEPS_VALUE}" else None),
     "expected_rollouts": $EXPECTED_ROLLOUTS,
     "expected_videos": ($EXPECTED_ROLLOUTS if bool($WRITE_VIDEO) else 0),
-    "require_subtask_events": bool($SUBTASK_PREDICTION) or bool($PROVIDED_SUBTASK_AS_PROMPT),
+    "require_subtask_events": bool($SUBTASK_PREDICTION),
     "require_selector_events": bool(selector),
     "driver": "$DRIVER",
     "pi05_mem_fraction": $PI05_MEM_FRACTION,
@@ -588,7 +549,6 @@ if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE
         log "launching $EVAL_PROFILE worker=$worker tasks=[$tasks] indices=[$indices] gpu=$worker port=$port"
         setsid env MODEL=pi05 PI05_CKPT="$LOCAL_CHECKPOINT" PI05_REPO_ID="$PI05_REPO_ID" \
             PI05_ENV="$PI05_ENV" SUBTASK_PREDICTION="$SUBTASK_PREDICTION" \
-            PROVIDED_SUBTASK_AS_PROMPT="$PROVIDED_SUBTASK_AS_PROMPT" \
             EXTERNAL_SUBTASK_SELECTOR="$EXTERNAL_SUBTASK_SELECTOR" \
             MAX_TOKEN_LEN="$POLICY_MAX_TOKEN_LEN" MAX_SUBTASK_LEN=64 SUBTASK_TEMPERATURE=0 \
             PROMPT_MODE=whole_task MODE=public_test \
@@ -669,7 +629,6 @@ else
         set +e
         setsid env MODEL=pi05 PI05_CKPT="$LOCAL_CHECKPOINT" PI05_REPO_ID="$PI05_REPO_ID" \
             PI05_ENV="$PI05_ENV" SUBTASK_PREDICTION="$SUBTASK_PREDICTION" \
-            PROVIDED_SUBTASK_AS_PROMPT="$PROVIDED_SUBTASK_AS_PROMPT" \
             EXTERNAL_SUBTASK_SELECTOR="$EXTERNAL_SUBTASK_SELECTOR" \
             MAX_TOKEN_LEN="$POLICY_MAX_TOKEN_LEN" MAX_SUBTASK_LEN=64 SUBTASK_TEMPERATURE=0 \
             PROMPT_MODE=whole_task MODE=public_test \
@@ -758,7 +717,7 @@ elif [[ "$EVAL_PROFILE" == two_tasks ]]; then
         --status-root "$PERSISTENT_OUTPUT/status"
         --require-videos
     )
-    if [[ "$SUBTASK_PREDICTION" == 1 || "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
+    if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
         SUMMARY_ARGS+=(--require-subtask-events)
     fi
     if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
@@ -782,8 +741,6 @@ elif [[ "$EVAL_PROFILE" == full4 ]]; then
     )
     if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
         SUMMARY_ARGS+=(--require-subtask-events --require-generated-subtasks)
-    elif [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
-        SUMMARY_ARGS+=(--require-subtask-events)
     fi
 elif [[ "$EVAL_PROFILE" == smoke && -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     SUMMARY_ARGS+=(--require-subtask-events --require-selector-events)
@@ -805,13 +762,6 @@ if [[ "$EVAL_PROFILE" == smoke ]]; then
     if [[ "$SUBTASK_PREDICTION" == 1 && -z "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
         grep -q 'Generated subtask:' "$LOCAL_RESULTS/pi05/server_$BASE_PORT.log" \
             || fail "smoke server log contains no generated subtask"
-    elif [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
-        server_log="$LOCAL_RESULTS/pi05/server_$BASE_PORT.log"
-        grep -q 'Loaded policy class=Policy conditioning=provided_subtask_as_prompt max_token_len=200' "$server_log" \
-            || fail "smoke server did not load the strict ordinary Policy"
-        if grep -q 'Generated subtask:' "$server_log"; then
-            fail "strict provided-subtask smoke unexpectedly generated a subtask"
-        fi
     fi
 fi
 

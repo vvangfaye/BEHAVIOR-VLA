@@ -38,8 +38,6 @@ class Pi0Config(_model.BaseModelConfig):
     # Keep the old default for checkpoint compatibility. Joint launchers select
     # subtask_only: p(s | observation, task) p(actions | observation, s).
     subtask_action_conditioning: Literal["task_and_subtask", "subtask_only"] = "task_and_subtask"
-    # Train a pure current-subtask executor with temporal action-loss masking.
-    train_subtask_executor: bool = False
     subtask_loss_weight: float = 1.0
     max_subtask_len: int = 64  # Includes EOS.
     subtask_loss_chunk_size: int = 8
@@ -53,10 +51,6 @@ class Pi0Config(_model.BaseModelConfig):
             object.__setattr__(self, "max_token_len", 200 if self.pi05 else 48)
         if self.discrete_state_input is None:
             object.__setattr__(self, "discrete_state_input", self.pi05)
-        if self.train_subtask_prediction and self.train_subtask_executor:
-            raise ValueError("train_subtask_executor is mutually exclusive with train_subtask_prediction.")
-        if self.train_subtask_executor and not self.pi05:
-            raise ValueError("Pure subtask executor training requires pi05=True.")
         if self.train_subtask_prediction:
             if not self.pi05:
                 raise ValueError("Subtask prediction training requires pi05=True.")
@@ -125,11 +119,6 @@ class Pi0Config(_model.BaseModelConfig):
                 action_tokenized_prompt_mask=(
                     jax.ShapeDtypeStruct([batch_size, self.max_token_len], bool)
                     if self.train_subtask_prediction and self.subtask_action_conditioning == "subtask_only"
-                    else None
-                ),
-                action_loss_mask=(
-                    jax.ShapeDtypeStruct([batch_size, self.action_horizon], bool)
-                    if self.train_subtask_executor
                     else None
                 ),
             )

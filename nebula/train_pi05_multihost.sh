@@ -62,21 +62,11 @@ COORDINATOR_ADDRESS="$COORDINATOR_IP:$COORDINATOR_PORT"
 log "assigned process_id=$PROCESS_ID/$PROCESS_COUNT coordinator=$COORDINATOR_ADDRESS"
 
 case "$DATASET_PROFILE" in
-    two_tasks|two_tasks_joint_h200|two_tasks_subtask_only|two_tasks_subtask_only_h200|full100) ;;
+    two_tasks|two_tasks_joint_h200|full100) ;;
     *) fail "unknown dataset profile: $DATASET_PROFILE" ;;
 esac
-STRICT_SUBTASK_ONLY=0
-if [[ "$DATASET_PROFILE" == "two_tasks_subtask_only" || "$DATASET_PROFILE" == "two_tasks_subtask_only_h200" ]]; then
-    STRICT_SUBTASK_ONLY=1
-fi
-H200_PROFILE=0
-if [[ "$DATASET_PROFILE" == "full100" || "$DATASET_PROFILE" == "two_tasks_joint_h200" \
-    || "$DATASET_PROFILE" == "two_tasks_subtask_only_h200" ]]; then
-    H200_PROFILE=1
-fi
 CONTRACT_PROFILE=0
-if [[ "$DATASET_PROFILE" == "full100" || "$DATASET_PROFILE" == "two_tasks_joint_h200" ]] \
-    || (( STRICT_SUBTASK_ONLY )); then
+if [[ "$DATASET_PROFILE" == "full100" || "$DATASET_PROFILE" == "two_tasks_joint_h200" ]]; then
     CONTRACT_PROFILE=1
 fi
 if (( CONTRACT_PROFILE )); then
@@ -84,14 +74,10 @@ if (( CONTRACT_PROFILE )); then
     (( ${#GPU_NAME_LIST[@]} == EXPECTED_LOCAL_DEVICES )) \
         || fail "$DATASET_PROFILE requires exactly $EXPECTED_LOCAL_DEVICES GPUs, saw ${#GPU_NAME_LIST[@]}"
     for gpu_name in "${GPU_NAME_LIST[@]}"; do
-        if (( H200_PROFILE )); then
-            case "$gpu_name" in
-                *H200*|"NVIDIA L20Z") ;;
-                *) fail "$DATASET_PROFILE requires H200 GPUs or the NVIDIA L20Z platform alias, saw: $gpu_name" ;;
-            esac
-        elif [[ ! "$gpu_name" =~ ^NVIDIA[[:space:]]+H20([^0-9]|$) ]]; then
-            fail "two_tasks_subtask_only requires H20 GPUs, saw: $gpu_name"
-        fi
+        case "$gpu_name" in
+            *H200*|"NVIDIA L20Z") ;;
+            *) fail "$DATASET_PROFILE requires H200 GPUs or the NVIDIA L20Z platform alias, saw: $gpu_name" ;;
+        esac
     done
 fi
 
@@ -413,25 +399,7 @@ if (( CONTRACT_PROFILE )); then
         --report-file "$CONTRACT_REPORT"
         --write-episodes-file "$EPISODES_FILE"
     )
-    if (( STRICT_SUBTASK_ONLY )); then
-        REQUESTED_EPISODES=()
-        while IFS= read -r episode; do REQUESTED_EPISODES+=("$episode"); done < <(
-            { seq 2800 2999; seq 11200 11399; }
-        )
-        read -r -a EXPECTED_TASK_INDEX_ARRAY <<< "$EXPECTED_TASK_INDICES"
-        CONTRACT_ARGS+=(
-            --episodes-index "${REQUESTED_EPISODES[@]}"
-            --expected-tasks "$EXPECTED_TASKS"
-            --expected-task-indices "${EXPECTED_TASK_INDEX_ARRAY[@]}"
-            --max-token-len 200
-            --action-horizon 32
-            --strict-subtask-action-chunks
-            --conditioning-mode subtask_only
-        )
-        if [[ "$MODE" != "smoke" ]]; then
-            CONTRACT_ARGS+=(--epochs "$TRAIN_EPOCHS")
-        fi
-    elif [[ "$DATASET_PROFILE" == "two_tasks_joint_h200" ]]; then
+    if [[ "$DATASET_PROFILE" == "two_tasks_joint_h200" ]]; then
         REQUESTED_EPISODES=()
         while IFS= read -r episode; do REQUESTED_EPISODES+=("$episode"); done < <(
             { seq 2800 2999; seq 11200 11399; }
@@ -442,7 +410,6 @@ if (( CONTRACT_PROFILE )); then
             --expected-tasks "$EXPECTED_TASKS"
             --expected-task-indices "${EXPECTED_TASK_INDEX_ARRAY[@]}"
             --max-token-len 512
-            --conditioning-mode joint
         )
         if [[ "$MODE" != "smoke" ]]; then
             CONTRACT_ARGS+=(--epochs "$TRAIN_EPOCHS")
@@ -486,7 +453,7 @@ PY
         || fail "contract annotation hash mismatch: $ANNOTATION_SHA"
     [[ "$(sha256sum "$EPISODES_FILE" | cut -d' ' -f1)" == "$EPISODE_LIST_SHA" ]] \
         || fail "contract episode file hash mismatch"
-    if (( STRICT_SUBTASK_ONLY )) || [[ "$DATASET_PROFILE" == "two_tasks_joint_h200" ]]; then
+    if [[ "$DATASET_PROFILE" == "two_tasks_joint_h200" ]]; then
         [[ "$RETAINED_EPISODES" == "$EXPECTED_RETAINED_EPISODES" ]] \
             || fail "retained episodes mismatch: $RETAINED_EPISODES != $EXPECTED_RETAINED_EPISODES"
         [[ "$RETAINED_FRAMES" == "$EXPECTED_RETAINED_FRAMES" ]] \
@@ -663,14 +630,6 @@ if (( CONTRACT_PROFILE )); then
             --episodes-index "${NORM_EPISODES[@]}"
             --assets-base-dir "$ASSETS_BASE_DIR"
         )
-        if (( STRICT_SUBTASK_ONLY )); then
-            NORM_ARGS+=(
-                --frame-stride "$FRAME_STRIDE"
-                --subtask-prompts-path "$LOCAL_DATASET/meta/subtask_segments.parquet"
-                --strict-subtask-action-chunks
-                --action-horizon 32
-            )
-        fi
         run_with_heartbeat "normalization statistics" \
             "$ENV_PREFIX/bin/python" scripts/compute_norm_stats.py "${NORM_ARGS[@]}"
         LOCAL_NORM_FILE="$ASSETS_BASE_DIR/pi05_b1k/$REPO_ID/norm_stats.json"
@@ -737,17 +696,9 @@ TRAIN_EXPECTED_TASKS="$EXPECTED_TASKS"
 if [[ "$DATASET_PROFILE" == "full100" && "$MODE" == "smoke" ]]; then
     TRAIN_EXPECTED_TASKS=2
 fi
-if (( STRICT_SUBTASK_ONLY )); then
-    TRAIN_SCRIPT="$REPO_ROOT/scripts/train_pi05_b1k.sh"
-    TRAIN_SUBTASK_PREDICTION=0
-    TRAIN_STRICT_SUBTASK_ACTION_CHUNKS=1
-    TRAIN_MAX_TOKEN_LEN=200
-else
-    TRAIN_SCRIPT="$REPO_ROOT/scripts/train_pi05_subtask_b1k.sh"
-    TRAIN_SUBTASK_PREDICTION=1
-    TRAIN_STRICT_SUBTASK_ACTION_CHUNKS=0
-    TRAIN_MAX_TOKEN_LEN=512
-fi
+TRAIN_SCRIPT="$REPO_ROOT/scripts/train_pi05_subtask_b1k.sh"
+TRAIN_SUBTASK_PREDICTION=1
+TRAIN_MAX_TOKEN_LEN=512
 
 log "starting multi-host $MODE; log: $RANK_LOG"
 
@@ -778,12 +729,10 @@ run_with_heartbeat "multi-host training" env \
     KEEP_PERIOD="$KEEP_PERIOD" \
     LOG_INTERVAL="$LOG_INTERVAL" \
     FRAME_STRIDE="$FRAME_STRIDE" \
-    ACTION_HORIZON=32 \
     LR_DECAY_STEPS="$LR_DECAY_STEPS_VALUE" \
     RESUME="$RESUME" \
     SUBTASK_PREDICTION="$TRAIN_SUBTASK_PREDICTION" \
     SUBTASK_ACTION_CONDITIONING="$SUBTASK_ACTION_CONDITIONING" \
-    STRICT_SUBTASK_ACTION_CHUNKS="$TRAIN_STRICT_SUBTASK_ACTION_CHUNKS" \
     WHOLE_TASK_PROB=0 \
     MAX_TOKEN_LEN="$TRAIN_MAX_TOKEN_LEN" \
     MAX_SUBTASK_LEN=64 \

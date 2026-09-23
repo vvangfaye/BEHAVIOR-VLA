@@ -20,17 +20,12 @@ case "$MODE" in
 esac
 DATASET_PROFILE="${DATASET_PROFILE:-two_tasks}"
 case "$DATASET_PROFILE" in
-    two_tasks|two_tasks_joint_h200|two_tasks_subtask_only|two_tasks_subtask_only_h200|full100) ;;
-    *) echo "DATASET_PROFILE must be two_tasks, two_tasks_joint_h200, two_tasks_subtask_only, two_tasks_subtask_only_h200, or full100" >&2; exit 2 ;;
+    two_tasks|two_tasks_joint_h200|full100) ;;
+    *) echo "DATASET_PROFILE must be two_tasks, two_tasks_joint_h200, or full100" >&2; exit 2 ;;
 esac
 
-if [[ "$DATASET_PROFILE" == "two_tasks_subtask_only" ]]; then
-    QUEUE="${QUEUE:-demand_specific_na175_h20}"
-    PROCESS_COUNT="${PROCESS_COUNT:-1}"
-else
-    QUEUE="${QUEUE:-demand_general}"
-    PROCESS_COUNT="${PROCESS_COUNT:-2}"
-fi
+QUEUE="${QUEUE:-demand_general}"
+PROCESS_COUNT="${PROCESS_COUNT:-2}"
 EXPECTED_LOCAL_DEVICES="${EXPECTED_LOCAL_DEVICES:-8}"
 FSDP_DEVICES="${FSDP_DEVICES:-8}"
 EXPECTED_GLOBAL_DEVICES="${EXPECTED_GLOBAL_DEVICES:-$((PROCESS_COUNT * EXPECTED_LOCAL_DEVICES))}"
@@ -122,98 +117,6 @@ elif [[ "$DATASET_PROFILE" == "two_tasks_joint_h200" ]]; then
     KEEP_PERIOD="${KEEP_PERIOD:-25000}"
     LOG_INTERVAL="${LOG_INTERVAL:-1}"
     LOCAL_DATASET_NAME="${LOCAL_DATASET_NAME:-two_tasks_joint_subtask_h200_b256_s1}"
-    NORM_STATS_SOURCE="${NORM_STATS_SOURCE:-}"
-    MIN_LOCAL_BYTES="${MIN_LOCAL_BYTES:-0}"
-    EXPECTED_META_FILES="${EXPECTED_META_FILES:-}"
-    EXPECTED_META_BYTES="${EXPECTED_META_BYTES:-}"
-    EXPECTED_META_MANIFEST_SHA256="${EXPECTED_META_MANIFEST_SHA256:-}"
-    EXPECTED_DATA_FILES="${EXPECTED_DATA_FILES:-}"
-    EXPECTED_DATA_BYTES="${EXPECTED_DATA_BYTES:-}"
-    EXPECTED_DATA_MANIFEST_SHA256="${EXPECTED_DATA_MANIFEST_SHA256:-}"
-    EXPECTED_LEFT_RGB_FILES="${EXPECTED_LEFT_RGB_FILES:-}"
-    EXPECTED_LEFT_RGB_BYTES="${EXPECTED_LEFT_RGB_BYTES:-}"
-    EXPECTED_LEFT_RGB_MANIFEST_SHA256="${EXPECTED_LEFT_RGB_MANIFEST_SHA256:-}"
-    EXPECTED_RIGHT_RGB_FILES="${EXPECTED_RIGHT_RGB_FILES:-}"
-    EXPECTED_RIGHT_RGB_BYTES="${EXPECTED_RIGHT_RGB_BYTES:-}"
-    EXPECTED_RIGHT_RGB_MANIFEST_SHA256="${EXPECTED_RIGHT_RGB_MANIFEST_SHA256:-}"
-    EXPECTED_BASE_RGB_FILES="${EXPECTED_BASE_RGB_FILES:-}"
-    EXPECTED_BASE_RGB_BYTES="${EXPECTED_BASE_RGB_BYTES:-}"
-    EXPECTED_BASE_RGB_MANIFEST_SHA256="${EXPECTED_BASE_RGB_MANIFEST_SHA256:-}"
-elif [[ "$DATASET_PROFILE" == "two_tasks_subtask_only_h200" ]]; then
-    ALGO_NAME="${ALGO_NAME:-pytorch2120}"
-    BATCH_SIZE="${BATCH_SIZE:-256}"
-    FRAME_STRIDE="${FRAME_STRIDE:-1}"
-    TRAIN_EPOCHS="${TRAIN_EPOCHS:-3}"
-    EXPECTED_TASKS="${EXPECTED_TASKS:-2}"
-    EXPECTED_TASK_INDICES="${EXPECTED_TASK_INDICES:-14 56}"
-    EXPECTED_RETAINED_EPISODES="${EXPECTED_RETAINED_EPISODES:-322}"
-    EXPECTED_RETAINED_FRAMES="${EXPECTED_RETAINED_FRAMES:-2596207}"
-    EXPECTED_TRAINING_SAMPLES="${EXPECTED_TRAINING_SAMPLES:-2439637}"
-    EXPECTED_BATCHES_PER_EPOCH="${EXPECTED_BATCHES_PER_EPOCH:-9529}"
-    EXPECTED_TRAIN_STEPS="${EXPECTED_TRAIN_STEPS:-28587}"
-    EXPECTED_EPISODE_LIST_SHA256="${EXPECTED_EPISODE_LIST_SHA256:-7ac7177711d6a6de51c67734612bc7121da43fed29d08812acdf66ae09e6aff6}"
-    EXPECTED_CONTRACT_SHA256="${EXPECTED_CONTRACT_SHA256:-880772a68e3b1b2d0c6ab1562a89cd6208d0b5cf9cbbeb4da0acd6436b61d2f8}"
-    if [[ "$MODE" == "smoke" ]]; then
-        TRAIN_EPOCHS=""
-        TRAIN_STEPS="${TRAIN_STEPS:-3}"
-        SAVE_INTERVAL="${SAVE_INTERVAL:-1000000}"
-        NORM_MAX_FRAMES="${NORM_MAX_FRAMES:-256}"
-        REPO_ID="${REPO_ID:-b1k_two_tasks_subtask_only_strict_h200_b256_s1_smoke}"
-    else
-        TRAIN_STEPS="${TRAIN_STEPS:-$EXPECTED_TRAIN_STEPS}"
-        SAVE_INTERVAL="${SAVE_INTERVAL:-5000}"
-        NORM_MAX_FRAMES="${NORM_MAX_FRAMES:-500000}"
-        REPO_ID="${REPO_ID:-b1k_two_tasks_subtask_only_strict_h200_b256_s1}"
-    fi
-    KEEP_PERIOD="${KEEP_PERIOD:-25000}"
-    LOG_INTERVAL="${LOG_INTERVAL:-1}"
-    LOCAL_DATASET_NAME="${LOCAL_DATASET_NAME:-two_tasks_subtask_only_strict_h200_b256_s1}"
-    NORM_STATS_SOURCE="${NORM_STATS_SOURCE:-}"
-    MIN_LOCAL_BYTES="${MIN_LOCAL_BYTES:-0}"
-    EXPECTED_META_FILES="${EXPECTED_META_FILES:-}"
-    EXPECTED_META_BYTES="${EXPECTED_META_BYTES:-}"
-    EXPECTED_META_MANIFEST_SHA256="${EXPECTED_META_MANIFEST_SHA256:-}"
-    EXPECTED_DATA_FILES="${EXPECTED_DATA_FILES:-}"
-    EXPECTED_DATA_BYTES="${EXPECTED_DATA_BYTES:-}"
-    EXPECTED_DATA_MANIFEST_SHA256="${EXPECTED_DATA_MANIFEST_SHA256:-}"
-    EXPECTED_LEFT_RGB_FILES="${EXPECTED_LEFT_RGB_FILES:-}"
-    EXPECTED_LEFT_RGB_BYTES="${EXPECTED_LEFT_RGB_BYTES:-}"
-    EXPECTED_LEFT_RGB_MANIFEST_SHA256="${EXPECTED_LEFT_RGB_MANIFEST_SHA256:-}"
-    EXPECTED_RIGHT_RGB_FILES="${EXPECTED_RIGHT_RGB_FILES:-}"
-    EXPECTED_RIGHT_RGB_BYTES="${EXPECTED_RIGHT_RGB_BYTES:-}"
-    EXPECTED_RIGHT_RGB_MANIFEST_SHA256="${EXPECTED_RIGHT_RGB_MANIFEST_SHA256:-}"
-    EXPECTED_BASE_RGB_FILES="${EXPECTED_BASE_RGB_FILES:-}"
-    EXPECTED_BASE_RGB_BYTES="${EXPECTED_BASE_RGB_BYTES:-}"
-    EXPECTED_BASE_RGB_MANIFEST_SHA256="${EXPECTED_BASE_RGB_MANIFEST_SHA256:-}"
-elif [[ "$DATASET_PROFILE" == "two_tasks_subtask_only" ]]; then
-    ALGO_NAME="${ALGO_NAME:-pytorch280}"
-    BATCH_SIZE="${BATCH_SIZE:-64}"
-    FRAME_STRIDE="${FRAME_STRIDE:-1}"
-    TRAIN_EPOCHS="${TRAIN_EPOCHS:-3}"
-    EXPECTED_TASKS="${EXPECTED_TASKS:-2}"
-    EXPECTED_TASK_INDICES="${EXPECTED_TASK_INDICES:-14 56}"
-    EXPECTED_RETAINED_EPISODES="${EXPECTED_RETAINED_EPISODES:-322}"
-    EXPECTED_RETAINED_FRAMES="${EXPECTED_RETAINED_FRAMES:-2596207}"
-    EXPECTED_TRAINING_SAMPLES="${EXPECTED_TRAINING_SAMPLES:-2439637}"
-    EXPECTED_BATCHES_PER_EPOCH="${EXPECTED_BATCHES_PER_EPOCH:-38119}"
-    EXPECTED_TRAIN_STEPS="${EXPECTED_TRAIN_STEPS:-114357}"
-    EXPECTED_EPISODE_LIST_SHA256="${EXPECTED_EPISODE_LIST_SHA256:-7ac7177711d6a6de51c67734612bc7121da43fed29d08812acdf66ae09e6aff6}"
-    EXPECTED_CONTRACT_SHA256="${EXPECTED_CONTRACT_SHA256:-9dd7500d91b11a8977e03c2558697cafbea2042567d9cc73b63e4af79d114dc4}"
-    if [[ "$MODE" == "smoke" ]]; then
-        TRAIN_EPOCHS=""
-        TRAIN_STEPS="${TRAIN_STEPS:-3}"
-        SAVE_INTERVAL="${SAVE_INTERVAL:-1000000}"
-        NORM_MAX_FRAMES="${NORM_MAX_FRAMES:-256}"
-        REPO_ID="${REPO_ID:-b1k_two_tasks_subtask_only_strict_s1_smoke}"
-    else
-        TRAIN_STEPS="${TRAIN_STEPS:-$EXPECTED_TRAIN_STEPS}"
-        SAVE_INTERVAL="${SAVE_INTERVAL:-5000}"
-        NORM_MAX_FRAMES="${NORM_MAX_FRAMES:-500000}"
-        REPO_ID="${REPO_ID:-b1k_two_tasks_subtask_only_strict_s1}"
-    fi
-    KEEP_PERIOD="${KEEP_PERIOD:-25000}"
-    LOG_INTERVAL="${LOG_INTERVAL:-1}"
-    LOCAL_DATASET_NAME="${LOCAL_DATASET_NAME:-two_tasks_subtask_only_strict_s1}"
     NORM_STATS_SOURCE="${NORM_STATS_SOURCE:-}"
     MIN_LOCAL_BYTES="${MIN_LOCAL_BYTES:-0}"
     EXPECTED_META_FILES="${EXPECTED_META_FILES:-}"
@@ -395,40 +298,6 @@ elif [[ "$DATASET_PROFILE" == "two_tasks_joint_h200" ]]; then
     fi
     if [[ "$MODE" == "full" && "$TRAIN_STEPS" != "$EXPECTED_TRAIN_STEPS" ]]; then
         echo "two_tasks_joint_h200 TRAIN_STEPS=$TRAIN_STEPS must equal $EXPECTED_TRAIN_STEPS" >&2
-        exit 2
-    fi
-elif [[ "$DATASET_PROFILE" == "two_tasks_subtask_only_h200" ]]; then
-    [[ -z "$NORM_STATS_SOURCE" ]] \
-        || { echo "two_tasks_subtask_only_h200 computes dedicated norm stats; NORM_STATS_SOURCE must be empty" >&2; exit 2; }
-    [[ "$QUEUE" == "demand_general" ]] \
-        || { echo "two_tasks_subtask_only_h200 requires the H200 queue used by full100" >&2; exit 2; }
-    [[ "$PROCESS_COUNT" == 2 && "$EXPECTED_LOCAL_DEVICES" == 8 && "$EXPECTED_GLOBAL_DEVICES" == 16 ]] \
-        || { echo "two_tasks_subtask_only_h200 requires 2 workers x 8 GPUs" >&2; exit 2; }
-    [[ "$FSDP_DEVICES" == 8 && "$BATCH_SIZE" == 256 && "$FRAME_STRIDE" == 1 ]] \
-        || { echo "two_tasks_subtask_only_h200 requires FSDP=8, batch=256, stride=1" >&2; exit 2; }
-    if [[ "$MODE" != "smoke" && "$TRAIN_EPOCHS" != 3 ]]; then
-        echo "two_tasks_subtask_only_h200 $MODE requires exactly 3 epochs" >&2
-        exit 2
-    fi
-    if [[ "$MODE" == "full" && "$TRAIN_STEPS" != "$EXPECTED_TRAIN_STEPS" ]]; then
-        echo "two_tasks_subtask_only_h200 TRAIN_STEPS=$TRAIN_STEPS must equal $EXPECTED_TRAIN_STEPS" >&2
-        exit 2
-    fi
-elif [[ "$DATASET_PROFILE" == "two_tasks_subtask_only" ]]; then
-    [[ -z "$NORM_STATS_SOURCE" ]] \
-        || { echo "two_tasks_subtask_only computes dedicated norm stats; NORM_STATS_SOURCE must be empty" >&2; exit 2; }
-    [[ "$QUEUE" == "demand_specific_na175_h20" ]] \
-        || { echo "two_tasks_subtask_only requires the H20 queue" >&2; exit 2; }
-    [[ "$PROCESS_COUNT" == 1 && "$EXPECTED_LOCAL_DEVICES" == 8 && "$EXPECTED_GLOBAL_DEVICES" == 8 ]] \
-        || { echo "two_tasks_subtask_only requires 1 worker x 8 GPUs" >&2; exit 2; }
-    [[ "$FSDP_DEVICES" == 8 && "$BATCH_SIZE" == 64 && "$FRAME_STRIDE" == 1 ]] \
-        || { echo "two_tasks_subtask_only requires FSDP=8, batch=64, stride=1" >&2; exit 2; }
-    if [[ "$MODE" != "smoke" && "$TRAIN_EPOCHS" != 3 ]]; then
-        echo "two_tasks_subtask_only $MODE requires exactly 3 epochs" >&2
-        exit 2
-    fi
-    if [[ "$MODE" == "full" && "$TRAIN_STEPS" != "$EXPECTED_TRAIN_STEPS" ]]; then
-        echo "two_tasks_subtask_only TRAIN_STEPS=$TRAIN_STEPS must equal $EXPECTED_TRAIN_STEPS" >&2
         exit 2
     fi
 fi

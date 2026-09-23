@@ -43,7 +43,6 @@ CHILD_ENV_ALLOWLIST = {
     "OMNIGIBSON_DATA_PATH",
     "PI05_MEM_FRACTION",
     "SUBTASK_PREDICTION",
-    "PROVIDED_SUBTASK_AS_PROMPT",
     "EXTERNAL_SUBTASK_SELECTOR",
     "MAX_TOKEN_LEN",
     "MAX_SUBTASK_LEN",
@@ -111,24 +110,15 @@ def validate_conditioning(conditioning: object) -> dict:
     if not isinstance(conditioning, dict):
         raise TypeError("conditioning must be a JSON object")
     subtask_prediction = conditioning.get("subtask_prediction")
-    provided = conditioning.get("provided_subtask_as_prompt")
     selector = conditioning.get("external_subtask_selector")
     max_token_len = conditioning.get("max_token_len")
-    if not isinstance(subtask_prediction, bool) or not isinstance(provided, bool):
-        raise TypeError("subtask conditioning modes must be booleans")
-    if subtask_prediction and provided:
-        raise ValueError(
-            "SUBTASK_PREDICTION and PROVIDED_SUBTASK_AS_PROMPT are mutually exclusive"
-        )
+    if not isinstance(subtask_prediction, bool):
+        raise TypeError("subtask_prediction must be a boolean")
     if selector not in (None, "state_machine_v1"):
         raise ValueError("EXTERNAL_SUBTASK_SELECTOR must be state_machine_v1")
-    if selector is not None and not (subtask_prediction or provided):
+    if selector is not None and not subtask_prediction:
         raise ValueError(
             "EXTERNAL_SUBTASK_SELECTOR requires a subtask conditioning mode"
-        )
-    if provided and selector is None:
-        raise ValueError(
-            "provided-subtask formal evaluation requires EXTERNAL_SUBTASK_SELECTOR"
         )
     if (
         isinstance(max_token_len, bool)
@@ -136,22 +126,14 @@ def validate_conditioning(conditioning: object) -> dict:
         or max_token_len <= 0
     ):
         raise ValueError("MAX_TOKEN_LEN must be a positive integer")
-    if provided and max_token_len != 200:
-        raise ValueError("PROVIDED_SUBTASK_AS_PROMPT requires MAX_TOKEN_LEN=200")
     return conditioning
 
 
 def _conditioning_from_args(args: argparse.Namespace) -> dict:
-    provided = bool(args.provided_subtask_as_prompt)
-    max_token_len = (
-        args.max_token_len
-        if args.max_token_len is not None
-        else (200 if provided else 512)
-    )
+    max_token_len = args.max_token_len if args.max_token_len is not None else 512
     return validate_conditioning(
         {
             "subtask_prediction": bool(args.subtask_prediction),
-            "provided_subtask_as_prompt": provided,
             "external_subtask_selector": args.external_subtask_selector,
             "max_token_len": max_token_len,
         }
@@ -182,9 +164,6 @@ def _manifest_payload(args: argparse.Namespace) -> dict:
             "OMNIGIBSON_DATA_PATH": str(data_path),
             "PI05_MEM_FRACTION": "0.35",
             "SUBTASK_PREDICTION": "1" if conditioning["subtask_prediction"] else "0",
-            "PROVIDED_SUBTASK_AS_PROMPT": "1"
-            if conditioning["provided_subtask_as_prompt"]
-            else "0",
             "EXTERNAL_SUBTASK_SELECTOR": conditioning["external_subtask_selector"]
             or "",
             "MAX_TOKEN_LEN": str(conditioning["max_token_len"]),
@@ -270,9 +249,6 @@ def validate_manifest(manifest: object) -> dict:
     expected_environment = {
         "PI05_MEM_FRACTION": "0.35",
         "SUBTASK_PREDICTION": "1" if conditioning["subtask_prediction"] else "0",
-        "PROVIDED_SUBTASK_AS_PROMPT": "1"
-        if conditioning["provided_subtask_as_prompt"]
-        else "0",
         "EXTERNAL_SUBTASK_SELECTOR": conditioning["external_subtask_selector"] or "",
         "MAX_TOKEN_LEN": str(conditioning["max_token_len"]),
     }
@@ -988,11 +964,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     start.add_argument("--max-restarts-per-slot", type=_nonnegative_int, default=8)
     start.add_argument(
         "--subtask-prediction", action=argparse.BooleanOptionalAction, default=False
-    )
-    start.add_argument(
-        "--provided-subtask-as-prompt",
-        action=argparse.BooleanOptionalAction,
-        default=False,
     )
     start.add_argument("--external-subtask-selector", choices=("state_machine_v1",))
     start.add_argument("--max-token-len", type=_positive_int)

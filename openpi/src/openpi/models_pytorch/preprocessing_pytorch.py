@@ -172,5 +172,4 @@ def preprocess_observation_pytorch(
         token_loss_mask=observation.token_loss_mask,
         action_tokenized_prompt=getattr(observation, "action_tokenized_prompt", None),
         action_tokenized_prompt_mask=getattr(observation, "action_tokenized_prompt_mask", None),
-        action_loss_mask=getattr(observation, "action_loss_mask", None),
     )

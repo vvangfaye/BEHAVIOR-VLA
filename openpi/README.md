@@ -1,8 +1,7 @@
 # OpenPI for BEHAVIOR π0.5（JAX）
 
 本目录包含 π0.5 模型、BEHAVIOR R1Pro 数据适配、JAX 训练器和策略服务。
-使用方式以[仓库 README](../README.md)为入口；joint、strict subtask-only 和
-pure executor 的区别、预检及闭环参数见 [subtask 指南](../docs/subtask_training.md)。
+使用方式以[仓库 README](../README.md)为入口；普通 π0.5 与 joint 联合训练的区别、预检及闭环参数见 [subtask 指南](../docs/subtask_training.md)。
 
 ## 代码入口
 
@@ -10,7 +9,7 @@ pure executor 的区别、预检及闭环参数见 [subtask 指南](../docs/subt
 | --- | --- | --- |
 | 启动脚本 | [train_pi05_b1k.sh](../scripts/train_pi05_b1k.sh) | 环境、模式选择、预检、norm stats、训练参数 |
 | 数据配置 | [config.py](src/openpi/training/config.py) | `pi05_b1k` / `LeRobotB1KDataConfig` |
-| 数据读取 | [data_loader.py](src/openpi/training/data_loader.py)、[subtask_data.py](src/openpi/training/subtask_data.py) | 原始 episode、标签对齐、动作边界与采样 |
+| 数据读取 | [data_loader.py](src/openpi/training/data_loader.py)、[subtask_data.py](src/openpi/training/subtask_data.py) | 原始 episode、标签对齐与帧采样 |
 | 语言输入 | [tokenizer.py](src/openpi/models/tokenizer.py) | 普通 prompt、joint 高低层序列与文本监督 mask |
 | JAX 模型 | [pi0.py](src/openpi/models/pi0.py)、[pi0_config.py](src/openpi/models/pi0_config.py) | π0.5 动作 loss、文本 CE 和采样 |
 | JAX 训练 | [train_b1k.py](scripts/b1k/train_b1k.py) | 更新参数、验证、EMA、保存和恢复 |

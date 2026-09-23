@@ -29,16 +29,12 @@ cd openpi
 | --- | --- |
 | 普通 π0.5 | 无；使用完整任务 prompt |
 | Joint 自主生成 / 外部标签对比 | `--subtask-prediction --max-token-len 512 --max-subtask-len 64` |
-| Strict checkpoint 接收外部技能 | `--provided-subtask-as-prompt --max-token-len 200` |
 
 Joint 模式读取 checkpoint 的 `assets/subtask_conditioning.json`。
 新 `subtask_only` 默认每 2 次动作块请求刷新技能，旧 `task_and_subtask` 默认每次刷新；
 可用 `--subtask-interval` 显式覆盖。这个间隔按动作块请求计数，不按 websocket 消息数计数。
-Strict 模式使用普通 `Policy`，把传入的 `subtask` 直接替换为模型 prompt，不生成技能。
-
-两种 subtask 服务开关互斥，token 长度必须匹配训练。Strict 的现有入口仅支持 JAX、200-token
-配置。外部 selector 和固定技能的闭环启动方法见
-[subtask 指南](../../docs/subtask_training.md#strict-checkpoint--外部技能-selector)。
+token 长度必须匹配训练。外部 selector 和固定技能的闭环启动方法见
+[subtask 指南](../../docs/subtask_training.md#joint-checkpoint--外部技能-selector)。
 
 ## 连接、观测与响应
 
@@ -55,11 +51,11 @@ Strict 模式使用普通 `Policy`，把传入的 `subtask` 直接替换为模�
 | `robot_r1::robot_r1:left_realsense_link:Camera:0::rgb` | 左腕 RGB，uint8 HWC |
 | `robot_r1::robot_r1:right_realsense_link:Camera:0::rgb` | 右腕 RGB，uint8 HWC |
 | `prompt` | 可选，完整任务指令；缺省使用服务的任务注册文本 |
-| `subtask` | 可选的外部技能文本；strict 服务模式下必填 |
+| `subtask` | 可选的外部技能文本，用于 joint 对比推理 |
 
 相机也可带第 4 个通道，wrapper 取前三通道并缩放。归一化和动作反变换在服务端完成。
 Joint 未传 `subtask` 时自主生成或复用缓存；传入时来源为 `provided`，不会将外部标签留作
-后续自主生成的缓存。Strict 要求非空外部技能，使用它作为唯一语言 prompt。
+后续自主生成的缓存。
 
 每次观测对应一个控制步响应：
 

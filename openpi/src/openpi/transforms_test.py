@@ -16,18 +16,6 @@ def test_repack_transform():
     assert transform(item) == {"a": {"b": 1}, "d": 2}
 
 
-def test_use_subtask_as_prompt():
-    transform = _transforms.UseSubtaskAsPrompt()
-
-    transformed = transform({"prompt": "whole task", "subtask": "  move to rose  ", "state": np.zeros(2)})
-
-    assert transformed["prompt"] == "move to rose"
-    assert "subtask" not in transformed
-    assert np.array_equal(transformed["state"], np.zeros(2))
-    with pytest.raises(ValueError, match="non-empty GT subtask"):
-        transform({"prompt": "whole task", "subtask": "  "})
-
-
 def test_delta_actions():
     item = {"state": np.array([1, 2, 3]), "actions": np.array([[3, 4, 5], [5, 6, 7]])}
 

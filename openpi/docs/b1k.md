@@ -48,7 +48,7 @@ checkpoint params + assets
 
 训练任务文本来自数据集任务元数据；服务默认任务文本来自
 [任务注册表](../src/openpi/configs/tasks/__init__.py)，也可由观测中的 `prompt` 覆盖。
-Joint 高层始终读取完整任务，strict / executor 以当前 subtask 替换语言 prompt。
+Joint 高层始终读取完整任务，低层语言输入由 `subtask_action_conditioning` 决定。
 
 ## 配置和训练入口
 
@@ -56,7 +56,7 @@ Joint 高层始终读取完整任务，strict / executor 以当前 subtask 替�
 `Pi0Config(pi05=True, action_horizon=32)`、R1Pro 和 `tolerance_s=5e-3` 的视频时间戳容差。
 配置文件里的默认数据路径属于原示例，运行时应通过启动脚本覆盖。
 
-优先使用仓库根目录的 `scripts/train_pi05_b1k.sh` 及 joint / executor 包装脚本。
+优先使用仓库根目录的 `scripts/train_pi05_b1k.sh` 及 joint 包装脚本。
 它们依次组织预检、最终 episode 名单、归一化统计和 Python trainer。
 本目录旧 `scripts/b1k/train_b1k.sh` / `.sbatch.sh` 保留，但不是这套 subtask 工作流的入口。
 
@@ -81,13 +81,11 @@ Subtask 模式应先通过脚本预检，并把最终名单传为 `--data.episod
 
 | 模式 | 模型与数据配置的关键差别 |
 | --- | --- |
-| 普通 | `train_subtask_prediction=False`、`train_subtask_executor=False`，完整任务 prompt |
+| 普通 | `train_subtask_prediction=False`，完整任务 prompt |
 | Joint | `train_subtask_prediction=True`；新模式显式设置 `subtask_action_conditioning=subtask_only` |
-| Strict | 两个模型训练开关均为 False；数据 `strict_subtask_action_chunks=True`，subtask prompt |
-| Pure executor | `train_subtask_executor=True`，segment 采样与 `action_loss_mask` |
 
-三种 subtask 模式互斥，要求 `subtask_whole_task_prob=0`。Joint 的低层 subtask-only
-使用独立语言序列，不能用 ordinary / strict 的 tokenizer 配置代替。
+Joint 要求 `subtask_whole_task_prob=0`。Joint 的低层 subtask-only
+使用独立语言序列，不能用 普通动作模型的 tokenizer 配置代替。
 
 [train_b1k.py](../scripts/b1k/train_b1k.py)通过
 [data_loader.py](../src/openpi/training/data_loader.py)的 `create_b1k_data_loader()` 构造训练数据，

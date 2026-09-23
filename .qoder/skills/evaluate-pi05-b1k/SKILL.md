@@ -1,6 +1,6 @@
 ---
 name: evaluate-pi05-b1k
-description: Safely run, submit, monitor, validate, and summarize BEHAVIOR-Challenge π0.5 OmniGibson closed-loop evaluations. Use for local smoke or multi-GPU evaluation, Nebula/AIHub evaluation submission, whole-task or joint predicted-subtask policies, fixed/external selector diagnostics, strict subtask-only checkpoints, pure masked executors, rollout progress, videos, success rate, or q-score analysis.
+description: Safely run, submit, monitor, validate, and summarize BEHAVIOR-Challenge π0.5 OmniGibson closed-loop evaluations. Use for local smoke or multi-GPU evaluation, Nebula/AIHub evaluation submission, whole-task or joint predicted-subtask policies, fixed/external selector diagnostics, rollout progress, videos, success rate, or q-score analysis.
 ---
 
 # Evaluate π0.5 on BEHAVIOR-1K
@@ -31,22 +31,15 @@ Keep checkpoint training semantics and inference semantics aligned.
 
 | Evaluation | Required settings | Meaning |
 |---|---|---|
-| Whole-task action-only | `SUBTASK_PREDICTION=0`, `PROVIDED_SUBTASK_AS_PROMPT=0`, `PROMPT_MODE=whole_task` | Whole task → actions |
-| Joint predicted subtask | `SUBTASK_PREDICTION=1`, `PROVIDED_SUBTASK_AS_PROMPT=0`, `MAX_TOKEN_LEN=512`, `MAX_SUBTASK_LEN=64` | Model predicts subtask and then actions |
+| Whole-task action-only | `SUBTASK_PREDICTION=0`, `PROMPT_MODE=whole_task` | Whole task → actions |
+| Joint predicted subtask | `SUBTASK_PREDICTION=1`, `MAX_TOKEN_LEN=512`, `MAX_SUBTASK_LEN=64` | Model predicts subtask and then actions |
 | Fixed subtask, joint | Joint settings plus `EXTERNAL_SUBTASK='<text>'` | Diagnostic using one supplied skill |
-| Fixed subtask, action-only | `SUBTASK_PREDICTION=0`, `PROVIDED_SUBTASK_AS_PROMPT=1`, `MAX_TOKEN_LEN=200`, `EXTERNAL_SUBTASK='<text>'` | Supplied skill is the sole language prompt |
 | Correct-skill joint diagnostic | Joint settings plus `EXTERNAL_SUBTASK_SELECTOR=state_machine_v1` | State selector bypasses high-level prediction |
-| Strict subtask-only diagnostic | `SUBTASK_PREDICTION=0`, `PROVIDED_SUBTASK_AS_PROMPT=1`, `MAX_TOKEN_LEN=200`, selector enabled | Full-horizon-filtered executor receives live skill |
-| Pure masked-executor diagnostic | Same inference settings as strict | Training mask is loss-only; inference receives live skill |
 | Unsatisfied-goal oracle | `PROMPT_MODE=oracle_unsatisfied_goal` | Privileged BDDL prompt; not comparable to whole-task results |
 
-`SUBTASK_PREDICTION` and `PROVIDED_SUBTASK_AS_PROMPT` are mutually exclusive. External text and an external selector are mutually exclusive. Keep `PROMPT_MODE=whole_task` for external subtask conditioning; `UseSubtaskAsPrompt` replaces the model prompt for action-only executors.
+External text and an external selector are mutually exclusive. Keep `PROMPT_MODE=whole_task` for external subtask conditioning.
 
 For joint checkpoints, inspect `assets/subtask_conditioning.json`: preserve `task_and_subtask` for legacy joint checkpoints and `subtask_only` for factorized joint checkpoints. Do not override metadata inconsistently.
-
-Provided-subtask serving is currently JAX-only. Torch checkpoints can use supported whole-task or joint-prediction paths.
-
-The current Nebula launcher accepts strict metadata (`strict_subtask_action_chunks=true`, `subtask_executor=false`) but rejects pure masked-executor metadata. Evaluate a pure executor locally after a successful smoke. If Nebula pure-executor evaluation is requested, first implement and test a dedicated metadata profile; never bypass the existing checks.
 
 ## Recover and verify the runtime
 
@@ -128,7 +121,6 @@ Conditioning options are explicit and immutable:
 
 - whole task: no additional options;
 - joint prediction: `--subtask-prediction --max-token-len 512`;
-- strict or pure executor selector: `--provided-subtask-as-prompt --external-subtask-selector state_machine_v1 --max-token-len 200`;
 - selector on a joint model: `--subtask-prediction --external-subtask-selector state_machine_v1 --max-token-len 512`.
 
 The launcher fixes `PI05_MEM_FRACTION=0.35`, assigns one GPU and unique port/runtime directory per slot, isolates failed attempts, retries whole instances, and publishes only complete three-rollout bundles. `_SUCCESS` is written only after all 120 unique JSON/video pairs pass the strict validator.

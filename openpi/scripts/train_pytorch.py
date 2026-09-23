@@ -45,15 +45,7 @@ if TYPE_CHECKING:
 _CHECKPOINT_FILES = ("model.safetensors", "optimizer.pt", "metadata.json", "rng.pt")
 _RESUME_COMPATIBLE_DEFAULTS = {
     "model": (
-        (("train_subtask_executor",), False),
         (("subtask_action_conditioning",), "task_and_subtask"),
-    ),
-    "data": (
-        (("subtask_executor_max_samples_per_segment",), None),
-        (("strict_subtask_action_chunks",), False),
-        (("base_config", "subtask_executor"), False),
-        (("base_config", "subtask_executor_max_samples_per_segment"), None),
-        (("base_config", "strict_subtask_action_chunks"), False),
     ),
 }
 

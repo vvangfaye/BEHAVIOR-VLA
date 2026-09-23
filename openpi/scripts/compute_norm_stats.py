@@ -146,8 +146,6 @@ def main(
     frame_stride: int | None = None,
     subtask_prompts_path: str | None = None,
     action_horizon: int | None = None,
-    *,
-    strict_subtask_action_chunks: bool = False,
 ):
     config = _config.get_config(config_name)
     if action_horizon is not None:
@@ -168,14 +166,12 @@ def main(
             subtask_prompts_path=(
                 subtask_prompts_path if subtask_prompts_path is not None else config.data.subtask_prompts_path
             ),
-            strict_subtask_action_chunks=strict_subtask_action_chunks,
         )
         config = dataclasses.replace(config, data=data_config_factory)
     elif (
         episodes_index is not None
         or frame_stride is not None
         or subtask_prompts_path is not None
-        or strict_subtask_action_chunks
     ):
         base_config = dataclasses.replace(
             config.data.base_config,
@@ -188,7 +184,6 @@ def main(
             subtask_prompts_path=(
                 subtask_prompts_path if subtask_prompts_path is not None else config.data.subtask_prompts_path
             ),
-            strict_subtask_action_chunks=strict_subtask_action_chunks,
         )
         config = dataclasses.replace(config, data=data_config_factory)
     if batch_size is not None:

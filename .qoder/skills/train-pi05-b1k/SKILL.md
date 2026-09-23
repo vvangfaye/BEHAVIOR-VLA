@@ -1,6 +1,6 @@
 ---
 name: train-pi05-b1k
-description: Safely prepare, preflight, launch, monitor, resume, and validate BEHAVIOR-Challenge π0.5 local JAX/Torch training and Nebula/AIHub submissions. Use for whole-task, joint, strict subtask-only, pure executor, multihost, checkpoint, or training-status requests.
+description: Safely prepare, preflight, launch, monitor, resume, and validate BEHAVIOR-Challenge π0.5 local JAX/Torch training and Nebula/AIHub submissions. Use for whole-task, joint, multihost, checkpoint, or training-status requests.
 ---
 
 # Train π0.5 on BEHAVIOR-1K
@@ -26,20 +26,18 @@ Use `ps -o user,pid,lstart,cmd -p "$PID"` for ambiguous processes. Never stop, r
 
 ## Choose the training objective
 
-The following JAX switches are mutually exclusive: `SUBTASK_PREDICTION`, `SUBTASK_EXECUTOR`, and `STRICT_SUBTASK_ACTION_CHUNKS`.
+Use `SUBTASK_PREDICTION=0` for ordinary action training and `1` for joint training.
 
 | Objective | Entry point / switch | Text and action semantics |
 |---|---|---|
-| Whole-task action-only | `scripts/train_pi05_b1k.sh` with all three switches `0` | Full task prompt → actions; no subtask CE |
+| Whole-task action-only | `scripts/train_pi05_b1k.sh` with `SUBTASK_PREDICTION=0` and no `SUBTASK_PROMPTS` | Full task prompt → actions; no subtask CE |
 | Legacy joint | `SUBTASK_ACTION_CONDITIONING=task_and_subtask scripts/train_pi05_subtask_b1k.sh` | Full task predicts subtask; action branch sees full task and GT subtask |
 | Factorized joint | `scripts/train_pi05_subtask_b1k.sh` | Default `subtask_only`: full task predicts subtask; independent image/state/subtask branch predicts actions |
-| Strict subtask-only | `STRICT_SUBTASK_ACTION_CHUNKS=1 scripts/train_pi05_b1k.sh` | Current GT subtask replaces task prompt; action loss only; reject every anchor whose full horizon crosses a segment boundary |
-| Pure executor | `scripts/train_pi05_subtask_executor_b1k.sh` | Current GT subtask prompt; action loss only; retain boundary anchors and mask steps outside the segment or episode |
-| Torch | `scripts/train_pi05_pytorch_b1k.sh` | Supports whole-task and joint; this shell path does not expose strict or pure executor |
+| Torch | `scripts/train_pi05_pytorch_b1k.sh` | Supports whole-task and joint |
 
-Treat a joint checkpoint without `assets/subtask_conditioning.json` as legacy `task_and_subtask`. Do not resume it as factorized. Local legacy resume must set `SUBTASK_ACTION_CONDITIONING=task_and_subtask`; the current Nebula profile does not carry that override, so do not resume an old legacy Nebula run with the current default bundle without first adding and testing explicit support.
+Treat a joint checkpoint without `assets/subtask_conditioning.json` as legacy `task_and_subtask`. Do not resume it as factorized. Legacy resume must set `SUBTASK_ACTION_CONDITIONING=task_and_subtask` explicitly in the local or Nebula launcher and match the saved checkpoint contract.
 
-Do not confuse the legacy action-only compatibility path (`SUBTASK_PROMPTS` set while all three switches are zero) with joint supervision.
+Do not confuse the legacy action-only compatibility path (`SUBTASK_PROMPTS` set while `SUBTASK_PREDICTION=0`) with joint supervision.
 
 ## Prepare subtask data
 
@@ -53,7 +51,7 @@ RUN_ROOT=<fresh-persistent-output-root>
 SUBTASK_PROMPTS="$RUN_ROOT/subtask_segments.role_aware_v1.parquet"
 ```
 
-Generate role-aware labels for pure executor training. The implemented option is `--out`, not `--output`:
+Generate role-aware labels when the experiment calls for object-role information; use the legacy format to preserve existing label semantics. The implemented option is `--out`, not `--output`:
 
 ```bash
 "$PY" "$REPO/scripts/gen_subtask_prompts.py" \
@@ -63,7 +61,7 @@ Generate role-aware labels for pure executor training. The implemented option is
   --out "$SUBTASK_PROMPTS"
 ```
 
-Pure executor requires the role/provenance columns. Keep the generated segment table immutable after preflight.
+Keep the generated segment table immutable after preflight.
 
 First validate the requested episode set and write the retained original IDs with `openpi/scripts/b1k/check_subtask_data.py`. Pass explicit episode IDs when the segment table contains only selected tasks; otherwise the checker will correctly reject unannotated episodes elsewhere in the dataset.
 
@@ -80,29 +78,6 @@ Create a held-out split only when the user wants offline validation:
 
 The split keeps each `(task_index, task_instance_id)` group on one side. It refuses a nonempty output directory. For training all retained episodes, pass `EPISODES_FILE=$RETAINED_EPISODES` and omit `VAL_EPISODES_FILE`.
 
-## Decide pure-executor sampling explicitly
-
-The pure-executor wrapper defaults to at most 64 evenly spaced anchors per annotated segment:
-
-```text
-MAX_SAMPLES_PER_SEGMENT=64
-```
-
-This balances long and short subtasks but can reduce millions of eligible frame anchors to hundreds of thousands. “All episodes” does not mean “all anchors.” Report both `eligible_action_anchors` and `capped_sample_count` before launch.
-
-For the cap, use `scripts/train_pi05_subtask_executor_b1k.sh`. For every annotated anchor, bypass that wrapper and invoke the base launcher with:
-
-```bash
-SUBTASK_EXECUTOR=1 \
-SUBTASK_PREDICTION=0 \
-STRICT_SUBTASK_ACTION_CHUNKS=0 \
-WHOLE_TASK_PROB=0 \
-MAX_SAMPLES_PER_SEGMENT= \
-  bash "$REPO/scripts/train_pi05_b1k.sh" full
-```
-
-Do not choose capped versus all-anchor sampling without telling the user the resulting sample and step counts.
-
 ## Run exact preflight
 
 Use `check` before normalization or model initialization:
@@ -110,13 +85,6 @@ Use `check` before normalization or model initialization:
 ```bash
 # Joint (set task_and_subtask explicitly for legacy)
 bash "$REPO/scripts/train_pi05_subtask_b1k.sh" check
-
-# Pure executor with the wrapper's 64-anchor cap
-bash "$REPO/scripts/train_pi05_subtask_executor_b1k.sh" check
-
-# Strict subtask-only
-STRICT_SUBTASK_ACTION_CHUNKS=1 PREFLIGHT_ONLY=1 \
-  bash "$REPO/scripts/train_pi05_b1k.sh" full
 ```
 
 Supply the same `DATASET_ROOT`, `SUBTASK_PROMPTS`, `EPISODES_FILE`, `BATCH_SIZE`, device/process topology, and output paths intended for training.
@@ -136,7 +104,7 @@ Use explicit paths and a fresh tmux session. Prefer persistent NAS output, and i
 
 ```bash
 SESSION=<unique-session>
-ENTRYPOINT="$REPO/scripts/train_pi05_subtask_executor_b1k.sh"  # choose from the objective table
+ENTRYPOINT="$REPO/scripts/train_pi05_subtask_b1k.sh"  # choose from the objective table
 LOG="$RUN_ROOT/train.log"
 
 # Recheck nvidia-smi here.
@@ -158,7 +126,6 @@ Add objective-specific variables and the exact `EXPECTED_*` contract. Do not reu
 
 Monitor the tracked tmux session and log, not broad process names. Require the first optimizer update to report finite `action_loss`, `loss`, `grad_norm`, and `param_norm`:
 
-- pure executor: also require `0 < valid_action_fraction <= 1` and no subtask CE metrics;
 - joint: require finite `subtask_loss`, positive `subtask_tokens`, and finite token accuracy;
 - action-only modes: require total loss to match action loss within logging precision.
 
@@ -174,11 +141,9 @@ Use `nebula/submit_pi05_multihost.sh`. Current pinned profiles are:
 |---|---|---:|---:|
 | `two_tasks` | development, normally 2×8 | 64 | unpinned/non-production |
 | `two_tasks_joint_h200` | `demand_general`, 2×8 H200/L20Z | 256 | 400 episodes / 4 epochs / 58,768 steps |
-| `two_tasks_subtask_only_h200` | `demand_general`, 2×8 H200/L20Z | 256 | 3 epochs / 28,587 steps |
-| `two_tasks_subtask_only` | H20 queue, 1×8 H20 | 64 | 3 epochs / 114,357 steps |
 | `full100` | `demand_general`, 2×8 H200/L20Z | 192 | 2 epochs / 1,688,978 steps |
 
-The two `subtask_only` profiles are strict full-horizon filtering, not pure executor. There is currently no pure-executor Nebula profile. Current new joint submissions use factorized conditioning; historical joint checkpoints may be legacy.
+Current new joint submissions use factorized conditioning; historical joint checkpoints may be legacy.
 
 Before any actual submission, build and inspect a dry-run bundle:
 

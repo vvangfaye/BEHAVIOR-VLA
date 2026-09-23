@@ -118,13 +118,6 @@ class DataConfig:
     # Fraction of frames that keep the whole-episode task prompt when sub-task
     # conditioning is on, so the closed-loop server's fixed prompt stays in-distribution.
     subtask_whole_task_prob: float = 0.0
-    # Derived from the model config. Pure executor mode strictly uses an annotated
-    # current-subtask prompt and supervises only in-segment, non-padding actions.
-    subtask_executor: bool = False
-    subtask_executor_max_samples_per_segment: int | None = None
-    # If true, retain only anchors whose complete action horizon stays inside one
-    # annotated subtask and condition the action model only on that subtask.
-    strict_subtask_action_chunks: bool = False
     # Derived from the model config for the B1K loader. Keeps task and label separate.
     subtask_prediction: bool = False
 
@@ -415,8 +408,6 @@ class LeRobotB1KDataConfig(DataConfigFactory):
     frame_stride: int = 1
     subtask_prompts_path: str | None = None
     subtask_whole_task_prob: float = 0.0
-    subtask_executor_max_samples_per_segment: int | None = None
-    strict_subtask_action_chunks: bool = False
 
     def _build_delta_mappings(self, robot_config) -> list[tuple[list[int], list[int]]]:
         state_slices = []
@@ -447,26 +438,8 @@ class LeRobotB1KDataConfig(DataConfigFactory):
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         robot_config = ROBOT_REGISTRY[self.robot_config_name]
         subtask_prediction = getattr(model_config, "train_subtask_prediction", False)
-        subtask_executor = getattr(model_config, "train_subtask_executor", False)
-        if subtask_prediction and subtask_executor:
-            raise ValueError("Pure subtask executor mode is mutually exclusive with subtask prediction.")
-        if (subtask_prediction or subtask_executor) and self.subtask_whole_task_prob != 0:
-            raise ValueError("Strict subtask training requires subtask_whole_task_prob=0.")
-        if (
-            subtask_executor
-            and self.subtask_executor_max_samples_per_segment is not None
-            and self.subtask_executor_max_samples_per_segment < 1
-        ):
-            raise ValueError("subtask_executor_max_samples_per_segment must be positive when set.")
-        if self.strict_subtask_action_chunks:
-            if subtask_executor:
-                raise ValueError(
-                    "Strict full-horizon filtering and masked subtask executor mode are mutually exclusive."
-                )
-            if self.subtask_prompts_path is None:
-                raise ValueError("Strict subtask action chunks require subtask_prompts_path.")
-            if self.subtask_whole_task_prob != 0:
-                raise ValueError("Strict subtask action chunks require subtask_whole_task_prob=0.")
+        if subtask_prediction and self.subtask_whole_task_prob != 0:
+            raise ValueError("Joint subtask training requires subtask_whole_task_prob=0.")
 
         # Build repack mapping dynamically based on available observations
         repack_mapping = {}
@@ -485,8 +458,6 @@ class LeRobotB1KDataConfig(DataConfigFactory):
         )
         if subtask_prediction:
             repack_mapping["subtask"] = "subtask"
-        if subtask_executor:
-            repack_mapping["action_loss_mask"] = "action_loss_mask"
 
         repack_transform = _transforms.Group(inputs=[_transforms.RepackTransform(repack_mapping)])
 
@@ -516,7 +487,7 @@ class LeRobotB1KDataConfig(DataConfigFactory):
         if subtask_prediction and not base_config.prompt_from_task:
             raise ValueError("B1K subtask prediction requires prompt_from_task=True for the high-level instruction.")
         subtask_path = self.subtask_prompts_path
-        if (subtask_prediction or subtask_executor) and subtask_path is None:
+        if subtask_prediction and subtask_path is None:
             if dataset_root is None:
                 raise ValueError("Set dataset_root or subtask_prompts_path for subtask supervision.")
             subtask_path = str(pathlib.Path(dataset_root) / "meta" / "subtask_segments.parquet")
@@ -533,9 +504,6 @@ class LeRobotB1KDataConfig(DataConfigFactory):
             frame_stride=self.frame_stride,
             subtask_prompts_path=subtask_path,
             subtask_whole_task_prob=self.subtask_whole_task_prob,
-            subtask_executor=subtask_executor,
-            subtask_executor_max_samples_per_segment=self.subtask_executor_max_samples_per_segment,
-            strict_subtask_action_chunks=self.strict_subtask_action_chunks,
             subtask_prediction=subtask_prediction,
         )
 

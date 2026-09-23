@@ -1,4 +1,4 @@
-"""Strict frame-to-subtask supervision from BEHAVIOR's compact segment table."""
+"""Frame-to-subtask supervision from BEHAVIOR's compact segment table."""
 
 from collections.abc import Collection
 import dataclasses
@@ -49,280 +49,6 @@ def episode_lengths_in_dataset_order(
     return {episode: length for _, _, episode, length in entries}
 
 
-def _evenly_spaced_indices(length: int, limit: int | None) -> np.ndarray:
-    if limit is None or length <= limit:
-        return np.arange(length, dtype=np.int64)
-    if limit < 1:
-        raise ValueError(f"max_samples_per_segment must be positive, got {limit}")
-    if limit == 1:
-        return np.asarray([length - 1], dtype=np.int64)
-    result = np.rint(np.linspace(0, length - 1, num=limit)).astype(np.int64)
-    if len(np.unique(result)) != limit:
-        raise RuntimeError("Evenly spaced anchor selection produced duplicate indices.")
-    return result
-
-
-@dataclasses.dataclass(frozen=True)
-class SubtaskActionIndex:
-    """A deterministic indexable view of annotated subtask anchors."""
-
-    dataset_indices: np.ndarray
-    episode_indices: np.ndarray
-    frame_indices: np.ndarray
-    segment_ends: np.ndarray
-    raw_frames: int
-    eligible_anchors: int
-    action_horizon: int
-    frame_stride: int
-    max_samples_per_segment: int | None
-
-    @classmethod
-    def from_segments(
-        cls,
-        labels: "SubtaskFromSegments",
-        episode_lengths: dict[int, int],
-        *,
-        action_horizon: int,
-        frame_stride: int = 1,
-        max_samples_per_segment: int | None = None,
-    ) -> "SubtaskActionIndex":
-        dataset_offset = 0
-        episode_rows = []
-        for episode, length in episode_lengths.items():
-            episode_rows.append((int(episode), dataset_offset, int(length)))
-            dataset_offset += int(length)
-        return cls._from_episode_rows(
-            labels,
-            episode_rows,
-            raw_frames=dataset_offset,
-            action_horizon=action_horizon,
-            frame_stride=frame_stride,
-            max_samples_per_segment=max_samples_per_segment,
-        )
-
-    @classmethod
-    def from_episode_frame_indices(
-        cls,
-        labels: "SubtaskFromSegments",
-        episode_indices: np.ndarray,
-        frame_indices: np.ndarray,
-        *,
-        action_horizon: int,
-        frame_stride: int = 1,
-        max_samples_per_segment: int | None = None,
-    ) -> "SubtaskActionIndex":
-        """Build from the selected HF dataset's scalar index columns without decoding media."""
-        episode_indices = np.asarray(episode_indices)
-        frame_indices = np.asarray(frame_indices)
-        if episode_indices.ndim != 1 or frame_indices.ndim != 1 or episode_indices.shape != frame_indices.shape:
-            raise ValueError("HF episode_index and frame_index columns must be same-length one-dimensional arrays.")
-        if not np.issubdtype(episode_indices.dtype, np.integer) or not np.issubdtype(frame_indices.dtype, np.integer):
-            raise ValueError("HF episode_index and frame_index columns must contain integers.")
-        if not len(episode_indices):
-            raise ValueError("The selected HF dataset contains no frames.")
-        episode_indices = episode_indices.astype(np.int64, copy=False)
-        frame_indices = frame_indices.astype(np.int64, copy=False)
-
-        run_starts = np.flatnonzero(np.r_[True, episode_indices[1:] != episode_indices[:-1]])
-        run_ends = np.r_[run_starts[1:], len(episode_indices)]
-        run_episodes = episode_indices[run_starts]
-        if len(np.unique(run_episodes)) != len(run_episodes):
-            raise ValueError("Each selected episode must occupy exactly one contiguous HF row range.")
-        if np.any(frame_indices[run_starts] != 0):
-            raise ValueError("Each selected HF episode must start at frame_index=0.")
-        same_episode = episode_indices[1:] == episode_indices[:-1]
-        if np.any(same_episode & (frame_indices[1:] != frame_indices[:-1] + 1)):
-            raise ValueError("Selected HF episode rows must contain consecutive frame_index values in order.")
-
-        episode_rows = [
-            (int(episode), int(start), int(end - start))
-            for episode, start, end in zip(run_episodes, run_starts, run_ends, strict=True)
-        ]
-        return cls._from_episode_rows(
-            labels,
-            episode_rows,
-            raw_frames=len(episode_indices),
-            action_horizon=action_horizon,
-            frame_stride=frame_stride,
-            max_samples_per_segment=max_samples_per_segment,
-        )
-
-    @classmethod
-    def _from_episode_rows(
-        cls,
-        labels: "SubtaskFromSegments",
-        episode_rows: list[tuple[int, int, int]],
-        *,
-        raw_frames: int,
-        action_horizon: int,
-        frame_stride: int,
-        max_samples_per_segment: int | None,
-    ) -> "SubtaskActionIndex":
-        if action_horizon < 1:
-            raise ValueError(f"action_horizon must be >= 1, got {action_horizon}")
-        if frame_stride < 1:
-            raise ValueError(f"frame_stride must be >= 1, got {frame_stride}")
-        if max_samples_per_segment is not None and max_samples_per_segment < 1:
-            raise ValueError("max_samples_per_segment must be positive when set.")
-
-        lengths = {episode: length for episode, _, length in episode_rows}
-        if len(lengths) != len(episode_rows):
-            raise ValueError("Each selected episode must occur exactly once in dataset order.")
-        labels.validate_coverage(lengths)
-
-        dataset_chunks = []
-        episode_chunks = []
-        frame_chunks = []
-        segment_end_chunks = []
-        eligible_anchors = 0
-        for episode, dataset_start, _ in episode_rows:
-            starts, ends, _ = labels.segments[episode]
-            annotated = labels.annotation_flags(episode)
-            for start, end, is_annotated in zip(starts, ends, annotated, strict=True):
-                if not is_annotated:
-                    continue
-                frames = np.arange(int(start), int(end), frame_stride, dtype=np.int64)
-                final_frame = int(end) - 1
-                if frames[-1] != final_frame:
-                    frames = np.append(frames, final_frame)
-                eligible_anchors += len(frames)
-                keep = _evenly_spaced_indices(len(frames), max_samples_per_segment)
-                frames = frames[keep]
-                dataset_chunks.append(dataset_start + frames)
-                episode_chunks.append(np.full(len(frames), episode, dtype=np.int64))
-                frame_chunks.append(frames)
-                segment_end_chunks.append(np.full(len(frames), int(end), dtype=np.int64))
-
-        if not dataset_chunks:
-            raise ValueError("No annotated subtask anchors remain after stride/cap selection.")
-        return cls(
-            dataset_indices=np.concatenate(dataset_chunks).astype(np.int64, copy=False),
-            episode_indices=np.concatenate(episode_chunks),
-            frame_indices=np.concatenate(frame_chunks).astype(np.int64, copy=False),
-            segment_ends=np.concatenate(segment_end_chunks),
-            raw_frames=int(raw_frames),
-            eligible_anchors=eligible_anchors,
-            action_horizon=int(action_horizon),
-            frame_stride=int(frame_stride),
-            max_samples_per_segment=max_samples_per_segment,
-        )
-
-    def __len__(self) -> int:
-        return len(self.dataset_indices)
-
-    @property
-    def capped_sample_count(self) -> int:
-        return len(self)
-
-    def resolve(self, index: int) -> tuple[int, int, int]:
-        index = int(index)
-        if index < 0:
-            index += len(self)
-        if index < 0 or index >= len(self):
-            raise IndexError(index)
-        return (
-            int(self.dataset_indices[index]),
-            int(self.episode_indices[index]),
-            int(self.frame_indices[index]),
-        )
-
-    def valid_action_steps(self) -> np.ndarray:
-        return np.minimum(self.action_horizon, self.segment_ends - self.frame_indices)
-
-    def valid_action_step_distribution(self) -> dict[int, int]:
-        values, counts = np.unique(self.valid_action_steps(), return_counts=True)
-        return {int(value): int(count) for value, count in zip(values, counts, strict=True)}
-
-
-@dataclasses.dataclass(frozen=True)
-class StrictSubtaskActionIndex:
-    dataset_starts: np.ndarray
-    frame_starts: np.ndarray
-    episode_indices: np.ndarray
-    counts: np.ndarray
-    cumulative_counts: np.ndarray
-    stride: int
-    raw_frames: int
-    eligible_anchors: int
-    boundary_rejected_anchors: int
-
-    @classmethod
-    def from_segments(
-        cls,
-        labels: "SubtaskFromSegments",
-        episode_lengths: dict[int, int],
-        *,
-        action_horizon: int,
-        frame_stride: int = 1,
-    ) -> "StrictSubtaskActionIndex":
-        if action_horizon < 1:
-            raise ValueError(f"action_horizon must be >= 1, got {action_horizon}")
-        if frame_stride < 1:
-            raise ValueError(f"frame_stride must be >= 1, got {frame_stride}")
-        labels.validate_coverage(episode_lengths)
-
-        dataset_starts = []
-        frame_starts = []
-        episode_indices = []
-        counts = []
-        dataset_offset = 0
-        eligible_anchors = 0
-        for episode, length in episode_lengths.items():
-            starts, ends, _ = labels.segments[episode]
-            annotated = labels.annotation_flags(episode)
-            for start, end, is_annotated in zip(starts.tolist(), ends.tolist(), annotated.tolist(), strict=True):
-                if not is_annotated:
-                    continue
-                valid_end = end - action_horizon + 1
-                if valid_end <= start:
-                    continue
-                eligible_anchors += valid_end - start
-                raw_start = dataset_offset + start
-                aligned_start = raw_start + (-raw_start % frame_stride)
-                raw_end = dataset_offset + valid_end
-                if aligned_start >= raw_end:
-                    continue
-                count = (raw_end - 1 - aligned_start) // frame_stride + 1
-                dataset_starts.append(aligned_start)
-                frame_starts.append(start + aligned_start - raw_start)
-                episode_indices.append(episode)
-                counts.append(count)
-            dataset_offset += length
-
-        if not counts:
-            raise ValueError("No action anchors remain after strict subtask-boundary filtering.")
-        counts_array = np.asarray(counts, dtype=np.int64)
-        return cls(
-            dataset_starts=np.asarray(dataset_starts, dtype=np.int64),
-            frame_starts=np.asarray(frame_starts, dtype=np.int64),
-            episode_indices=np.asarray(episode_indices, dtype=np.int64),
-            counts=counts_array,
-            cumulative_counts=np.cumsum(counts_array, dtype=np.int64),
-            stride=int(frame_stride),
-            raw_frames=dataset_offset,
-            eligible_anchors=eligible_anchors,
-            boundary_rejected_anchors=dataset_offset - eligible_anchors,
-        )
-
-    def __len__(self) -> int:
-        return int(self.cumulative_counts[-1])
-
-    def resolve(self, index: int) -> tuple[int, int, int]:
-        index = int(index)
-        if index < 0:
-            index += len(self)
-        if index < 0 or index >= len(self):
-            raise IndexError(index)
-        range_index = int(np.searchsorted(self.cumulative_counts, index, side="right"))
-        previous_count = 0 if range_index == 0 else int(self.cumulative_counts[range_index - 1])
-        offset = index - previous_count
-        return (
-            int(self.dataset_starts[range_index] + offset * self.stride),
-            int(self.episode_indices[range_index]),
-            int(self.frame_starts[range_index] + offset * self.stride),
-        )
-
-
 @dataclasses.dataclass(frozen=True)
 class SubtaskFromSegments:
     # Episode ids remain the ORIGINAL LeRobot ids, including when using a subset.
@@ -340,7 +66,6 @@ class SubtaskFromSegments:
         *,
         episodes_index: Collection[int] | None = None,
         empty_label_policy: Literal["error", "drop_episode"] = "error",
-        require_role_provenance: bool = False,
     ) -> "SubtaskFromSegments":
         import pyarrow as pa  # noqa: PLC0415
         import pyarrow.compute as pc  # noqa: PLC0415
@@ -354,8 +79,6 @@ class SubtaskFromSegments:
         schema = pq.read_schema(path)
         role_columns = [name for name in ("annotated", "is_annotated") if name in schema.names]
         provenance_column = "provenance" if "provenance" in schema.names else None
-        if require_role_provenance and ("is_annotated" not in role_columns or provenance_column is None):
-            raise ValueError("Pure subtask executor requires role_aware_v1 columns is_annotated and provenance.")
         columns = ["episode_index", "start", "end", "subtask", *role_columns]
         if provenance_column is not None:
             columns.append(provenance_column)
@@ -403,11 +126,9 @@ class SubtaskFromSegments:
                     raise ValueError(f"Unknown provenance {provenance!r}: episode={ep}, [{start}, {end}).")
                 if is_annotated != (provenance == "annotated"):
                     raise ValueError(f"Conflicting is_annotated/provenance values: episode={ep}, [{start}, {end}).")
-            elif require_role_provenance:
-                raise ValueError(f"Missing provenance: episode={ep}, [{start}, {end}).")
 
             empty_text = text is None or (isinstance(text, str) and not text.strip())
-            if empty_text and is_annotated:
+            if empty_text:
                 if empty_label_policy == "error":
                     raise ValueError(
                         f"Empty subtask label: episode={ep}, [{start}, {end}). "
@@ -416,18 +137,18 @@ class SubtaskFromSegments:
                     )
                 empty_intervals.setdefault(ep, []).append((start, end))
                 continue
-            if not empty_text and not isinstance(text, str):
+            if not isinstance(text, str):
                 raise ValueError(f"Subtask label must be a string: episode={ep}, [{start}, {end}).")
             grouped.setdefault(ep, []).append(
                 (
                     start,
                     end,
-                    "" if empty_text else text.strip(),
+                    text.strip(),
                     is_annotated,
                     provenance or ("annotated" if is_annotated else "imputed_unspecified"),
                 )
             )
-        # Drop whole episodes with empty annotated targets; empty imputed intervals remain coverage-only.
+        # Joint training samples every retained frame, including imputed intervals.
         for ep in empty_intervals:
             grouped.pop(ep, None)
 
@@ -519,26 +240,3 @@ class SubtaskFromSegments:
         episode, frame = self.indices(data)
         label, _ = self.lookup(episode, frame)
         return {**data, "subtask": label}
-
-
-@dataclasses.dataclass(frozen=True)
-class PureSubtaskExecutor:
-    """Set a strict GT subtask prompt and temporal action mask for one anchor."""
-
-    segments: SubtaskFromSegments
-    action_horizon: int
-    action_pad_key: str
-
-    def __call__(self, data: dict) -> dict:
-        episode, frame = self.segments.indices(data)
-        prompt, segment_end = self.segments.lookup(episode, frame, require_annotated=True)
-        if self.action_pad_key not in data:
-            raise ValueError(f"Pure subtask executor requires LeRobot padding field {self.action_pad_key!r}.")
-        is_pad = np.asarray(data[self.action_pad_key])
-        if is_pad.shape != (self.action_horizon,):
-            raise ValueError(f"{self.action_pad_key} must have shape ({self.action_horizon},), got {is_pad.shape}.")
-        boundary_mask = np.arange(self.action_horizon) < segment_end - frame
-        action_loss_mask = boundary_mask & ~is_pad.astype(np.bool_)
-        if not action_loss_mask[0]:
-            raise ValueError(f"Executor anchor has no valid offset-0 action: episode={episode}, frame={frame}.")
-        return {**data, "prompt": prompt, "action_loss_mask": action_loss_mask}

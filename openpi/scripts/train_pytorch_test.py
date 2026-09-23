@@ -250,37 +250,6 @@ def test_resume_configuration_comparison_handles_shared_python_callables(tmp_pat
         trainer.load_checkpoint(model, optimizer, tmp_path, torch.device("cpu"), config)
 
 
-def test_resume_accepts_new_disabled_subtask_defaults(tmp_path):
-    config = _config(tmp_path)
-    config.model = {"train_subtask_prediction": True}
-    config.data = {"base_config": {"prompt_from_task": True}}
-    model = TinyJoint()
-    optimizer = _optimizer(model)
-    trainer.save_checkpoint(model, optimizer, 2, config)
-
-    config.model["train_subtask_executor"] = False
-    config.data.update(subtask_executor_max_samples_per_segment=None, strict_subtask_action_chunks=False)
-    config.data["base_config"].update(
-        subtask_executor=False,
-        subtask_executor_max_samples_per_segment=None,
-        strict_subtask_action_chunks=False,
-    )
-    restored = TinyJoint()
-    restored_optimizer = _optimizer(restored)
-    assert trainer.load_checkpoint(restored, restored_optimizer, tmp_path, torch.device("cpu"), config) == 2
-
-
-def test_resume_rejects_new_subtask_mode_when_enabled(tmp_path):
-    config = _config(tmp_path)
-    config.model = {"train_subtask_prediction": True}
-    model = TinyJoint()
-    optimizer = _optimizer(model)
-    trainer.save_checkpoint(model, optimizer, 2, config)
-    config.model["train_subtask_executor"] = True
-    with pytest.raises(ValueError, match="changed model"):
-        trainer.load_checkpoint(model, optimizer, tmp_path, torch.device("cpu"), config)
-
-
 def test_resume_uses_checkpoint_norm_stats_without_mutating_training_config(tmp_path):
     @dataclasses.dataclass(frozen=True)
     class Assets:
