@@ -88,8 +88,10 @@ def generated_result() -> dict:
     }
     result.pop("selector_events")
     result.pop("selector_summary")
-    for event in result["subtask_events"]:
-        event["source"] = "generated"
+    result["subtask_events"] = [
+        {"step": 0, "subtask": "move to paper bag", "source": "generated"},
+        {"step": 1, "subtask": "move to paper bag", "source": "cached"},
+    ]
     return result
 
 
@@ -194,10 +196,27 @@ def test_selector_diagnostic_violation_fails_completeness(tmp_path, mutate):
     assert summary["selector_diagnostics"]["valid_rollouts"] == 0
 
 
-def test_generated_subtasks_are_validated(tmp_path):
+@pytest.mark.parametrize(
+    "events",
+    [
+        [{"step": 0, "subtask": "move to paper bag", "source": "generated"}],
+        [
+            {"step": 0, "subtask": "move to paper bag", "source": "generated"},
+            {"step": 3, "subtask": "move to paper bag", "source": "cached"},
+            {"step": 8, "subtask": "move to paper bag", "source": "cached"},
+            {"step": 13, "subtask": "pick up paper bag", "source": "generated"},
+            {"step": 21, "subtask": "close car", "source": "generated"},
+            {"step": 34, "subtask": "close car", "source": "cached"},
+        ],
+    ],
+)
+def test_generated_subtasks_are_validated(tmp_path, events):
+    result = generated_result()
+    result["subtask_events"] = events
+
     completed, summary = run_summarizer(
         tmp_path,
-        generated_result(),
+        result,
         require_selector=False,
         require_generated=True,
     )
@@ -212,7 +231,14 @@ def test_generated_subtasks_are_validated(tmp_path):
         lambda result: result["conditioning"].update(oracle=True),
         lambda result: result["conditioning"].update(privileged=True),
         lambda result: result["conditioning"].update(selector=SELECTOR),
-        lambda result: result["subtask_events"][0].update(source="provided"),
+        lambda result: result["subtask_events"][0].update(source="cached"),
+        lambda result: result["subtask_events"][1].update(subtask="different skill"),
+        lambda result: result["subtask_events"][1].update(source="provided"),
+        lambda result: result["subtask_events"][1].update(source="unknown"),
+        lambda result: result["subtask_events"][1].pop("source"),
+        lambda result: result["subtask_events"][0].update(subtask=None),
+        lambda result: result["subtask_events"][0].update(subtask=""),
+        lambda result: result["subtask_events"][1].update(subtask="  "),
     ],
 )
 def test_generated_subtask_violation_fails_completeness(tmp_path, mutate):

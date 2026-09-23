@@ -27,10 +27,10 @@ case "$PI05_MODEL_FORMAT" in
     *) fail "PI05_MODEL_FORMAT must be jax or torch" ;;
 esac
 case "$EVAL_PROFILE" in
-    smoke|speed|two_tasks|reduced|full) ;;
-    *) fail "EVAL_PROFILE must be smoke, speed, two_tasks, reduced, or full" ;;
+    smoke|speed|two_tasks|reduced|full|full4) ;;
+    *) fail "EVAL_PROFILE must be smoke, speed, two_tasks, reduced, full, or full4" ;;
 esac
-if [[ "$EVAL_PROFILE" == full && "$CONFIRM_FULL" != 1 ]]; then
+if [[ ( "$EVAL_PROFILE" == full || "$EVAL_PROFILE" == full4 ) && "$CONFIRM_FULL" != 1 ]]; then
     fail "full evaluation requires CONFIRM_FULL=1"
 fi
 [[ "$EVAL_WORKERS" =~ ^[1-9][0-9]*$ ]] || fail "EVAL_WORKERS must be a positive integer"
@@ -375,6 +375,21 @@ case "$EVAL_PROFILE" in
         )
         MAX_STEPS_VALUE=""
         ;;
+    full4)
+        TASK_FILE=""
+        mapfile -t FULL4_ALL_TASKS < <(grep -vE '^[[:space:]]*(#|$)' "$REPO_ROOT/scripts/b1k_tasks.txt" | awk '{print $1}')
+        (( ${#FULL4_ALL_TASKS[@]} == 100 )) || fail "full4 expects 100 tasks, got ${#FULL4_ALL_TASKS[@]}"
+        TASK_SPECS=()
+        for (( w = 0; w < EVAL_WORKERS; w++ )); do
+            shard=()
+            for (( t = w; t < ${#FULL4_ALL_TASKS[@]}; t += EVAL_WORKERS )); do
+                shard+=("${FULL4_ALL_TASKS[t]}")
+            done
+            (( ${#shard[@]} > 0 )) || fail "full4 worker $w received no tasks"
+            TASK_SPECS+=("${shard[*]}|$INSTANCE_INDICES")
+        done
+        MAX_STEPS_VALUE=""
+        ;;
     reduced)
         TASK_FILE="$REPO_ROOT/scripts/b1k_tasks_reduced.txt"
         TASK_SPECS=()
@@ -449,6 +464,28 @@ elif profile == "two_tasks":
         }
         for worker in range($EVAL_WORKERS)
     ]
+elif profile == "full4":
+    with open("$REPO_ROOT/scripts/b1k_tasks.txt") as fh:
+        all_tasks = [
+            line.split()[0]
+            for line in fh
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+    num_workers = $EVAL_WORKERS
+    task_shards = [all_tasks[worker::num_workers] for worker in range(num_workers)]
+    workers = [
+        {
+            "worker": worker,
+            "server_gpu": worker,
+            "eval_gpu": worker,
+            "port": $BASE_PORT + worker,
+            "tasks": task_shards[worker],
+            "instance_indices": list(indices),
+            "expected_instance_ids": [301 + index for index in indices],
+            "expected_rollouts": len(task_shards[worker]) * len(indices) * $NUM_ROLLOUTS,
+        }
+        for worker in range(num_workers)
+    ]
 elif profile == "smoke":
     workers = [{
         "worker": 0,
@@ -506,7 +543,13 @@ path.write_text(json.dumps({
         "privileged": True,
         "official_benchmark": False,
     } if selector else None),
-    "tasks": (["carrying_in_groceries", "make_rose_centerpieces"] if profile == "two_tasks" else None),
+    "tasks": (
+        ["carrying_in_groceries", "make_rose_centerpieces"]
+        if profile == "two_tasks"
+        else [task for worker in workers for task in worker["tasks"]]
+        if profile == "full4"
+        else None
+    ),
     "instance_indices": indices,
     "num_rollouts": $NUM_ROLLOUTS,
     "max_steps": (int("${MAX_STEPS_VALUE}") if "${MAX_STEPS_VALUE}" else None),
@@ -526,7 +569,7 @@ touch "$PERSISTENT_OUTPUT/_RUNNING"
 
 status=0
 EVAL_WALL_TIME=""
-if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ]]; then
+if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 ]]; then
     PARALLEL_START="$(date +%s)"
     WORKER_PIDS=()
     WORKER_TASKS=()
@@ -574,12 +617,12 @@ if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ]]; then
         else
             "$PI05_ENV/bin/python" - "$PERSISTENT_OUTPUT/status/worker-$worker.json" \
                 "$LOCAL_RESULTS/shards/worker_$worker" "$worker" "${WORKER_TASKS[worker]}" \
-                "${WORKER_INDICES[worker]}" "$((BASE_PORT + worker))" "$worker_status" <<'PY'
+                "${WORKER_INDICES[worker]}" "$((BASE_PORT + worker))" "$worker_status" "$NUM_ROLLOUTS" <<'PY'
 import json
 from pathlib import Path
 import sys
 
-output, shard_root, worker, tasks, indices, port, exit_code = sys.argv[1:]
+output, shard_root, worker, tasks, indices, port, exit_code, num_rollouts = sys.argv[1:]
 root = Path(shard_root)
 results = []
 for path in root.rglob("json/*.json"):
@@ -587,13 +630,15 @@ for path in root.rglob("json/*.json"):
         results.append(json.loads(path.read_text()))
     except Exception:
         pass
+task_list = tasks.split()
+index_list = [int(value) for value in indices.split()]
 status = {
     "worker": int(worker),
-    "tasks": tasks.split(),
-    "instance_indices": [int(value) for value in indices.split()],
+    "tasks": task_list,
+    "instance_indices": index_list,
     "gpu": int(worker),
     "port": int(port),
-    "expected_rollouts": 30,
+    "expected_rollouts": len(task_list) * len(index_list) * int(num_rollouts),
     "completed_rollouts": len(results),
     "completed_videos": sum(1 for path in root.rglob("videos/*.mp4") if path.stat().st_size > 0),
     "rollouts_with_subtask_events": sum(bool(result.get("subtask_events")) for result in results),
@@ -675,7 +720,7 @@ PY
     fi
 fi
 if [[ "$SUBTASK_PREDICTION" == 1 && -z "$EXTERNAL_SUBTASK_SELECTOR" \
-    && ( "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ) ]]; then
+    && ( "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 ) ]]; then
     for (( worker = 0; worker < EVAL_WORKERS; worker++ )); do
         server_log="$LOCAL_RESULTS/shards/worker_$worker/pi05/server_$((BASE_PORT + worker)).log"
         if ! grep -q 'Generated subtask:' "$server_log"; then
@@ -720,6 +765,25 @@ elif [[ "$EVAL_PROFILE" == two_tasks ]]; then
         SUMMARY_ARGS+=(--require-selector-events)
     elif [[ "$SUBTASK_PREDICTION" == 1 ]]; then
         SUMMARY_ARGS+=(--require-generated-subtasks)
+    fi
+elif [[ "$EVAL_PROFILE" == full4 ]]; then
+    full4_task_str="$(grep -vE '^[[:space:]]*(#|$)' "$REPO_ROOT/scripts/b1k_tasks.txt" | awk '{print $1}' | tr '\n' ' ')"
+    full4_id_str=""
+    for idx in $INSTANCE_INDICES; do full4_id_str+="$((301 + idx)) "; done
+    full4_rollout_str=""
+    for (( r = 0; r < NUM_ROLLOUTS; r++ )); do full4_rollout_str+="$r "; done
+    SUMMARY_ARGS+=(
+        --expected-tasks "$full4_task_str"
+        --expected-instance-ids "$full4_id_str"
+        --expected-rollout-ids "$full4_rollout_str"
+        --expected-workers "$EVAL_WORKERS"
+        --status-root "$PERSISTENT_OUTPUT/status"
+        --require-videos
+    )
+    if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
+        SUMMARY_ARGS+=(--require-subtask-events --require-generated-subtasks)
+    elif [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
+        SUMMARY_ARGS+=(--require-subtask-events)
     fi
 elif [[ "$EVAL_PROFILE" == smoke && -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     SUMMARY_ARGS+=(--require-subtask-events --require-selector-events)

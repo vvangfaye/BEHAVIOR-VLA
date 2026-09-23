@@ -22,10 +22,10 @@ case "$PI05_MODEL_FORMAT" in
 esac
 EVAL_PROFILE="${EVAL_PROFILE:-smoke}"
 case "$EVAL_PROFILE" in
-    smoke|speed|two_tasks|reduced|full) ;;
-    *) echo "EVAL_PROFILE must be smoke, speed, two_tasks, reduced, or full" >&2; exit 2 ;;
+    smoke|speed|two_tasks|reduced|full|full4) ;;
+    *) echo "EVAL_PROFILE must be smoke, speed, two_tasks, reduced, full, or full4" >&2; exit 2 ;;
 esac
-if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ]]; then
+if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 ]]; then
     CLUSTER_FILE="${CLUSTER_FILE:-nebula/multihost_cluster_4gpu.json}"
     EVAL_WORKERS="${EVAL_WORKERS:-4}"
     BASE_PORT="${BASE_PORT:-8000}"
@@ -36,6 +36,13 @@ if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ]]; then
         INSTANCE_INDICES="${INSTANCE_INDICES:-0 1 2 3}"
         SPEED_EXPECTED_INSTANCE_IDS="${SPEED_EXPECTED_INSTANCE_IDS:-301 302 303 304}"
         MAX_STEPS="${MAX_STEPS:-100}"
+    elif [[ "$EVAL_PROFILE" == full4 ]]; then
+        WRITE_VIDEO="${WRITE_VIDEO:-1}"
+        SPEED_TASK=""
+        SPEED_EXPECTED_INSTANCE_IDS=""
+        INSTANCE_INDICES="${INSTANCE_INDICES:-0 1}"
+        NUM_ROLLOUTS="${NUM_ROLLOUTS:-1}"
+        MAX_STEPS="${MAX_STEPS:-}"
     else
         WRITE_VIDEO="${WRITE_VIDEO:-1}"
         SPEED_TASK=""
@@ -64,7 +71,7 @@ CONFIRM_FULL="${CONFIRM_FULL:-0}"
 SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-1}"
 EXTERNAL_SUBTASK_SELECTOR="${EXTERNAL_SUBTASK_SELECTOR:-}"
 MAX_FAILOVER_TIMES="${MAX_FAILOVER_TIMES:-0}"
-if [[ "$EVAL_PROFILE" == full && "$CONFIRM_FULL" != 1 ]]; then
+if [[ ( "$EVAL_PROFILE" == full || "$EVAL_PROFILE" == full4 ) && "$CONFIRM_FULL" != 1 ]]; then
     echo "Full evaluation requires CONFIRM_FULL=1" >&2
     exit 2
 fi
@@ -211,6 +218,25 @@ elif [[ "$EVAL_PROFILE" == two_tasks ]]; then
     }
     [[ "${two_task_indices[*]}" == "0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19" ]] || {
         echo "two_tasks profile requires INSTANCE_INDICES='0 1 ... 19'" >&2
+        exit 2
+    }
+elif [[ "$EVAL_PROFILE" == full4 ]]; then
+    (( EVAL_WORKERS == 4 )) || { echo "full4 profile requires EVAL_WORKERS=4" >&2; exit 2; }
+    (( NUM_ROLLOUTS == 1 )) || { echo "full4 profile requires NUM_ROLLOUTS=1" >&2; exit 2; }
+    [[ "$WRITE_VIDEO" == 1 ]] || { echo "full4 profile requires WRITE_VIDEO=1" >&2; exit 2; }
+    [[ -z "$MAX_STEPS" ]] || { echo "full4 profile requires a full task timeout" >&2; exit 2; }
+    [[ -z "$EXTERNAL_SUBTASK_SELECTOR" ]] || { echo "full4 profile does not support EXTERNAL_SUBTASK_SELECTOR" >&2; exit 2; }
+    read -ra full4_indices <<< "$INSTANCE_INDICES"
+    (( ${#full4_indices[@]} >= 1 )) || { echo "full4 profile requires at least one instance index" >&2; exit 2; }
+    for idx in "${full4_indices[@]}"; do
+        [[ "$idx" =~ ^[0-9]+$ ]] && (( idx >= 0 && idx <= 19 )) || {
+            echo "full4 instance indices must be integers in 0..19 (public test)" >&2; exit 2; }
+    done
+    [[ "$(printf '%s\n' "${full4_indices[@]}" | sort -un | grep -c .)" == "${#full4_indices[@]}" ]] || {
+        echo "full4 instance indices must be unique" >&2; exit 2; }
+    full4_task_count="$(grep -cvE '^[[:space:]]*(#|$)' "$REPO_ROOT/scripts/b1k_tasks.txt")"
+    (( full4_task_count == 100 )) || {
+        echo "full4 profile requires 100 tasks in scripts/b1k_tasks.txt, found $full4_task_count" >&2
         exit 2
     }
 fi
@@ -395,6 +421,24 @@ if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ]]; then
                 "$worker" "$worker" "$worker" "$((BASE_PORT + worker))"
         fi
     done
+elif [[ "$EVAL_PROFILE" == full4 ]]; then
+    mapfile -t FULL4_TASKS < <(grep -vE '^[[:space:]]*(#|$)' "$REPO_ROOT/scripts/b1k_tasks.txt" | awk '{print $1}')
+    read -ra FULL4_IDX <<< "$INSTANCE_INDICES"
+    n_idx="${#FULL4_IDX[@]}"
+    for (( worker = 0; worker < EVAL_WORKERS; worker++ )); do
+        shard_count=0
+        shard_first=""
+        for (( idx = worker; idx < ${#FULL4_TASKS[@]}; idx += EVAL_WORKERS )); do
+            [[ -z "$shard_first" ]] && shard_first="${FULL4_TASKS[idx]}"
+            shard_count=$((shard_count + 1))
+        done
+        printf 'WORKER %d: tasks=%d (first=%s) indices=[%s] rollouts=%d gpu=%d port=%d\n' \
+            "$worker" "$shard_count" "$shard_first" "$INSTANCE_INDICES" \
+            "$((shard_count * n_idx * NUM_ROLLOUTS))" "$worker" "$((BASE_PORT + worker))"
+    done
+    printf 'FULL4 TOTAL: tasks=%d instances_per_task=%d rollouts=%d videos=%d\n' \
+        "${#FULL4_TASKS[@]}" "$n_idx" \
+        "$(( ${#FULL4_TASKS[@]} * n_idx * NUM_ROLLOUTS ))" "$(( ${#FULL4_TASKS[@]} * n_idx * NUM_ROLLOUTS ))"
 elif [[ "$EVAL_PROFILE" == smoke ]]; then
     printf 'GPU MAP: policy=0 simulator=%s task=%s\n' "$SMOKE_EVAL_GPU" "$SMOKE_TASK"
 else

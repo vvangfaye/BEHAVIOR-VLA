@@ -84,8 +84,23 @@ def validate_generated_subtask_rollout(result: dict) -> None:
     if result.get("selector_summary"):
         raise ValueError("selector_summary must be absent or empty")
     validate_subtask_events(result.get("subtask_events"))
-    if any(event.get("source") != "generated" for event in result["subtask_events"]):
-        raise ValueError("all subtask event sources must be 'generated'")
+    latest_generated_subtask = None
+    for event in result["subtask_events"]:
+        subtask = event["subtask"]
+        if not isinstance(subtask, str) or not subtask.strip():
+            raise ValueError("generated subtask event text must be nonempty")
+        source = event.get("source")
+        if source == "generated":
+            latest_generated_subtask = subtask
+        elif source == "cached":
+            if latest_generated_subtask is None:
+                raise ValueError("first subtask event source must be 'generated'")
+            if subtask != latest_generated_subtask:
+                raise ValueError(
+                    "cached subtask text must match the most recent generated subtask"
+                )
+        else:
+            raise ValueError("subtask event source must be 'generated' or 'cached'")
 
 
 def _nonnegative_int(value: object, name: str) -> int:
