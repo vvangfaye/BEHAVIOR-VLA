@@ -2,7 +2,8 @@
 # Closed-loop evaluation of π0.5 in OmniGibson.
 # Starts the policy server, evaluates each task, then stops the server.
 # Usage: PI05_CKPT=/path/to/checkpoint bash scripts/eval_b1k.sh turning_on_radio
-# For native OpenPI joint checkpoints, set SUBTASK_PREDICTION=1.
+# For native OpenPI joint checkpoints, set SUBTASK_PREDICTION=1; for action-only
+# subtask checkpoints, set PROVIDED_SUBTASK_AS_PROMPT=1 with an external subtask source.
 # GoalKeeper reads joint mode from each task's JSON configuration.
 set -euo pipefail
 
@@ -25,6 +26,13 @@ PROMPT_MODE="${PROMPT_MODE:-whole_task}"
 EXTERNAL_SUBTASK_SET="${EXTERNAL_SUBTASK+x}"
 EXTERNAL_SUBTASK="${EXTERNAL_SUBTASK:-}"
 EXTERNAL_SUBTASK_SELECTOR="${EXTERNAL_SUBTASK_SELECTOR:-}"
+SUBTASK_SAMPLE_PANEL="${PI05_SUBTASK_SAMPLE_PANEL:-}"
+SUBTASK_RAW_DATA_ROOT="${PI05_SUBTASK_RAW_DATA_ROOT:-}"
+SUBTASK_SAMPLE_MODE=0
+if [[ -n "$SUBTASK_SAMPLE_PANEL" ]]; then
+    SUBTASK_SAMPLE_MODE=1
+    : "${SUBTASK_RAW_DATA_ROOT:?set PI05_SUBTASK_RAW_DATA_ROOT with PI05_SUBTASK_SAMPLE_PANEL}"
+fi
 case "$PROMPT_MODE" in
     whole_task|oracle_unsatisfied_goal) ;;
     *) echo "PROMPT_MODE must be whole_task or oracle_unsatisfied_goal" >&2; exit 2 ;;
@@ -56,20 +64,31 @@ SERVER_GPU="${SERVER_GPU:-0}"
 EVAL_GPU="${EVAL_GPU:-1}"
 PI05_MEM_FRACTION="${PI05_MEM_FRACTION:-0.85}"
 SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-0}"
+PROVIDED_SUBTASK_AS_PROMPT="${PROVIDED_SUBTASK_AS_PROMPT:-0}"
 if [[ "$SUBTASK_PREDICTION" != 0 && "$SUBTASK_PREDICTION" != 1 ]]; then
     echo "SUBTASK_PREDICTION must be 0 or 1" >&2; exit 2
 fi
-if [[ -n "$GOALKEEPER_CONFIG_DIR" && ( "$PROMPT_MODE" != whole_task || -n "$EXTERNAL_SUBTASK_SELECTOR" || -n "$EXTERNAL_SUBTASK_SET" ) ]]; then
+if [[ "$PROVIDED_SUBTASK_AS_PROMPT" != 0 && "$PROVIDED_SUBTASK_AS_PROMPT" != 1 ]]; then
+    echo "PROVIDED_SUBTASK_AS_PROMPT must be 0 or 1" >&2; exit 2
+fi
+if [[ "$SUBTASK_PREDICTION" == 1 && "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
+    echo "SUBTASK_PREDICTION and PROVIDED_SUBTASK_AS_PROMPT are mutually exclusive" >&2; exit 2
+fi
+if [[ -n "$GOALKEEPER_CONFIG_DIR" && ( "$PROMPT_MODE" != whole_task || -n "$EXTERNAL_SUBTASK_SELECTOR" || -n "$EXTERNAL_SUBTASK_SET" || "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ) ]]; then
     echo "GoalKeeper evaluation requires whole_task prompt mode without an external subtask" >&2
     exit 2
 fi
 EXTERNAL_SUBTASK_ARGS=()
+if (( SUBTASK_SAMPLE_MODE )) && [[ -n "$EXTERNAL_SUBTASK_SET" || -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
+    echo "PI05_SUBTASK_SAMPLE_PANEL supplies per-sample prompts and cannot be combined with EXTERNAL_SUBTASK or EXTERNAL_SUBTASK_SELECTOR" >&2
+    exit 2
+fi
 if [[ -n "$EXTERNAL_SUBTASK_SET" ]]; then
     if [[ ! "$EXTERNAL_SUBTASK" =~ [^[:space:]] ]]; then
         echo "EXTERNAL_SUBTASK must be a non-empty, non-whitespace string" >&2; exit 2
     fi
-    if [[ "$SUBTASK_PREDICTION" != 1 ]]; then
-        echo "EXTERNAL_SUBTASK requires SUBTASK_PREDICTION=1" >&2; exit 2
+    if [[ "$SUBTASK_PREDICTION" != 1 && "$PROVIDED_SUBTASK_AS_PROMPT" != 1 ]]; then
+        echo "EXTERNAL_SUBTASK requires a subtask conditioning mode" >&2; exit 2
     fi
     if [[ "$PROMPT_MODE" != whole_task ]]; then
         echo "EXTERNAL_SUBTASK requires PROMPT_MODE=whole_task" >&2; exit 2
@@ -83,8 +102,8 @@ if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     if [[ "$EXTERNAL_SUBTASK_SELECTOR" != state_machine_v1 ]]; then
         echo "EXTERNAL_SUBTASK_SELECTOR must be state_machine_v1" >&2; exit 2
     fi
-    if [[ "$SUBTASK_PREDICTION" != 1 ]]; then
-        echo "EXTERNAL_SUBTASK_SELECTOR requires SUBTASK_PREDICTION=1" >&2; exit 2
+    if [[ "$SUBTASK_PREDICTION" != 1 && "$PROVIDED_SUBTASK_AS_PROMPT" != 1 ]]; then
+        echo "EXTERNAL_SUBTASK_SELECTOR requires a subtask conditioning mode" >&2; exit 2
     fi
     if [[ "$PROMPT_MODE" != whole_task ]]; then
         echo "EXTERNAL_SUBTASK_SELECTOR requires PROMPT_MODE=whole_task" >&2; exit 2
@@ -103,6 +122,14 @@ if [[ "$SUBTASK_PREDICTION" == 1 && -z "$GOALKEEPER_CONFIG_DIR" ]]; then
     if [[ -n "${SUBTASK_ACTION_CONDITIONING:-}" ]]; then
         SUBTASK_SERVER_ARGS+=(--subtask-action-conditioning "$SUBTASK_ACTION_CONDITIONING")
     fi
+elif [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
+    if [[ -z "$EXTERNAL_SUBTASK_SET" && -z "$EXTERNAL_SUBTASK_SELECTOR" && "$SUBTASK_SAMPLE_MODE" == 0 ]]; then
+        echo "PROVIDED_SUBTASK_AS_PROMPT requires EXTERNAL_SUBTASK, EXTERNAL_SUBTASK_SELECTOR, or PI05_SUBTASK_SAMPLE_PANEL" >&2; exit 2
+    fi
+    if [[ "${MAX_TOKEN_LEN:-200}" != 200 ]]; then
+        echo "PROVIDED_SUBTASK_AS_PROMPT requires MAX_TOKEN_LEN=200" >&2; exit 2
+    fi
+    SUBTASK_SERVER_ARGS=(--provided-subtask-as-prompt --max-token-len 200)
 fi
 EVAL_RUNTIME_ROOT="${EVAL_RUNTIME_ROOT:-/dev/shm/wangfaye/omnigibson-runtime/$PORT}"
 QUEUE_MODE=0
@@ -125,6 +152,16 @@ if [[ -n "${PI05_EVAL_QUEUE_DB:-}" ]]; then
     QUEUE_LOG_DIR="${PI05_EVAL_QUEUE_LOG_ROOT:-$PI05_EVAL_QUEUE_ATTEMPT_ROOT/../logs}"
     QUEUE_LOG_DIR="$QUEUE_LOG_DIR/$PI05_EVAL_QUEUE_WORKER/generation-$PI05_EVAL_QUEUE_GENERATION"
     mkdir -p "$QUEUE_LOG_DIR"
+fi
+if (( SUBTASK_SAMPLE_MODE )); then
+    (( QUEUE_MODE )) || {
+        echo "PI05_SUBTASK_SAMPLE_PANEL requires PI05_EVAL_QUEUE_DB" >&2; exit 2; }
+    [[ "$NUM_ROLLOUTS" == 1 ]] || {
+        echo "PI05_SUBTASK_SAMPLE_PANEL requires NUM_ROLLOUTS=1" >&2; exit 2; }
+    [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]] || {
+        echo "PI05_SUBTASK_SAMPLE_PANEL requires PROVIDED_SUBTASK_AS_PROMPT=1" >&2; exit 2; }
+    [[ "${SUBTASK_SAMPLE_MAX_STEPS:-2048}" =~ ^[1-9][0-9]*$ ]] || {
+        echo "SUBTASK_SAMPLE_MAX_STEPS must be a positive integer" >&2; exit 2; }
 fi
 
 TASKS=("$@")
@@ -162,6 +199,9 @@ else
     [[ -d "$PI05_CKPT" ]] || { echo "checkpoint not found: $PI05_CKPT" >&2; exit 1; }
     [[ -d "$PI05_CKPT/assets/$PI05_REPO_ID" ]] || {
         echo "norm stats not found: $PI05_CKPT/assets/$PI05_REPO_ID" >&2; exit 1; }
+    if [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 && -f "$PI05_CKPT/model.safetensors" ]]; then
+        echo "PROVIDED_SUBTASK_AS_PROMPT currently supports JAX checkpoints only" >&2; exit 2
+    fi
     if [[ -f "$PI05_CKPT/model.safetensors" ]]; then
         PI05_ENV="${PI05_ENV:-$REPO_ROOT/openpi/.venv-torch}"
         export JAX_PLATFORMS=cpu
@@ -305,7 +345,15 @@ for task in "${TASKS[@]}"; do
     cd "$REPO_ROOT/BEHAVIOR-1K"
     EVAL_ARGS=("${EXTERNAL_SUBTASK_ARGS[@]}")
     EVAL_COMMAND=("$EVAL_ENV/bin/python" -m omnigibson.eval.eval)
-    if (( QUEUE_MODE )); then
+    if (( SUBTASK_SAMPLE_MODE )); then
+        EVAL_ARGS+=(
+            "${QUEUE_EVAL_ARGS[@]}"
+            --subtask-panel "$SUBTASK_SAMPLE_PANEL"
+            --raw-data-root "$SUBTASK_RAW_DATA_ROOT"
+            --sample-max-steps "${SUBTASK_SAMPLE_MAX_STEPS:-2048}"
+        )
+        EVAL_COMMAND=("$EVAL_ENV/bin/python" "$REPO_ROOT/scripts/eval_b1k_subtask_samples.py")
+    elif (( QUEUE_MODE )); then
         EVAL_ARGS+=("${QUEUE_EVAL_ARGS[@]}")
         EVAL_COMMAND=("$EVAL_ENV/bin/python" "$REPO_ROOT/scripts/eval_b1k_queue.py")
     fi

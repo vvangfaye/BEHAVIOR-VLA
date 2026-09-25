@@ -420,6 +420,17 @@ class PromptFromLeRobotTask(DataTransformFn):
 
 
 @dataclasses.dataclass(frozen=True)
+class UseSubtaskAsPrompt(DataTransformFn):
+    def __call__(self, data: DataDict) -> DataDict:
+        data = dict(data)
+        subtask = data.pop("subtask", None)
+        if not isinstance(subtask, str) or not subtask.strip():
+            raise ValueError("A non-empty GT subtask is required as the prompt.")
+        data["prompt"] = subtask.strip()
+        return data
+
+
+@dataclasses.dataclass(frozen=True)
 class PromptFromSubtask(DataTransformFn):
     """Conditions each frame on the CURRENT sub-task instead of the whole-episode task.
 

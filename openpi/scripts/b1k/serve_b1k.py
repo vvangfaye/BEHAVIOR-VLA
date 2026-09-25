@@ -1,5 +1,6 @@
 import dataclasses
 import logging
+import pathlib
 import socket
 
 import tyro
@@ -10,6 +11,7 @@ from openpi.policies import policy_config as _policy_config
 from openpi.serving import websocket_b1k_server
 from openpi.shared.eval_b1k_wrapper import B1KPolicyWrapper
 from openpi.training import config as _config
+import openpi.transforms as transforms
 
 
 @dataclasses.dataclass
@@ -42,6 +44,8 @@ class Args:
     record: bool = False
     # Use the joint subtask-trained checkpoint and generate text before actions.
     subtask_prediction: bool = False
+    # Use a selector-provided subtask as the only language prompt for an action-only checkpoint.
+    provided_subtask_as_prompt: bool = False
     max_token_len: int = 512
     max_subtask_len: int = 64
     # Refresh every N model action-chunk requests (not simulator frames).
@@ -60,6 +64,8 @@ def main(args: Args) -> None:
 
     # Load training config and override request-specific fields.
     config = _config.get_config(args.policy.config)
+    if args.subtask_prediction and args.provided_subtask_as_prompt:
+        raise ValueError("Subtask prediction and provided-subtask prompt modes are mutually exclusive.")
     if args.subtask_prediction:
         config = dataclasses.replace(
             config,
@@ -71,21 +77,42 @@ def main(args: Args) -> None:
                 subtask_loss_chunk_size=min(config.model.subtask_loss_chunk_size, args.max_subtask_len),
             ),
         )
+    elif args.provided_subtask_as_prompt:
+        if not getattr(config.model, "pi05", False):
+            raise ValueError("Provided-subtask prompt mode requires a π0.5 model.")
+        if pathlib.Path(args.policy.dir, "model.safetensors").exists():
+            raise ValueError("Provided-subtask prompt mode currently supports JAX checkpoints only.")
+        if args.max_token_len != 200:
+            raise ValueError("Provided-subtask prompt mode requires max_token_len=200.")
+        config = dataclasses.replace(
+            config,
+            model=dataclasses.replace(
+                config.model,
+                train_subtask_prediction=False,
+                max_token_len=args.max_token_len,
+            ),
+        )
     norm_stats_repo_id = args.repo_id or args.task
     logging.info("Using norm stats for repo: %s", norm_stats_repo_id)
     config = dataclasses.replace(
         config, data=dataclasses.replace(config.data, repo_id=norm_stats_repo_id, robot_config_name=args.robot)
     )
 
+    repack_transforms = (
+        transforms.Group(inputs=[transforms.UseSubtaskAsPrompt()]) if args.provided_subtask_as_prompt else None
+    )
     policy = _policy_config.create_trained_policy(
         config,
         args.policy.dir,
+        repack_transforms=repack_transforms,
         default_prompt=task_prompt,
         subtask_interval=args.subtask_interval,
         subtask_temperature=args.subtask_temperature,
         subtask_action_conditioning=args.subtask_action_conditioning,
     )
     policy_metadata = dict(policy.metadata)
+    if args.provided_subtask_as_prompt:
+        policy_metadata["conditioning_mode"] = "provided_subtask_as_prompt"
     logging.info(
         "Loaded policy class=%s conditioning=%s max_token_len=%d",
         type(policy).__name__,
@@ -104,6 +131,7 @@ def main(args: Args) -> None:
         control_mode=args.control_mode,
         action_horizon=args.action_horizon,
         max_len=config.model.action_horizon,
+        provided_subtask_as_prompt=args.provided_subtask_as_prompt,
     )
 
     hostname = socket.gethostname()
