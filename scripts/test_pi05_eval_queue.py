@@ -610,6 +610,7 @@ def fake_base_module(recorded=None):
         parser.add_argument("--task-name", required=True)
         parser.add_argument("--host", default="127.0.0.1")
         parser.add_argument("--port", type=int, default=8000)
+        parser.add_argument("--expected-server-token")
         parser.add_argument("--robot-config")
         parser.add_argument("--instance-indices", type=int, nargs="+", default=[0])
         parser.add_argument("--mode", default="public_test")
@@ -789,7 +790,10 @@ def test_tracked_queue_runner_claims_executes_and_publishes(tmp_path):
     )
     recorded = {}
     base = fake_base_module(recorded)
-    args = queue_runner.parse_args(queue_runner_argv(tmp_path), base_module=base)
+    args = queue_runner.parse_args(
+        queue_runner_argv(tmp_path, "--expected-server-token", "test-token"),
+        base_module=base,
+    )
 
     results = queue_runner.run(
         args,
@@ -802,6 +806,7 @@ def test_tracked_queue_runner_claims_executes_and_publishes(tmp_path):
     assert len(results) == 4
     assert recorded["instances"] == [301, 302]
     assert recorded["cfg"]["task"] == {"name": task}
+    assert recorded["cfg"]["model"]["expected_server_token"] == "test-token"
     assert queue.snapshot()["counts"] == {
         "pending": 0,
         "running": 0,

@@ -1,6 +1,6 @@
 ---
 name: evaluate-pi05-b1k
-description: Safely run, submit, monitor, validate, and summarize BEHAVIOR-Challenge π0.5 OmniGibson closed-loop evaluations. Use for local smoke or multi-GPU evaluation, Nebula/AIHub evaluation submission, whole-task or joint predicted-subtask policies, fixed/external selector diagnostics, rollout progress, videos, success rate, or q-score analysis.
+description: Safely run, submit, monitor, validate, and summarize BEHAVIOR-Challenge π0.5 OmniGibson closed-loop evaluations. Use for local smoke or multi-GPU evaluation, Nebula/AIHub evaluation submission, whole-task or joint predicted-subtask policies, FrameSamp visual-memory checkpoints, fixed/external selector diagnostics, rollout progress, videos, success rate, or q-score analysis.
 ---
 
 # Evaluate π0.5 on BEHAVIOR-1K
@@ -41,6 +41,8 @@ External text and an external selector are mutually exclusive. Keep `PROMPT_MODE
 
 For joint checkpoints, inspect `assets/subtask_conditioning.json`: preserve `task_and_subtask` for legacy joint checkpoints and `subtask_only` for factorized joint checkpoints. Do not override metadata inconsistently.
 
+For a JAX FrameSamp checkpoint, require `assets/frame_memory.json` and let `create_trained_policy` load its memory contract. Closed-loop evaluation encodes history online, so it does not use the offline training cache. Use the BEHAVIOR wrapper: it observes every control step, clears history on episode reset, and preserves history across subtask changes. Keep one policy instance per environment. Do not drive arbitrary-frequency rollouts through raw `Policy.infer`; direct calls are treated as one memory stride apart unless the client explicitly calls `observe_memory(obs, step=...)`.
+
 ## Recover and verify the runtime
 
 If `/dev/shm` environments, cache, simulator assets, or Vulkan manifests are missing, invoke `/restore-pi05-inference` or run:
@@ -60,7 +62,8 @@ Confirm:
 - OmniGibson, CUDA, Vulkan, and EGL checks pass;
 - the checkpoint contains exactly one supported model format;
 - `PI05_REPO_ID` matches `checkpoint/assets/<repo-id>/norm_stats.json`;
-- staged checkpoints pass their checksum manifest and `_READY` contract.
+- staged checkpoints pass their checksum manifest and `_READY` contract;
+- FrameSamp checkpoints include `assets/frame_memory.json` and load as JAX.
 
 ## Run a local smoke
 
@@ -84,7 +87,7 @@ timeout --signal=TERM --kill-after=30s 1800s env \
   bash "$REPO/scripts/eval_b1k.sh" <task>
 ```
 
-For selector smoke, choose one of the two supported tasks and add `EXTERNAL_SUBTASK_SELECTOR=state_machine_v1` plus the matching joint or action-only settings.
+For selector smoke, choose one of the two supported tasks and add `EXTERNAL_SUBTASK_SELECTOR=state_machine_v1` plus the joint-prediction settings; action-only selector serving was removed.
 
 Require:
 
@@ -157,7 +160,7 @@ Do not restart successful shards. For a failed shard, preserve evidence, determi
 
 ## Submit through Nebula
 
-Use `nebula/submit_pi05_eval.sh`; do not call the worker entry point directly. Supported profiles are `smoke`, `speed`, `two_tasks`, `reduced`, and `full`.
+Use `nebula/submit_pi05_eval.sh`; do not call the worker entry point directly. Supported profiles are `smoke`, `speed`, `two_tasks`, `reduced`, `full`, and four-worker `full4`. Full profiles require `CONFIRM_FULL=1`.
 
 For the formal two-task profile, the launcher uses four co-located workers with modulo-four shards and expects 120 rollouts. A selector run is a privileged diagnostic.
 
@@ -237,6 +240,7 @@ Report:
 - total and per-task mean q-score;
 - rollout/video completeness;
 - checkpoint identity and conditioning mode;
+- for FrameSamp, the saved memory contract plus `memory_ms`, `infer_ms`, and end-to-end wrapper latency;
 - for predicted policies, subtask-generation coverage;
 - for selector diagnostics, phase/stall/recovery distributions and the explicit privileged/non-official caveat;
 - comparison against only evaluations with matching task, instances, rollouts, prompt mode, and evaluator contract.

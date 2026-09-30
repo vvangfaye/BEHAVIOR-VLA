@@ -24,9 +24,28 @@ case "$EVAL_PROFILE" in
     smoke|speed|two_tasks|reduced|full|full4) ;;
     *) echo "EVAL_PROFILE must be smoke, speed, two_tasks, reduced, full, or full4" >&2; exit 2 ;;
 esac
-if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 ]]; then
-    CLUSTER_FILE="${CLUSTER_FILE:-nebula/multihost_cluster_4gpu.json}"
+if [[ "$EVAL_PROFILE" == two_tasks ]]; then
     EVAL_WORKERS="${EVAL_WORKERS:-4}"
+    if [[ "$EVAL_WORKERS" == 8 ]]; then
+        CLUSTER_FILE="${CLUSTER_FILE:-nebula/multihost_cluster.json}"
+    else
+        CLUSTER_FILE="${CLUSTER_FILE:-nebula/multihost_cluster_4gpu.json}"
+    fi
+    BASE_PORT="${BASE_PORT:-8000}"
+    PI05_MEM_FRACTION="${PI05_MEM_FRACTION:-0.35}"
+    WRITE_VIDEO="${WRITE_VIDEO:-1}"
+    SPEED_TASK=""
+    SPEED_EXPECTED_INSTANCE_IDS=""
+    INSTANCE_INDICES="${INSTANCE_INDICES:-0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19}"
+    NUM_ROLLOUTS="${NUM_ROLLOUTS:-3}"
+    MAX_STEPS="${MAX_STEPS:-}"
+elif [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == full4 ]]; then
+    EVAL_WORKERS="${EVAL_WORKERS:-4}"
+    if [[ "$EVAL_PROFILE" == full4 && "$EVAL_WORKERS" == 8 ]]; then
+        CLUSTER_FILE="${CLUSTER_FILE:-nebula/multihost_cluster.json}"
+    else
+        CLUSTER_FILE="${CLUSTER_FILE:-nebula/multihost_cluster_4gpu.json}"
+    fi
     BASE_PORT="${BASE_PORT:-8000}"
     PI05_MEM_FRACTION="${PI05_MEM_FRACTION:-0.35}"
     if [[ "$EVAL_PROFILE" == speed ]]; then
@@ -35,19 +54,12 @@ if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE
         INSTANCE_INDICES="${INSTANCE_INDICES:-0 1 2 3}"
         SPEED_EXPECTED_INSTANCE_IDS="${SPEED_EXPECTED_INSTANCE_IDS:-301 302 303 304}"
         MAX_STEPS="${MAX_STEPS:-100}"
-    elif [[ "$EVAL_PROFILE" == full4 ]]; then
+    else
         WRITE_VIDEO="${WRITE_VIDEO:-1}"
         SPEED_TASK=""
         SPEED_EXPECTED_INSTANCE_IDS=""
         INSTANCE_INDICES="${INSTANCE_INDICES:-0 1}"
         NUM_ROLLOUTS="${NUM_ROLLOUTS:-1}"
-        MAX_STEPS="${MAX_STEPS:-}"
-    else
-        WRITE_VIDEO="${WRITE_VIDEO:-1}"
-        SPEED_TASK=""
-        SPEED_EXPECTED_INSTANCE_IDS=""
-        INSTANCE_INDICES="${INSTANCE_INDICES:-0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19}"
-        NUM_ROLLOUTS="${NUM_ROLLOUTS:-3}"
         MAX_STEPS="${MAX_STEPS:-}"
     fi
 else
@@ -68,6 +80,7 @@ else
 fi
 CONFIRM_FULL="${CONFIRM_FULL:-0}"
 SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-1}"
+SUBTASK_INTERVAL="${SUBTASK_INTERVAL:-}"
 EXTERNAL_SUBTASK_SELECTOR="${EXTERNAL_SUBTASK_SELECTOR:-}"
 MAX_FAILOVER_TIMES="${MAX_FAILOVER_TIMES:-0}"
 if [[ ( "$EVAL_PROFILE" == full || "$EVAL_PROFILE" == full4 ) && "$CONFIRM_FULL" != 1 ]]; then
@@ -119,11 +132,18 @@ KEEP_RUNTIME="${KEEP_RUNTIME:-0}"
 [[ "$EVAL_WORKERS" =~ ^[1-9][0-9]*$ ]] || { echo "EVAL_WORKERS must be a positive integer" >&2; exit 2; }
 [[ "$NUM_ROLLOUTS" =~ ^[1-9][0-9]*$ ]] || { echo "NUM_ROLLOUTS must be a positive integer" >&2; exit 2; }
 [[ "$BASE_PORT" =~ ^[1-9][0-9]*$ ]] || { echo "BASE_PORT must be a positive integer" >&2; exit 2; }
+(( BASE_PORT + EVAL_WORKERS - 1 <= 65535 )) || { echo "worker port range exceeds 65535" >&2; exit 2; }
 [[ "$MAX_FAILOVER_TIMES" =~ ^[0-9]+$ ]] || { echo "MAX_FAILOVER_TIMES must be a non-negative integer" >&2; exit 2; }
 [[ "$NEBULA_PIP_NO_DEPS" == 0 || "$NEBULA_PIP_NO_DEPS" == 1 ]] || {
     echo "NEBULA_PIP_NO_DEPS must be 0 or 1" >&2; exit 2; }
 [[ "$WRITE_VIDEO" == 0 || "$WRITE_VIDEO" == 1 ]] || { echo "WRITE_VIDEO must be 0 or 1" >&2; exit 2; }
 [[ "$SUBTASK_PREDICTION" == 0 || "$SUBTASK_PREDICTION" == 1 ]] || { echo "SUBTASK_PREDICTION must be 0 or 1" >&2; exit 2; }
+if [[ -n "$SUBTASK_INTERVAL" ]]; then
+    [[ "$SUBTASK_INTERVAL" =~ ^[1-9][0-9]*$ ]] || {
+        echo "SUBTASK_INTERVAL must be a positive integer" >&2; exit 2; }
+    [[ "$SUBTASK_PREDICTION" == 1 ]] || {
+        echo "SUBTASK_INTERVAL requires SUBTASK_PREDICTION=1" >&2; exit 2; }
+fi
 [[ "$SMOKE_EVAL_GPU" =~ ^[0-9]+$ ]] || { echo "SMOKE_EVAL_GPU must be a non-negative integer" >&2; exit 2; }
 [[ "$PI05_MEM_FRACTION" =~ ^0\.[0-9]+$ ]] || { echo "PI05_MEM_FRACTION must be between 0 and 1" >&2; exit 2; }
 if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
@@ -176,7 +196,8 @@ if [[ "$EVAL_PROFILE" == speed ]]; then
         exit 2
     }
 elif [[ "$EVAL_PROFILE" == two_tasks ]]; then
-    (( EVAL_WORKERS == 4 )) || { echo "two_tasks profile requires EVAL_WORKERS=4" >&2; exit 2; }
+    (( EVAL_WORKERS == 4 || EVAL_WORKERS == 8 )) || {
+        echo "two_tasks profile requires EVAL_WORKERS=4 or 8" >&2; exit 2; }
     (( NUM_ROLLOUTS == 3 )) || { echo "two_tasks profile requires NUM_ROLLOUTS=3" >&2; exit 2; }
     [[ "$WRITE_VIDEO" == 1 ]] || { echo "two_tasks profile requires WRITE_VIDEO=1" >&2; exit 2; }
     [[ -z "$MAX_STEPS" ]] || { echo "two_tasks profile requires a full task timeout" >&2; exit 2; }
@@ -190,7 +211,8 @@ elif [[ "$EVAL_PROFILE" == two_tasks ]]; then
         exit 2
     }
 elif [[ "$EVAL_PROFILE" == full4 ]]; then
-    (( EVAL_WORKERS == 4 )) || { echo "full4 profile requires EVAL_WORKERS=4" >&2; exit 2; }
+    (( EVAL_WORKERS == 4 || EVAL_WORKERS == 8 )) || {
+        echo "full4 profile requires EVAL_WORKERS=4 or 8" >&2; exit 2; }
     (( NUM_ROLLOUTS == 1 )) || { echo "full4 profile requires NUM_ROLLOUTS=1" >&2; exit 2; }
     [[ "$WRITE_VIDEO" == 1 ]] || { echo "full4 profile requires WRITE_VIDEO=1" >&2; exit 2; }
     [[ -z "$MAX_STEPS" ]] || { echo "full4 profile requires a full task timeout" >&2; exit 2; }
@@ -232,7 +254,7 @@ else
         exit 1
     }
 fi
-if [[ "$EVAL_PROFILE" == two_tasks || "$PI05_MODEL_FORMAT" == torch ]]; then
+if [[ "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 || "$PI05_MODEL_FORMAT" == torch ]]; then
     for path in "$CHECKPOINT_SOURCE/_CHECKPOINT_METADATA" \
         "$CHECKPOINT_SOURCE/SHA256SUMS.inference" "$CHECKPOINT_SOURCE/_READY"; do
         [[ -s "$path" ]] || { echo "Staged checkpoint input missing or empty: $path" >&2; exit 1; }
@@ -315,9 +337,11 @@ write_setting() { printf 'export %s=%q\n' "$1" "$2"; }
     write_setting MAX_STEPS "$MAX_STEPS"
     write_setting EVAL_WORKERS "$EVAL_WORKERS"
     write_setting BASE_PORT "$BASE_PORT"
+    write_setting CLUSTER_FILE "$CLUSTER_FILE"
     write_setting PI05_MEM_FRACTION "$PI05_MEM_FRACTION"
     write_setting WRITE_VIDEO "$WRITE_VIDEO"
     write_setting SUBTASK_PREDICTION "$SUBTASK_PREDICTION"
+    write_setting SUBTASK_INTERVAL "$SUBTASK_INTERVAL"
     write_setting EXTERNAL_SUBTASK_SELECTOR "$EXTERNAL_SUBTASK_SELECTOR"
     write_setting SMOKE_TASK "$SMOKE_TASK"
     write_setting SMOKE_EVAL_GPU "$SMOKE_EVAL_GPU"
@@ -341,14 +365,16 @@ printf 'PROFILE: %s\n' "$EVAL_PROFILE"
 printf 'MODEL_FORMAT: %s\n' "$PI05_MODEL_FORMAT"
 printf 'CLUSTER: %s\n' "$CLUSTER_FILE"
 printf 'SUBTASK_PREDICTION: %s\n' "$SUBTASK_PREDICTION"
+printf 'SUBTASK_INTERVAL: %s\n' "${SUBTASK_INTERVAL:-<policy-default>}"
 printf 'EXTERNAL_SUBTASK_SELECTOR: %s\n' "${EXTERNAL_SUBTASK_SELECTOR:-<disabled>}"
 if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     printf 'EVALUATION_KIND: selector diagnostic (label_format=legacy oracle=true privileged=true official_benchmark=false)\n'
-    if [[ "$EVAL_PROFILE" == two_tasks ]]; then
-        printf 'EXPECTED_ROLLOUTS: 120 (4 co-located workers)\n'
-    else
-        printf 'EXPECTED_ROLLOUTS: %s smoke rollout(s)\n' "$NUM_ROLLOUTS"
-    fi
+fi
+if [[ "$EVAL_PROFILE" == two_tasks ]]; then
+    printf 'EXPECTED_ROLLOUTS: 120 (%d co-located workers, %d each)\n' \
+        "$EVAL_WORKERS" "$((120 / EVAL_WORKERS))"
+elif [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
+    printf 'EXPECTED_ROLLOUTS: %s smoke rollout(s)\n' "$NUM_ROLLOUTS"
 fi
 printf 'MAX_FAILOVER_TIMES: %s\n' "$MAX_FAILOVER_TIMES"
 printf 'CHECKPOINT: %s\n' "$CHECKPOINT_SOURCE"
@@ -361,8 +387,22 @@ if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ]]; then
     TWO_TASK_SHARDS=("0 4 8 12 16" "1 5 9 13 17" "2 6 10 14 18" "3 7 11 15 19")
     for (( worker = 0; worker < EVAL_WORKERS; worker++ )); do
         if [[ "$EVAL_PROFILE" == two_tasks ]]; then
-            printf 'WORKER %d: tasks=carrying_in_groceries,make_rose_centerpieces indices=[%s] rollouts=30 gpu=%d port=%d\n' \
-                "$worker" "${TWO_TASK_SHARDS[worker]}" "$worker" "$((BASE_PORT + worker))"
+            if (( EVAL_WORKERS == 4 )); then
+                worker_task=carrying_in_groceries,make_rose_centerpieces
+                shard_index="$worker"
+                worker_rollouts=30
+            elif (( worker < 4 )); then
+                worker_task=carrying_in_groceries
+                shard_index="$worker"
+                worker_rollouts=15
+            else
+                worker_task=make_rose_centerpieces
+                shard_index="$((worker - 4))"
+                worker_rollouts=15
+            fi
+            printf 'WORKER %d: tasks=%s indices=[%s] rollouts=%d gpu=%d port=%d\n' \
+                "$worker" "$worker_task" "${TWO_TASK_SHARDS[shard_index]}" "$worker_rollouts" \
+                "$worker" "$((BASE_PORT + worker))"
         else
             printf 'WORKER %d: policy=%d simulator=%d port=%d\n' \
                 "$worker" "$worker" "$worker" "$((BASE_PORT + worker))"
@@ -437,8 +477,9 @@ submit_status=${PIPESTATUS[0]}
 set -e
 python3 - "$CLI_OUTPUT_PATH" "$RECEIPT_PATH" "$RUN_ID" "$JOB_NAME" \
     "$EVAL_PROFILE" "$PERSISTENT_OUTPUT" "$EXTERNAL_SUBTASK_SELECTOR" "$PI05_MODEL_FORMAT" \
-    "$PI05_ENV_ARCHIVE" "$CHECKPOINT_SOURCE" "$SUBTASK_PREDICTION" \
-    "$ALGO_NAME" "$NEBULA_PIP_NO_DEPS" "$submit_status" <<'PY'
+    "$PI05_ENV_ARCHIVE" "$CHECKPOINT_SOURCE" "$SUBTASK_PREDICTION" "$SUBTASK_INTERVAL" \
+    "$ALGO_NAME" "$NEBULA_PIP_NO_DEPS" "$EVAL_WORKERS" "$BASE_PORT" "$CLUSTER_FILE" \
+    "$submit_status" <<'PY'
 import json
 import re
 import sys
@@ -456,8 +497,12 @@ from pathlib import Path
     policy_env_archive,
     checkpoint_source,
     subtask_prediction,
+    subtask_interval,
     algo_name,
     nebula_pip_no_deps,
+    eval_workers,
+    base_port,
+    cluster_file,
     exit_code,
 ) = sys.argv[1:]
 text = Path(output_path).read_text(errors="replace")
@@ -494,6 +539,11 @@ receipt = {
         if subtask_prediction == "1"
         else "whole_task"
     ),
+    "subtask_interval": int(subtask_interval) if subtask_interval else None,
+    "subtask_interval_source": "explicit" if subtask_interval else "policy_default",
+    "eval_workers": int(eval_workers),
+    "base_port": int(base_port),
+    "cluster_file": cluster_file,
     "persistent_output": persistent_output,
     "exit_code": int(exit_code),
     "job_identifiers": sorted(identifiers),

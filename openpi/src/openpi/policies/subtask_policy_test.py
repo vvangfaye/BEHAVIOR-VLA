@@ -318,8 +318,13 @@ def test_server_protocol_preserves_subtasks_and_episode_reset():
             self.sent.append(websocket_b1k_server.unpackb(data))
 
     policy, socket = Policy(), Socket()
-    server = websocket_b1k_server.WebsocketPolicyServer(policy)
+    server = websocket_b1k_server.WebsocketPolicyServer(
+        policy,
+        metadata={"server_instance_token": "stale"},
+        server_token="expected",
+    )
     asyncio.run(server._handler(socket))
+    assert socket.sent[0]["server_instance_token"] == "expected"
     assert socket.sent[1]["action"].shape == (23,)
     assert socket.sent[1]["subtasks"] == ["press radio"]
     assert socket.sent[1]["subtask_sources"] == ["provided"]
@@ -383,8 +388,11 @@ def test_b1k_server_cli_exposes_subtask_settings():
             "2",
             "--subtask-temperature",
             "0.2",
+            "--server-token",
+            "test-token",
         ],
     )
     assert args.subtask_prediction
     assert args.subtask_interval == 2
     assert args.subtask_temperature == 0.2
+    assert args.server_token == "test-token"

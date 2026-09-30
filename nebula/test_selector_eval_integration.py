@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from nebula.summarize_pi05_eval import load_worker_metrics, load_worker_statuses
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SUMMARIZER = REPO_ROOT / "nebula" / "summarize_pi05_eval.py"
 EVAL_SCRIPT = REPO_ROOT / "scripts" / "eval_b1k.sh"
@@ -263,9 +265,13 @@ def run_shell(
     env = os.environ.copy()
     for name in (
         "EXTERNAL_SUBTASK",
+        "BASE_PORT",
+        "CLUSTER_FILE",
+        "EVAL_WORKERS",
         "EXTERNAL_SUBTASK_SELECTOR",
         "PI05_CKPT",
         "PI05_MODEL_FORMAT",
+        "SUBTASK_INTERVAL",
     ):
         env.pop(name, None)
     env.update(overrides)
@@ -302,7 +308,7 @@ def run_shell(
         (
             {"EXTERNAL_SUBTASK_SELECTOR": SELECTOR, "SUBTASK_PREDICTION": "0"},
             TASK,
-            "requires SUBTASK_PREDICTION=1",
+            "requires a subtask conditioning mode",
         ),
         (
             {
@@ -351,6 +357,29 @@ def test_submit_script_rejects_unknown_model_format():
     assert "PI05_MODEL_FORMAT must be jax or torch" in completed.stderr
 
 
+@pytest.mark.parametrize("value", ["0", "-1", "1.5", "invalid"])
+def test_submit_script_rejects_invalid_subtask_interval(value):
+    completed = run_shell(
+        SUBMIT_SCRIPT,
+        SUBTASK_PREDICTION="1",
+        SUBTASK_INTERVAL=value,
+    )
+
+    assert completed.returncode == 2
+    assert "SUBTASK_INTERVAL must be a positive integer" in completed.stderr
+
+
+def test_submit_script_rejects_subtask_interval_without_prediction():
+    completed = run_shell(
+        SUBMIT_SCRIPT,
+        SUBTASK_PREDICTION="0",
+        SUBTASK_INTERVAL="8",
+    )
+
+    assert completed.returncode == 2
+    assert "SUBTASK_INTERVAL requires SUBTASK_PREDICTION=1" in completed.stderr
+
+
 def test_submit_script_requires_explicit_torch_checkpoint():
     completed = run_shell(SUBMIT_SCRIPT, PI05_MODEL_FORMAT="torch")
 
@@ -358,12 +387,28 @@ def test_submit_script_requires_explicit_torch_checkpoint():
     assert "CHECKPOINT_SOURCE is required" in completed.stderr
 
 
-def test_worker_uses_checkpoint_factorized_interval():
-    source = WORKER_SCRIPT.read_text()
+def test_nebula_propagates_and_records_subtask_interval():
+    submit_source = SUBMIT_SCRIPT.read_text()
+    worker_source = WORKER_SCRIPT.read_text()
 
-    assert "SUBTASK_INTERVAL=1" not in source
-    assert 'action_conditioning == "subtask_only"' in source
-    assert '"subtask_interval": subtask_interval' in source
+    assert 'write_setting SUBTASK_INTERVAL "$SUBTASK_INTERVAL"' in submit_source
+    assert "printf 'SUBTASK_INTERVAL: %s\\n'" in submit_source
+    assert (
+        '"subtask_interval": int(subtask_interval) if subtask_interval else None'
+        in submit_source
+    )
+    assert (
+        '"subtask_interval_source": "explicit" if subtask_interval else "policy_default"'
+        in submit_source
+    )
+    assert worker_source.count('SUBTASK_INTERVAL="$SUBTASK_INTERVAL"') == 2
+    assert "int(requested_subtask_interval)" in worker_source
+    assert 'action_conditioning == "subtask_only"' in worker_source
+    assert '"subtask_interval": subtask_interval' in worker_source
+    assert '"subtask_interval_source": subtask_interval_source' in worker_source
+    assert (
+        'grep -Fq "subtask refresh every $SUBTASK_INTERVAL requests"' in worker_source
+    )
 
 
 def test_submit_script_supports_no_dependency_bootstrap():
@@ -371,6 +416,222 @@ def test_submit_script_supports_no_dependency_bootstrap():
 
     assert 'BOOTSTRAP_ENV_ARGS=("--env=PIP_NO_DEPS=1")' in source
     assert '"nebula_pip_no_deps": nebula_pip_no_deps == "1"' in source
+
+
+def test_two_tasks_supports_parameterized_eight_gpu_topology():
+    submit_source = SUBMIT_SCRIPT.read_text()
+    worker_source = WORKER_SCRIPT.read_text()
+
+    assert 'EVAL_WORKERS="${EVAL_WORKERS:-4}"' in submit_source
+    assert 'if [[ "$EVAL_WORKERS" == 8 ]]' in submit_source
+    assert (
+        'CLUSTER_FILE="${CLUSTER_FILE:-nebula/multihost_cluster.json}"'
+        in submit_source
+    )
+    assert "two_tasks profile requires EVAL_WORKERS=4 or 8" in submit_source
+    assert '"carrying_in_groceries|0 4 8 12 16"' in worker_source
+    assert '"make_rose_centerpieces|0 4 8 12 16"' in worker_source
+    assert (
+        '"expected_rollouts": len(worker_tasks) * len(shard) * $NUM_ROLLOUTS'
+        in worker_source
+    )
+
+
+def test_submit_script_rejects_unsupported_worker_count_for_two_tasks():
+    completed = run_shell(
+        SUBMIT_SCRIPT,
+        EVAL_PROFILE="two_tasks",
+        EVAL_WORKERS="6",
+    )
+
+    assert completed.returncode == 2
+    assert "two_tasks profile requires EVAL_WORKERS=4 or 8" in completed.stderr
+
+
+def test_full4_supports_parameterized_eight_gpu_topology():
+    submit_source = SUBMIT_SCRIPT.read_text()
+    worker_source = WORKER_SCRIPT.read_text()
+
+    assert 'if [[ "$EVAL_PROFILE" == full4 && "$EVAL_WORKERS" == 8 ]]' in submit_source
+    assert "full4 profile requires EVAL_WORKERS=4 or 8" in submit_source
+    assert (
+        '[[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 ]]'
+        in worker_source
+    )
+    assert (
+        "task_shards = [all_tasks[worker::num_workers] for worker in range(num_workers)]"
+        in worker_source
+    )
+
+
+def test_submit_script_rejects_unsupported_worker_count_for_full4():
+    completed = run_shell(
+        SUBMIT_SCRIPT,
+        EVAL_PROFILE="full4",
+        CONFIRM_FULL="1",
+        EVAL_WORKERS="6",
+    )
+
+    assert completed.returncode == 2
+    assert "full4 profile requires EVAL_WORKERS=4 or 8" in completed.stderr
+
+
+def _write_two_task_worker_statuses(status_root: Path, worker_count: int) -> None:
+    status_root.mkdir()
+    tasks = ("carrying_in_groceries", "make_rose_centerpieces")
+    for worker in range(worker_count):
+        if worker_count == 4:
+            worker_tasks = list(tasks)
+            indices = list(range(worker, 20, 4))
+            expected_rollouts = 30
+        else:
+            worker_tasks = [tasks[worker // 4]]
+            indices = list(range(worker % 4, 20, 4))
+            expected_rollouts = 15
+        value = {
+            "worker": worker,
+            "tasks": worker_tasks,
+            "instance_indices": indices,
+            "gpu": worker,
+            "port": 8200 + worker,
+            "expected_rollouts": expected_rollouts,
+            "completed_rollouts": expected_rollouts,
+            "completed_videos": expected_rollouts,
+            "rollouts_with_subtask_events": expected_rollouts,
+            "rollouts_with_selector_events": 0,
+            "exit_code": 0,
+        }
+        (status_root / f"worker-{worker}.json").write_text(json.dumps(value))
+
+
+@pytest.mark.parametrize("worker_count", [4, 8])
+def test_two_task_worker_status_layouts_are_valid(tmp_path, worker_count):
+    status_root = tmp_path / "status"
+    _write_two_task_worker_statuses(status_root, worker_count)
+
+    statuses, missing, unexpected, invalid, mismatches = load_worker_statuses(
+        status_root,
+        worker_count,
+        "two_tasks",
+        ["carrying_in_groceries", "make_rose_centerpieces"],
+        120,
+        True,
+        True,
+        False,
+    )
+
+    assert len(statuses) == worker_count
+    assert not missing
+    assert not unexpected
+    assert not invalid
+    assert not mismatches
+
+
+def test_two_task_worker_status_rejects_wrong_eight_worker_assignment(tmp_path):
+    status_root = tmp_path / "status"
+    _write_two_task_worker_statuses(status_root, 8)
+    path = status_root / "worker-4.json"
+    value = json.loads(path.read_text())
+    value["tasks"] = ["carrying_in_groceries"]
+    path.write_text(json.dumps(value))
+
+    *_, mismatches = load_worker_statuses(
+        status_root,
+        8,
+        "two_tasks",
+        ["carrying_in_groceries", "make_rose_centerpieces"],
+        120,
+        True,
+        True,
+        False,
+    )
+
+    assert mismatches
+
+
+def test_nonzero_worker_metric_is_reported(tmp_path):
+    path = tmp_path / "eval_metrics_8200.json"
+    path.write_text(
+        json.dumps(
+            {
+                "port": 8200,
+                "server_gpu": 0,
+                "eval_gpu": 0,
+                "elapsed_seconds": 1,
+                "exit_code": 1,
+            }
+        )
+    )
+
+    metrics, invalid, failed, duplicates = load_worker_metrics(tmp_path)
+
+    assert len(metrics) == 1
+    assert not invalid
+    assert failed == [{"path": str(path), "exit_code": 1}]
+    assert not duplicates
+
+
+def test_eval_launcher_verifies_server_identity():
+    source = EVAL_SCRIPT.read_text()
+
+    assert '--server-token "$SERVER_TOKEN"' in source
+    assert '--expected-server-token "$SERVER_TOKEN"' in source
+    assert 'metadata.get("server_instance_token") == sys.argv[2]' in source
+    assert "connect_ex" not in source
+
+
+def test_submit_records_eight_worker_port_contract():
+    source = SUBMIT_SCRIPT.read_text()
+
+    assert 'write_setting CLUSTER_FILE "$CLUSTER_FILE"' in source
+    assert '"eval_workers": int(eval_workers)' in source
+    assert '"base_port": int(base_port)' in source
+    assert '"cluster_file": cluster_file' in source
+    assert "worker port range exceeds 65535" in source
+
+
+def run_worker_validation(tmp_path, *, subtask_prediction: str, subtask_interval: str):
+    nebula_dir = tmp_path / "repo" / "nebula"
+    nebula_dir.mkdir(parents=True)
+    worker = nebula_dir / WORKER_SCRIPT.name
+    shutil.copy(WORKER_SCRIPT, worker)
+    (nebula_dir / "eval_job.env").write_text(
+        "\n".join(
+            (
+                "EVAL_PROFILE=smoke",
+                "CONFIRM_FULL=0",
+                "EVAL_WORKERS=1",
+                "BASE_PORT=8000",
+                "WRITE_VIDEO=1",
+                f"SUBTASK_PREDICTION={subtask_prediction}",
+                f"SUBTASK_INTERVAL={subtask_interval}",
+                "SMOKE_EVAL_GPU=1",
+            )
+        )
+        + "\n"
+    )
+    return subprocess.run(
+        ["bash", str(worker)], capture_output=True, text=True, check=False
+    )
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "1.5", "invalid"])
+def test_worker_rejects_invalid_subtask_interval(tmp_path, value):
+    completed = run_worker_validation(
+        tmp_path, subtask_prediction="1", subtask_interval=value
+    )
+
+    assert completed.returncode == 1
+    assert "SUBTASK_INTERVAL must be a positive integer" in completed.stderr
+
+
+def test_worker_rejects_subtask_interval_without_prediction(tmp_path):
+    completed = run_worker_validation(
+        tmp_path, subtask_prediction="0", subtask_interval="8"
+    )
+
+    assert completed.returncode == 1
+    assert "SUBTASK_INTERVAL requires SUBTASK_PREDICTION=1" in completed.stderr
 
 
 def test_worker_rejects_selector_outside_supported_profiles(tmp_path):

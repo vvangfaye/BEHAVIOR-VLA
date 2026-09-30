@@ -1,6 +1,6 @@
 ---
 name: train-pi05-b1k
-description: Safely prepare, preflight, launch, monitor, resume, and validate BEHAVIOR-Challenge π0.5 local JAX/Torch training and Nebula/AIHub submissions. Use for whole-task, joint, multihost, checkpoint, or training-status requests.
+description: Safely prepare, preflight, launch, monitor, resume, and validate BEHAVIOR-Challenge π0.5 local JAX/Torch training and Nebula/AIHub submissions. Use for whole-task, joint, FrameSamp visual memory, multihost, checkpoint, or training-status requests.
 ---
 
 # Train π0.5 on BEHAVIOR-1K
@@ -38,6 +38,8 @@ Use `SUBTASK_PREDICTION=0` for ordinary action training and `1` for joint traini
 Treat a joint checkpoint without `assets/subtask_conditioning.json` as legacy `task_and_subtask`. Do not resume it as factorized. Legacy resume must set `SUBTASK_ACTION_CONDITIONING=task_and_subtask` explicitly in the local or Nebula launcher and match the saved checkpoint contract.
 
 Do not confuse the legacy action-only compatibility path (`SUBTASK_PROMPTS` set while `SUBTASK_PREDICTION=0`) with joint supervision.
+
+Strict subtask-only and pure executor support has been removed. Do not use the deleted `SUBTASK_EXECUTOR`, `STRICT_SUBTASK_ACTION_CHUNKS`, `PROVIDED_SUBTASK_AS_PROMPT`, `scripts/train_pi05_subtask_executor_b1k.sh`, or removed Nebula profiles.
 
 ## Prepare subtask data
 
@@ -77,6 +79,51 @@ Create a held-out split only when the user wants offline validation:
 ```
 
 The split keeps each `(task_index, task_instance_id)` group on one side. It refuses a nonempty output directory. For training all retained episodes, pass `EPISODES_FILE=$RETAINED_EPISODES` and omit `VAL_EPISODES_FILE`.
+
+## Optional FrameSamp visual memory
+
+Enable FrameSamp only for JAX with `FRAMESAMP_MODUL=1`. It causally samples frozen SigLIP features from the current episode and modulates only the action expert; it does not inject history into the VLM or high-level subtask loss. PyTorch rejects this mode.
+
+Build the cache before preflight using the exact SigLIP weights supplied through `INIT_PARAMS`:
+
+```bash
+(
+  cd "$REPO/openpi"
+  CUDA_VISIBLE_DEVICES=0 .venv/bin/python scripts/b1k/cache_frame_memory.py \
+    --dataset-root "$DATASET_ROOT" --repo-id "$REPO_ID" \
+    --init-params "$INIT_PARAMS" --episodes-file "$EPISODES_FILE" \
+    --output-dir "$MEMORY_CACHE_DIR" \
+    --frame-stride 16 --grid-size 4 --batch-size 32
+)
+```
+
+Include every train and validation episode in the cache. Use `--shard-index i --num-shards N` for disjoint multi-GPU cache generation; all shards must share weights, dataset, camera, stride, grid, and output directory. The cache contains `manifest.json`, one FP16 array and atomic completion marker per episode. Never reuse a cache after changing the dataset, SigLIP weights, camera, stride, or grid.
+
+Validate it without GPU allocation or video decoding:
+
+```bash
+"$PY" "$REPO/openpi/scripts/b1k/check_frame_memory.py" \
+  --dataset-root "$DATASET_ROOT" --cache-dir "$MEMORY_CACHE_DIR" \
+  --episodes-index <original-episode-ids> \
+  --num-frames 32 --grid-size 4 --frame-stride 16 --camera base_0_rgb
+```
+
+Use these launcher variables:
+
+| Variable | Default | Contract |
+|---|---:|---|
+| `FRAMESAMP_MODUL` | `0` | Set to `1` to enable memory |
+| `MEMORY_CACHE_DIR` | none | Completed cache path |
+| `MEMORY_NUM_FRAMES` | `32` | Maximum uniformly sampled history frames |
+| `MEMORY_GRID_SIZE` | `4` | Pooling grid side; 16 tokens per frame |
+| `MEMORY_FRAME_STRIDE` | `16` | Historical candidate interval in original control frames |
+| `MEMORY_CAMERA` | `base_0_rgb` | Historical camera |
+
+Do not confuse `MEMORY_FRAME_STRIDE` with the action-training `FRAME_STRIDE`. The former controls cached history candidates; the latter selects action-training anchors.
+
+When adding memory to an existing non-memory model, create a new `EXP_NAME`, set `INIT_PARAMS=<old-checkpoint>/params`, and do not use full-state resume; only the new memory parameters are initialized. Resume an existing memory experiment only with identical memory configuration and cache provenance. Require `assets/frame_memory.json` in its checkpoints. Changing only `MEMORY_NUM_FRAMES` may reuse the cache but still requires a new experiment.
+
+The implementation has CPU/unit coverage but no committed evidence of a full-data GPU smoke, multihost throughput, or closed-loop gain. Run a target-hardware smoke and measure finite metrics, peak memory, and steady-state step time before formal training. See `docs/frame_memory_training.md` for architecture and evaluation details.
 
 ## Run exact preflight
 
@@ -144,6 +191,8 @@ Use `nebula/submit_pi05_multihost.sh`. Current pinned profiles are:
 | `full100` | `demand_general`, 2×8 H200/L20Z | 192 | 2 epochs / 1,688,978 steps |
 
 Current new joint submissions use factorized conditioning; historical joint checkpoints may be legacy.
+
+For FrameSamp submission, pass `FRAMESAMP_MODUL=1`, `MEMORY_CACHE_DIR`, all `MEMORY_*` contract values, and `INIT_PARAMS` to the existing command. The cache path must be mounted read-only at the same location on every worker; the submission does not generate or upload it, and each worker validates cache completeness before training.
 
 Before any actual submission, build and inspect a dry-run bundle:
 
@@ -217,4 +266,4 @@ Confirm it is no longer running. Never delete or rewrite output roots as part of
 
 ## Report
 
-Report the objective and conditioning mode, dataset/annotation/episode hashes, retained episodes and samples, anchor cap, global/per-device batch, topology, epochs/steps, initialization or resume checkpoint, output/log paths, first finite metrics, current status, and latest complete/restored checkpoint. State explicitly when preflight passed but optimizer training never began.
+Report the objective and conditioning mode, dataset/annotation/episode hashes, retained episodes and samples, global/per-device batch, topology, epochs/steps, initialization or resume checkpoint, output/log paths, first finite metrics, current status, and latest complete/restored checkpoint. For FrameSamp, also report the cache path, encoder/dataset fingerprints, camera, stride, grid, frame budget, cache completeness, and whether the run is a weight migration or full-state resume. State explicitly when preflight passed but optimizer training never began.

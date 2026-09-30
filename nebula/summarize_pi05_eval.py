@@ -321,9 +321,21 @@ def load_worker_statuses(
                     if require_selector_events
                     else None,
                 }
-                if value.get("tasks") != expected_tasks:
+                if expected_workers == 4:
+                    expected_worker_tasks = expected_tasks
+                    expected_indices = list(range(worker, 20, 4))
+                elif expected_workers == 8:
+                    expected_worker_tasks = [expected_tasks[worker // 4]]
+                    expected_indices = list(range(worker % 4, 20, 4))
+                else:
+                    expected_worker_tasks = []
+                    expected_indices = []
                     errors.append(
-                        f"tasks are {value.get('tasks')!r}, expected {expected_tasks!r}"
+                        f"two_tasks expected_workers is {expected_workers}, expected 4 or 8"
+                    )
+                if value.get("tasks") != expected_worker_tasks:
+                    errors.append(
+                        f"tasks are {value.get('tasks')!r}, expected {expected_worker_tasks!r}"
                     )
                 indices = value.get("instance_indices")
                 if not isinstance(indices, list) or any(
@@ -331,6 +343,10 @@ def load_worker_statuses(
                     for item in indices
                 ):
                     errors.append("instance_indices must be a list of integers")
+                elif indices != expected_indices:
+                    errors.append(
+                        f"instance_indices are {indices!r}, expected {expected_indices!r}"
+                    )
                 for name, expected in required_counts.items():
                     if expected is not None and value.get(name) != expected:
                         errors.append(
@@ -344,15 +360,21 @@ def load_worker_statuses(
             invalid_files.append({"path": str(path), "error": str(exc)})
 
     if profile == "two_tasks" and not invalid_files and not missing_files:
-        observed_indices = [
-            index for status in statuses for index in status.get("instance_indices", [])
+        observed_pairs = [
+            (task, index)
+            for status in statuses
+            for task in status.get("tasks", [])
+            for index in status.get("instance_indices", [])
         ]
-        if sorted(observed_indices) != list(range(20)):
+        expected_pairs = [
+            (task, index) for task in expected_tasks for index in range(20)
+        ]
+        if sorted(observed_pairs) != sorted(expected_pairs):
             mismatches.append(
                 {
                     "path": str(status_root),
                     "errors": [
-                        f"worker instance indices are {sorted(observed_indices)}, expected 0..19"
+                        "worker task-instance assignments do not cover each expected pair exactly once"
                     ],
                 }
             )

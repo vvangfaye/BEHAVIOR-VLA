@@ -40,6 +40,7 @@ class Args:
     action_horizon: int = 16
     # Port to serve the policy on.
     port: int = 8000
+    server_token: str | None = None
     # Record the policy's behavior for debugging.
     record: bool = False
     # Use the joint subtask-trained checkpoint and generate text before actions.
@@ -56,6 +57,9 @@ class Args:
 
 
 def main(args: Args) -> None:
+    if args.server_token is not None and not args.server_token.strip():
+        raise ValueError("server_token must be nonempty")
+
     # Load task from registry
     task_bucket, task_name = args.task.split("/")
     task_prompt = TASK_REGISTRY[task_bucket][task_name]
@@ -143,6 +147,7 @@ def main(args: Args) -> None:
         host="0.0.0.0",
         port=args.port,
         metadata=policy_metadata,
+        server_token=args.server_token,
     )
     server.serve_forever()
 

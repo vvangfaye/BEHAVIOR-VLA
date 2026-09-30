@@ -32,11 +32,16 @@ class WebsocketPolicyServer:
         host: str = "0.0.0.0",
         port: int = 8000,
         metadata: dict | None = None,
+        server_token: str | None = None,
     ) -> None:
+        if server_token is not None and not server_token:
+            raise ValueError("server_token must be nonempty")
         self._policy = policy
         self._host = host
         self._port = port
-        self._metadata = metadata or {}
+        self._metadata = dict(metadata or {})
+        if server_token is not None:
+            self._metadata["server_instance_token"] = server_token
 
     def serve_forever(self) -> None:
         asyncio.run(self.run())

@@ -77,6 +77,7 @@ def _build_evaluator_cfg(base: ModuleType, args: argparse.Namespace, seed: int):
             "_target_": "omnigibson.eval.policies.WebsocketPolicy",
             "host": args.host,
             "port": args.port,
+            "expected_server_token": args.expected_server_token,
         }
     else:
         model_cfg = {

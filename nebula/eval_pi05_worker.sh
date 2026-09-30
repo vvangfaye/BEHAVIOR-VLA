@@ -10,6 +10,8 @@ EXTERNAL_SUBTASK_SELECTOR="${EXTERNAL_SUBTASK_SELECTOR:-}"
 PI05_MODEL_FORMAT="${PI05_MODEL_FORMAT:-jax}"
 SMOKE_TASK="${SMOKE_TASK:-turning_on_radio}"
 SMOKE_EVAL_GPU="${SMOKE_EVAL_GPU:-1}"
+SUBTASK_INTERVAL="${SUBTASK_INTERVAL:-}"
+CLUSTER_FILE="${CLUSTER_FILE:-}"
 
 log() { printf '[%(%F %T)T] %s\n' -1 "$*"; }
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -34,8 +36,13 @@ if [[ ( "$EVAL_PROFILE" == full || "$EVAL_PROFILE" == full4 ) && "$CONFIRM_FULL"
 fi
 [[ "$EVAL_WORKERS" =~ ^[1-9][0-9]*$ ]] || fail "EVAL_WORKERS must be a positive integer"
 [[ "$BASE_PORT" =~ ^[1-9][0-9]*$ ]] || fail "BASE_PORT must be a positive integer"
+(( BASE_PORT + EVAL_WORKERS - 1 <= 65535 )) || fail "worker port range exceeds 65535"
 [[ "$WRITE_VIDEO" == 0 || "$WRITE_VIDEO" == 1 ]] || fail "WRITE_VIDEO must be 0 or 1"
 [[ "$SUBTASK_PREDICTION" == 0 || "$SUBTASK_PREDICTION" == 1 ]] || fail "SUBTASK_PREDICTION must be 0 or 1"
+if [[ -n "$SUBTASK_INTERVAL" ]]; then
+    [[ "$SUBTASK_INTERVAL" =~ ^[1-9][0-9]*$ ]] || fail "SUBTASK_INTERVAL must be a positive integer"
+    [[ "$SUBTASK_PREDICTION" == 1 ]] || fail "SUBTASK_INTERVAL requires SUBTASK_PREDICTION=1"
+fi
 [[ "$SMOKE_EVAL_GPU" =~ ^[0-9]+$ ]] || fail "SMOKE_EVAL_GPU must be a non-negative integer"
 if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     [[ "$EXTERNAL_SUBTASK_SELECTOR" == state_machine_v1 ]] \
@@ -53,10 +60,12 @@ if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     [[ -z "${EXTERNAL_SUBTASK:-}" ]] \
         || fail "EXTERNAL_SUBTASK and EXTERNAL_SUBTASK_SELECTOR are mutually exclusive"
 fi
-if [[ ( "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ) && "$EVAL_WORKERS" != 4 ]]; then
-    fail "$EVAL_PROFILE profile requires EVAL_WORKERS=4"
+if [[ "$EVAL_PROFILE" == speed && "$EVAL_WORKERS" != 4 ]]; then
+    fail "speed profile requires EVAL_WORKERS=4"
 fi
 if [[ "$EVAL_PROFILE" == two_tasks ]]; then
+    [[ "$EVAL_WORKERS" == 4 || "$EVAL_WORKERS" == 8 ]] \
+        || fail "two_tasks profile requires EVAL_WORKERS=4 or 8"
     [[ "$NUM_ROLLOUTS" == 3 ]] || fail "two_tasks profile requires NUM_ROLLOUTS=3"
     [[ "$WRITE_VIDEO" == 1 ]] || fail "two_tasks profile requires WRITE_VIDEO=1"
     [[ -z "$MAX_STEPS" ]] || fail "two_tasks profile requires a full task timeout"
@@ -88,7 +97,7 @@ else
     require_file "$CHECKPOINT_SOURCE/params/_METADATA"
     [[ ! -e "$CHECKPOINT_SOURCE/model.safetensors" ]] || fail "JAX checkpoint must not contain model.safetensors"
 fi
-if [[ "$EVAL_PROFILE" == two_tasks || "$PI05_MODEL_FORMAT" == torch ]]; then
+if [[ "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 || "$PI05_MODEL_FORMAT" == torch ]]; then
     require_file "$CHECKPOINT_SOURCE/_CHECKPOINT_METADATA"
     require_file "$CHECKPOINT_SOURCE/SHA256SUMS.inference"
     require_file "$CHECKPOINT_SOURCE/_READY"
@@ -104,7 +113,8 @@ fi
 
 mapfile -t GPU_ROWS < <(nvidia-smi --query-gpu=index,name,driver_version --format=csv,noheader)
 REQUIRED_GPUS=2
-[[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks ]] && REQUIRED_GPUS="$EVAL_WORKERS"
+[[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 ]] \
+    && REQUIRED_GPUS="$EVAL_WORKERS"
 (( ${#GPU_ROWS[@]} >= REQUIRED_GPUS )) || fail "closed-loop evaluation requires at least $REQUIRED_GPUS GPUs"
 printf '%s\n' "${GPU_ROWS[@]}"
 for (( gpu = 0; gpu < REQUIRED_GPUS; gpu++ )); do
@@ -242,7 +252,7 @@ if [[ -f "$CHECKPOINT_SOURCE/_CHECKPOINT_METADATA" ]]; then
     cp "$CHECKPOINT_SOURCE/_CHECKPOINT_METADATA" "$LOCAL_CHECKPOINT/"
 fi
 require_file "$LOCAL_CHECKPOINT/assets/$PI05_REPO_ID/norm_stats.json"
-if [[ "$EVAL_PROFILE" == two_tasks || "$PI05_MODEL_FORMAT" == torch ]]; then
+if [[ "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 || "$PI05_MODEL_FORMAT" == torch ]]; then
     cp "$CHECKPOINT_SOURCE/SHA256SUMS.inference" "$LOCAL_CHECKPOINT/"
     (
         cd "$LOCAL_CHECKPOINT"
@@ -331,12 +341,25 @@ case "$EVAL_PROFILE" in
         ;;
     two_tasks)
         TASK_FILE=""
-        TASK_SPECS=(
-            "carrying_in_groceries make_rose_centerpieces|0 4 8 12 16"
-            "carrying_in_groceries make_rose_centerpieces|1 5 9 13 17"
-            "carrying_in_groceries make_rose_centerpieces|2 6 10 14 18"
-            "carrying_in_groceries make_rose_centerpieces|3 7 11 15 19"
-        )
+        if (( EVAL_WORKERS == 4 )); then
+            TASK_SPECS=(
+                "carrying_in_groceries make_rose_centerpieces|0 4 8 12 16"
+                "carrying_in_groceries make_rose_centerpieces|1 5 9 13 17"
+                "carrying_in_groceries make_rose_centerpieces|2 6 10 14 18"
+                "carrying_in_groceries make_rose_centerpieces|3 7 11 15 19"
+            )
+        else
+            TASK_SPECS=(
+                "carrying_in_groceries|0 4 8 12 16"
+                "carrying_in_groceries|1 5 9 13 17"
+                "carrying_in_groceries|2 6 10 14 18"
+                "carrying_in_groceries|3 7 11 15 19"
+                "make_rose_centerpieces|0 4 8 12 16"
+                "make_rose_centerpieces|1 5 9 13 17"
+                "make_rose_centerpieces|2 6 10 14 18"
+                "make_rose_centerpieces|3 7 11 15 19"
+            )
+        fi
         MAX_STEPS_VALUE=""
         ;;
     full4)
@@ -415,19 +438,25 @@ if profile == "speed":
     ]
 elif profile == "two_tasks":
     shards = ([0, 4, 8, 12, 16], [1, 5, 9, 13, 17], [2, 6, 10, 14, 18], [3, 7, 11, 15, 19])
-    workers = [
-        {
+    task_names = ("carrying_in_groceries", "make_rose_centerpieces")
+    workers = []
+    for worker in range($EVAL_WORKERS):
+        if $EVAL_WORKERS == 4:
+            worker_tasks = list(task_names)
+            shard = shards[worker]
+        else:
+            worker_tasks = [task_names[worker // 4]]
+            shard = shards[worker % 4]
+        workers.append({
             "worker": worker,
             "server_gpu": worker,
             "eval_gpu": worker,
             "port": $BASE_PORT + worker,
-            "tasks": ["carrying_in_groceries", "make_rose_centerpieces"],
-            "instance_indices": list(shards[worker]),
-            "expected_instance_ids": [301 + index for index in shards[worker]],
-            "expected_rollouts": 30,
-        }
-        for worker in range($EVAL_WORKERS)
-    ]
+            "tasks": worker_tasks,
+            "instance_indices": list(shard),
+            "expected_instance_ids": [301 + index for index in shard],
+            "expected_rollouts": len(worker_tasks) * len(shard) * $NUM_ROLLOUTS,
+        })
 elif profile == "full4":
     with open("$REPO_ROOT/scripts/b1k_tasks.txt") as fh:
         all_tasks = [
@@ -469,9 +498,16 @@ conditioning_path = pathlib.Path("$LOCAL_CHECKPOINT/assets/subtask_conditioning.
 action_conditioning = None
 if conditioning_path.is_file():
     action_conditioning = json.loads(conditioning_path.read_text()).get("action_conditioning")
+requested_subtask_interval = "$SUBTASK_INTERVAL"
 subtask_interval = None
+subtask_interval_source = None
 if bool($SUBTASK_PREDICTION):
-    subtask_interval = 2 if action_conditioning == "subtask_only" else 1
+    subtask_interval = (
+        int(requested_subtask_interval)
+        if requested_subtask_interval
+        else (2 if action_conditioning == "subtask_only" else 1)
+    )
+    subtask_interval_source = "explicit" if requested_subtask_interval else "policy_default"
 path = pathlib.Path("$PERSISTENT_OUTPUT/manifest.json")
 path.write_text(json.dumps({
     "run_id": "$RUN_ID",
@@ -492,6 +528,7 @@ path.write_text(json.dumps({
     "max_token_len": (512 if bool($SUBTASK_PREDICTION) else None),
     "subtask_action_conditioning": action_conditioning,
     "subtask_interval": subtask_interval,
+    "subtask_interval_source": subtask_interval_source,
     "subtask_temperature": (0.0 if bool($SUBTASK_PREDICTION) else None),
     "external_subtask_selector": selector,
     "selector_diagnostics": ({
@@ -519,6 +556,9 @@ path.write_text(json.dumps({
     "require_subtask_events": bool($SUBTASK_PREDICTION),
     "require_selector_events": bool(selector),
     "driver": "$DRIVER",
+    "eval_workers": $EVAL_WORKERS,
+    "base_port": $BASE_PORT,
+    "cluster_file": "$CLUSTER_FILE",
     "pi05_mem_fraction": $PI05_MEM_FRACTION,
     "write_video": bool($WRITE_VIDEO),
     "workers": workers,
@@ -549,7 +589,7 @@ if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE
         log "launching $EVAL_PROFILE worker=$worker tasks=[$tasks] indices=[$indices] gpu=$worker port=$port"
         setsid env MODEL=pi05 PI05_CKPT="$LOCAL_CHECKPOINT" PI05_REPO_ID="$PI05_REPO_ID" \
             PI05_ENV="$PI05_ENV" SUBTASK_PREDICTION="$SUBTASK_PREDICTION" \
-            EXTERNAL_SUBTASK_SELECTOR="$EXTERNAL_SUBTASK_SELECTOR" \
+            SUBTASK_INTERVAL="$SUBTASK_INTERVAL" EXTERNAL_SUBTASK_SELECTOR="$EXTERNAL_SUBTASK_SELECTOR" \
             MAX_TOKEN_LEN="$POLICY_MAX_TOKEN_LEN" MAX_SUBTASK_LEN=64 SUBTASK_TEMPERATURE=0 \
             PROMPT_MODE=whole_task MODE=public_test \
             SERVER_GPU="$worker" EVAL_GPU="$worker" PORT="$port" EVAL_ENV="$EVAL_ENV" \
@@ -629,7 +669,7 @@ else
         set +e
         setsid env MODEL=pi05 PI05_CKPT="$LOCAL_CHECKPOINT" PI05_REPO_ID="$PI05_REPO_ID" \
             PI05_ENV="$PI05_ENV" SUBTASK_PREDICTION="$SUBTASK_PREDICTION" \
-            EXTERNAL_SUBTASK_SELECTOR="$EXTERNAL_SUBTASK_SELECTOR" \
+            SUBTASK_INTERVAL="$SUBTASK_INTERVAL" EXTERNAL_SUBTASK_SELECTOR="$EXTERNAL_SUBTASK_SELECTOR" \
             MAX_TOKEN_LEN="$POLICY_MAX_TOKEN_LEN" MAX_SUBTASK_LEN=64 SUBTASK_TEMPERATURE=0 \
             PROMPT_MODE=whole_task MODE=public_test \
             SERVER_GPU=0 EVAL_GPU="$SERIAL_EVAL_GPU" PORT="$BASE_PORT" EVAL_ENV="$EVAL_ENV" \
@@ -687,6 +727,23 @@ if [[ "$SUBTASK_PREDICTION" == 1 && -z "$EXTERNAL_SUBTASK_SELECTOR" \
             status=1
         fi
     done
+fi
+if [[ "$SUBTASK_PREDICTION" == 1 && -n "$SUBTASK_INTERVAL" ]]; then
+    if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 ]]; then
+        for (( worker = 0; worker < EVAL_WORKERS; worker++ )); do
+            server_log="$LOCAL_RESULTS/shards/worker_$worker/pi05/server_$((BASE_PORT + worker)).log"
+            if ! grep -Fq "subtask refresh every $SUBTASK_INTERVAL requests" "$server_log"; then
+                log "$EVAL_PROFILE worker $worker server log does not confirm SUBTASK_INTERVAL=$SUBTASK_INTERVAL"
+                status=1
+            fi
+        done
+    else
+        server_log="$LOCAL_RESULTS/pi05/server_$BASE_PORT.log"
+        if ! grep -Fq "subtask refresh every $SUBTASK_INTERVAL requests" "$server_log"; then
+            log "$EVAL_PROFILE server log does not confirm SUBTASK_INTERVAL=$SUBTASK_INTERVAL"
+            status=1
+        fi
+    fi
 fi
 
 SUMMARY_ARGS=(

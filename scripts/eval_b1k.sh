@@ -268,6 +268,7 @@ PY
     if [[ -f "$PI05_CKPT/model.safetensors" ]]; then
         python scripts/install_transformers_patch.py --check
     fi
+    SERVER_TOKEN="$(python -c 'import secrets; print(secrets.token_hex(32))')"
     # The startup prompt is the fallback when the evaluator does not send
     # a dynamic oracle prompt; --repo-id must match the training assets.
     CUDA_VISIBLE_DEVICES="$SERVER_GPU" XLA_PYTHON_CLIENT_PREALLOCATE=true \
@@ -280,6 +281,7 @@ PY
         --policy.dir "$PI05_CKPT" \
         --control_mode receding_horizon \
         --action_horizon "${EXECUTE_HORIZON:-16}" \
+        --server-token "$SERVER_TOKEN" \
         "${SUBTASK_SERVER_ARGS[@]}" \
         --port "$PORT" >> "$SERVER_LOG" 2>&1 &
     SERVER_PID=$!
@@ -306,20 +308,38 @@ trap stop_server EXIT
 wait_for_server() {
     echo "waiting for policy server on port $PORT"
     for i in $(seq 1 900); do
-        # The policy server speaks WebSocket; probe the listening socket.
-        if "$EVAL_ENV/bin/python" - "$PORT" <<'PY' >/dev/null 2>&1
-import socket, sys
-s = socket.socket()
-s.settimeout(2)
-sys.exit(0 if s.connect_ex(("127.0.0.1", int(sys.argv[1]))) == 0 else 1)
+        kill -0 "$SERVER_PID" 2>/dev/null || { echo "server died; see $SERVER_LOG" >&2; tail -25 "$SERVER_LOG" >&2; return 1; }
+        if "$EVAL_ENV/bin/python" - "$PORT" "$SERVER_TOKEN" <<'PY' >/dev/null 2>&1
+import msgpack
+import sys
+import websockets.sync.client
+
+try:
+    with websockets.sync.client.connect(
+        f"ws://127.0.0.1:{int(sys.argv[1])}",
+        compression=None,
+        max_size=None,
+        open_timeout=2,
+        close_timeout=1,
+    ) as connection:
+        metadata = msgpack.unpackb(connection.recv(timeout=2), raw=False)
+except Exception:
+    raise SystemExit(1)
+raise SystemExit(
+    0
+    if isinstance(metadata, dict)
+    and metadata.get("server_instance_token") == sys.argv[2]
+    else 1
+)
 PY
         then
-            echo "server accepting connections after ${i}s"; return 0
+            kill -0 "$SERVER_PID" 2>/dev/null || { echo "server exited during readiness check; see $SERVER_LOG" >&2; tail -25 "$SERVER_LOG" >&2; return 1; }
+            echo "verified policy server after ${i}s"
+            return 0
         fi
-        kill -0 "$SERVER_PID" 2>/dev/null || { echo "server died; see $SERVER_LOG" >&2; tail -25 "$SERVER_LOG" >&2; return 1; }
         sleep 1
     done
-    echo "server did not open port $PORT in time; see $SERVER_LOG" >&2
+    echo "server did not pass identity verification on port $PORT; see $SERVER_LOG" >&2
     tail -25 "$SERVER_LOG" >&2
     return 1
 }
@@ -343,7 +363,7 @@ for task in "${TASKS[@]}"; do
         if (( QUEUE_MODE )); then break; else continue; fi
     fi
     cd "$REPO_ROOT/BEHAVIOR-1K"
-    EVAL_ARGS=("${EXTERNAL_SUBTASK_ARGS[@]}")
+    EVAL_ARGS=(--expected-server-token "$SERVER_TOKEN" "${EXTERNAL_SUBTASK_ARGS[@]}")
     EVAL_COMMAND=("$EVAL_ENV/bin/python" -m omnigibson.eval.eval)
     if (( SUBTASK_SAMPLE_MODE )); then
         EVAL_ARGS+=(
@@ -402,10 +422,19 @@ for task in "${TASKS[@]}"; do
         run_evaluator 2>&1 | tee "$EVAL_LOG"
         pipeline_status=("${PIPESTATUS[@]}")
     fi
-    set -e
+    server_failed=0
+    server_exit_status=0
+    server_state="$(ps -o stat= -p "$SERVER_PID" 2>/dev/null | tr -d '[:space:]')"
+    if [[ -z "$server_state" || "$server_state" == Z* ]]; then
+        wait "$SERVER_PID"
+        server_exit_status=$?
+        SERVER_PID=""
+        server_failed=1
+    fi
     stop_server
-    if (( pipeline_status[0] != 0 || pipeline_status[1] != 0 )); then
-        echo "FAIL $task (evaluator=${pipeline_status[0]} tee=${pipeline_status[1]})" \
+    set -e
+    if (( pipeline_status[0] != 0 || pipeline_status[1] != 0 || server_failed != 0 )); then
+        echo "FAIL $task (evaluator=${pipeline_status[0]} tee=${pipeline_status[1]} server=${server_exit_status})" \
             | tee -a "$FAILURES_LOG"
         status=1
         if (( QUEUE_MODE )); then break; fi
