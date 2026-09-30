@@ -167,7 +167,8 @@ def serve_config(path):
                                 selector=PreservationSelector(**settings.get("selector", {})))
     # Each process serves one public task. Run separate processes for different
     # tasks/checkpoints. The websocket loop serializes inference in this prototype.
-    serve_forever(factory, settings.get("host", "127.0.0.1"), settings.get("port", 8000))
+    serve_forever(factory, settings.get("host", "127.0.0.1"), settings.get("port", 8000),
+                  server_token=os.environ.get("GOALKEEPER_SERVER_TOKEN"))
 
 
 if __name__ == "__main__":

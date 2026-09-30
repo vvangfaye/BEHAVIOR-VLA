@@ -256,8 +256,10 @@ if config.get("subtask_prediction") is not True:
     raise SystemExit("SUBTASK_PREDICTION=1 requires subtask_prediction=true in the GoalKeeper task JSON")
 PY
         fi
+        SERVER_TOKEN="$(python -c 'import secrets; print(secrets.token_hex(32))')"
         CUDA_VISIBLE_DEVICES="$SERVER_GPU" XLA_PYTHON_CLIENT_PREALLOCATE=true \
         XLA_PYTHON_CLIENT_MEM_FRACTION="$PI05_MEM_FRACTION" HF_HUB_OFFLINE=1 GOALKEEPER_EXPECTED_TASK="b1k/$task" \
+        GOALKEEPER_SERVER_TOKEN="$SERVER_TOKEN" \
         python -m goalkeeper.cli serve "$config" >> "$SERVER_LOG" 2>&1 &
         SERVER_PID=$!
         echo "GoalKeeper server pid=$SERVER_PID task=$task log=$SERVER_LOG"

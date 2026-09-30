@@ -12,10 +12,16 @@ def health_check(connection, request):
     if request.path == "/healthz": return connection.respond(http.HTTPStatus.OK, "OK\n")
 
 
-def handler_factory(policy_factory, metadata=None):
+def handler_factory(policy_factory, metadata=None, server_token=None):
+    greeting = {"protocol": "b1k-v3.9.2", "implementation": "goalkeeper-v1", **(metadata or {})}
+    if server_token is not None:
+        if not server_token:
+            raise ValueError("server_token must be nonempty")
+        greeting["server_instance_token"] = server_token
+
     async def handler(connection):
         policy = policy_factory()
-        await connection.send(packb(metadata or {"protocol": "b1k-v3.9.2", "implementation": "goalkeeper-v1"}))
+        await connection.send(packb(greeting))
         try:
             async for message in connection:
                 if not isinstance(message, bytes): raise ValueError("Expected binary msgpack message")
@@ -44,11 +50,11 @@ def handler_factory(policy_factory, metadata=None):
     return handler
 
 
-async def run_server(policy_factory, host="127.0.0.1", port=8000):
-    async with serve(handler_factory(policy_factory), host, port, compression=None,
+async def run_server(policy_factory, host="127.0.0.1", port=8000, server_token=None):
+    async with serve(handler_factory(policy_factory, server_token=server_token), host, port, compression=None,
                      max_size=32 * 1024 * 1024, process_request=health_check) as server:
         await server.serve_forever()
 
 
-def serve_forever(policy_factory, host="127.0.0.1", port=8000):
-    asyncio.run(run_server(policy_factory, host, port))
+def serve_forever(policy_factory, host="127.0.0.1", port=8000, server_token=None):
+    asyncio.run(run_server(policy_factory, host, port, server_token=server_token))

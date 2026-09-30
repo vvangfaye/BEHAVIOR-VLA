@@ -129,10 +129,13 @@ def test_shadow_and_rerank_change_only_selected_candidate():
 
 def test_reset_has_no_ack_and_connections_do_not_share_queues():
     async def scenario():
-        async with serve(handler_factory(make_policy), "127.0.0.1", 0, process_request=health_check) as server:
+        async with serve(handler_factory(make_policy, server_token="expected-instance"),
+                         "127.0.0.1", 0, process_request=health_check) as server:
             port = server.sockets[0].getsockname()[1]
             async with connect(f"ws://127.0.0.1:{port}", proxy=None) as a:
-                assert unpackb(await a.recv())["protocol"] == "b1k-v3.9.2"
+                metadata = unpackb(await a.recv())
+                assert metadata["protocol"] == "b1k-v3.9.2"
+                assert metadata["server_instance_token"] == "expected-instance"
                 for _ in range(5):
                     await a.send(packb(observation())); await a.recv()
                 await a.send(packb({"reset": True}))
@@ -143,6 +146,11 @@ def test_reset_has_no_ack_and_connections_do_not_share_queues():
                     await b.recv(); await b.send(packb(observation()))
                     assert (unpackb(await b.recv())["action"] == 1).all()
     asyncio.run(scenario())
+
+
+def test_server_rejects_empty_instance_token():
+    with pytest.raises(ValueError, match="server_token"):
+        handler_factory(make_policy, server_token="")
 
 
 def test_server_reports_joint_subtask_across_reset():
