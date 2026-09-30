@@ -1,0 +1,6 @@
+; Illustrative task for tests and demo; NOT an official competition definition.
+(define (problem cup_in_cabinet_demo)
+  (:domain omnigibson)
+  (:objects cup_1 - cup cabinet_1 - cabinet table_1 - table)
+  (:init (ontop cup_1 table_1) (not (open cabinet_1)))
+  (:goal (and (inside cup_1 cabinet_1) (not (open cabinet_1)))))

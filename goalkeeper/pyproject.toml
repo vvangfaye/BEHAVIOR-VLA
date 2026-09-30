@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "b1k-goalkeeper"
+version = "0.1.0"
+description = "Experimental goal-belief and progress-preservation layer for BEHAVIOR"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.23,<2", "msgpack>=1", "websockets>=14", "Pillow>=11", "torch>=2.7"]
+
+[project.optional-dependencies]
+vision = ["transformers==5.5.4"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+goalkeeper = "goalkeeper.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

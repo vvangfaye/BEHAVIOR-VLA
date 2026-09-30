@@ -2,12 +2,20 @@
 # Closed-loop evaluation of π0.5 in OmniGibson.
 # Starts the policy server, evaluates each task, then stops the server.
 # Usage: PI05_CKPT=/path/to/checkpoint bash scripts/eval_b1k.sh turning_on_radio
-# For joint subtask checkpoints, set SUBTASK_PREDICTION=1.
+# For native OpenPI joint checkpoints, set SUBTASK_PREDICTION=1.
+# GoalKeeper reads joint mode from each task's JSON configuration.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODEL="${MODEL:-pi05}"
-[[ "$MODEL" == pi05 ]] || { echo "Only MODEL=pi05 is supported" >&2; exit 2; }
+GOALKEEPER_CONFIG_DIR="${GOALKEEPER_CONFIG_DIR:-}"
+if [[ -n "$GOALKEEPER_CONFIG_DIR" ]]; then
+    GOALKEEPER_CONFIG_DIR="$(cd "$GOALKEEPER_CONFIG_DIR" && pwd)"
+    MODEL="${MODEL:-goalkeeper}"
+    [[ "$MODEL" == goalkeeper ]] || { echo "MODEL must be goalkeeper with GOALKEEPER_CONFIG_DIR" >&2; exit 2; }
+else
+    MODEL="${MODEL:-pi05}"
+    [[ "$MODEL" == pi05 ]] || { echo "Only MODEL=pi05 is supported without GOALKEEPER_CONFIG_DIR" >&2; exit 2; }
+fi
 ENV_ROOT="${ENV_ROOT:-/dev/shm/wangfaye/conda_envs}"
 EVAL_ENV="${EVAL_ENV:-$ENV_ROOT/b1k-eval}"
 PORT="${PORT:-8000}"
@@ -51,6 +59,10 @@ SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-0}"
 if [[ "$SUBTASK_PREDICTION" != 0 && "$SUBTASK_PREDICTION" != 1 ]]; then
     echo "SUBTASK_PREDICTION must be 0 or 1" >&2; exit 2
 fi
+if [[ -n "$GOALKEEPER_CONFIG_DIR" && ( "$PROMPT_MODE" != whole_task || -n "$EXTERNAL_SUBTASK_SELECTOR" || -n "$EXTERNAL_SUBTASK_SET" ) ]]; then
+    echo "GoalKeeper evaluation requires whole_task prompt mode without an external subtask" >&2
+    exit 2
+fi
 EXTERNAL_SUBTASK_ARGS=()
 if [[ -n "$EXTERNAL_SUBTASK_SET" ]]; then
     if [[ ! "$EXTERNAL_SUBTASK" =~ [^[:space:]] ]]; then
@@ -80,7 +92,7 @@ if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     EXTERNAL_SUBTASK_ARGS=(--external-subtask-selector "$EXTERNAL_SUBTASK_SELECTOR")
 fi
 SUBTASK_SERVER_ARGS=()
-if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
+if [[ "$SUBTASK_PREDICTION" == 1 && -z "$GOALKEEPER_CONFIG_DIR" ]]; then
     : "${PI05_CKPT:?set PI05_CKPT to your joint subtask-trained checkpoint}"
     SUBTASK_SERVER_ARGS=(--subtask-prediction --max-token-len "${MAX_TOKEN_LEN:-512}"
         --max-subtask-len "${MAX_SUBTASK_LEN:-64}"
@@ -120,6 +132,14 @@ if [[ ${#TASKS[@]} -eq 0 ]]; then
     echo "Usage: MODEL=pi05 $0 <task-name> [task-name...]" >&2
     exit 2
 fi
+if [[ -n "$GOALKEEPER_CONFIG_DIR" ]]; then
+    for task in "${TASKS[@]}"; do
+        [[ -f "$GOALKEEPER_CONFIG_DIR/$task.json" ]] || {
+            echo "GoalKeeper config not found: $GOALKEEPER_CONFIG_DIR/$task.json" >&2
+            exit 2
+        }
+    done
+fi
 if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     for task in "${TASKS[@]}"; do
         case "$task" in
@@ -132,23 +152,30 @@ if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     done
 fi
 
-PI05_CKPT="${PI05_CKPT:-$REPO_ROOT/openpi/outputs/checkpoints/pi05_b1k/pi05_b1k_full_20260803_162620/49999}"
-# Must match the assets dir written during training, otherwise the server
-# derives b1k/<task> and looks for norm stats in the wrong place.
-PI05_REPO_ID="${PI05_REPO_ID:-behavior-1k/2026-challenge-demos}"
-[[ -d "$PI05_CKPT" ]] || { echo "checkpoint not found: $PI05_CKPT" >&2; exit 1; }
-[[ -d "$PI05_CKPT/assets/$PI05_REPO_ID" ]] || {
-    echo "norm stats not found: $PI05_CKPT/assets/$PI05_REPO_ID" >&2; exit 1; }
-if [[ -f "$PI05_CKPT/model.safetensors" ]]; then
-    PI05_ENV="${PI05_ENV:-$REPO_ROOT/openpi/.venv-torch}"
-    export JAX_PLATFORMS=cpu
-else
+if [[ -n "$GOALKEEPER_CONFIG_DIR" ]]; then
     PI05_ENV="${PI05_ENV:-$REPO_ROOT/openpi/.venv}"
+else
+    PI05_CKPT="${PI05_CKPT:-$REPO_ROOT/openpi/outputs/checkpoints/pi05_b1k/pi05_b1k_full_20260803_162620/49999}"
+    # Must match the assets dir written during training, otherwise the server
+    # derives b1k/<task> and looks for norm stats in the wrong place.
+    PI05_REPO_ID="${PI05_REPO_ID:-behavior-1k/2026-challenge-demos}"
+    [[ -d "$PI05_CKPT" ]] || { echo "checkpoint not found: $PI05_CKPT" >&2; exit 1; }
+    [[ -d "$PI05_CKPT/assets/$PI05_REPO_ID" ]] || {
+        echo "norm stats not found: $PI05_CKPT/assets/$PI05_REPO_ID" >&2; exit 1; }
+    if [[ -f "$PI05_CKPT/model.safetensors" ]]; then
+        PI05_ENV="${PI05_ENV:-$REPO_ROOT/openpi/.venv-torch}"
+        export JAX_PLATFORMS=cpu
+    else
+        PI05_ENV="${PI05_ENV:-$REPO_ROOT/openpi/.venv}"
+    fi
 fi
-for name in PI05_CKPT PI05_ENV; do
+for name in PI05_ENV; do
     value="${!name}"
     if [[ "$value" != /* ]]; then printf -v "$name" '%s/%s' "$PWD" "$value"; fi
 done
+if [[ -z "$GOALKEEPER_CONFIG_DIR" && "$PI05_CKPT" != /* ]]; then
+    PI05_CKPT="$PWD/$PI05_CKPT"
+fi
 
 mkdir -p "$OUTPUT_ROOT/$MODEL"
 echo "prompt mode: $PROMPT_MODE"
@@ -174,6 +201,28 @@ activate_env() {
 
 start_server() {
     local task="$1"
+    if [[ -n "$GOALKEEPER_CONFIG_DIR" ]]; then
+        local config="$GOALKEEPER_CONFIG_DIR/$task.json"
+        [[ -f "$config" ]] || { echo "GoalKeeper config not found: $config" >&2; return 1; }
+        cd "$REPO_ROOT"
+        activate_env "$PI05_ENV/bin/activate"
+        if [[ "$SUBTASK_PREDICTION" == 1 ]]; then
+            python - "$config" <<'PY'
+import json
+import sys
+with open(sys.argv[1]) as f:
+    config = json.load(f)
+if config.get("subtask_prediction") is not True:
+    raise SystemExit("SUBTASK_PREDICTION=1 requires subtask_prediction=true in the GoalKeeper task JSON")
+PY
+        fi
+        CUDA_VISIBLE_DEVICES="$SERVER_GPU" XLA_PYTHON_CLIENT_PREALLOCATE=true \
+        XLA_PYTHON_CLIENT_MEM_FRACTION="$PI05_MEM_FRACTION" HF_HUB_OFFLINE=1 GOALKEEPER_EXPECTED_TASK="b1k/$task" \
+        python -m goalkeeper.cli serve "$config" >> "$SERVER_LOG" 2>&1 &
+        SERVER_PID=$!
+        echo "GoalKeeper server pid=$SERVER_PID task=$task log=$SERVER_LOG"
+        return 0
+    fi
     cd "$REPO_ROOT/openpi"
     activate_env "$PI05_ENV/bin/activate"
     if [[ -f "$PI05_CKPT/model.safetensors" ]]; then

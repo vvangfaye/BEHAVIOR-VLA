@@ -1,0 +1,864 @@
+{
+  "date": "2026-09-10",
+  "scope": "Official 2026 gallery task names; v3.9.2 public problem0 files, not instance-specific binding or semantic-equivalence certification",
+  "counts": {
+    "supported": 77,
+    "unsupported": 23
+  },
+  "tasks": [
+    {
+      "task": "turning_on_radio",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/turning_on_radio/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 1,
+      "clauses": 1,
+      "sha256": "06bd7ab790f3b33dd9d701ea689216fd4a73d7fc17e80f3130a1f92dd1c93e32"
+    },
+    {
+      "task": "picking_up_trash",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/picking_up_trash/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 3,
+      "clauses": 1,
+      "sha256": "4dc802891cc16e91d2531d2b0c19e7bece663ddffd3c218112e3358f2dd459e4"
+    },
+    {
+      "task": "putting_away_Halloween_decorations",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/putting_away_Halloween_decorations/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Wildcard object domain requires public resolved bindings; cannot ground as one object"
+    },
+    {
+      "task": "cleaning_up_plates_and_food",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/cleaning_up_plates_and_food/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Unsupported logical operator: forpairs"
+    },
+    {
+      "task": "can_meat",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/can_meat/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 13,
+      "clauses": 36,
+      "sha256": "1862f9bb2fdeb8f528b499e4cf6167aa188321032cf57a1f072de13808383505"
+    },
+    {
+      "task": "setting_mousetraps",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/setting_mousetraps/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Wildcard object domain requires public resolved bindings; cannot ground as one object"
+    },
+    {
+      "task": "hiding_Easter_eggs",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/hiding_Easter_eggs/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Wildcard object domain requires public resolved bindings; cannot ground as one object"
+    },
+    {
+      "task": "picking_up_toys",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/picking_up_toys/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 6,
+      "clauses": 1,
+      "sha256": "146aaa8e9d897202382adcacf142e74380776f1881edc27a6d72ca7b74275006"
+    },
+    {
+      "task": "rearranging_kitchen_furniture",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/rearranging_kitchen_furniture/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Wildcard object domain requires public resolved bindings; cannot ground as one object"
+    },
+    {
+      "task": "putting_up_Christmas_decorations_inside",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/putting_up_Christmas_decorations_inside/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Wildcard object domain requires public resolved bindings; cannot ground as one object"
+    },
+    {
+      "task": "set_up_a_coffee_station_in_your_kitchen",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/set_up_a_coffee_station_in_your_kitchen/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 6,
+      "clauses": 1,
+      "sha256": "40b21c641f854923eaa6e8ef62da756ae9de2f4523aec038d47f487f443e3b8a"
+    },
+    {
+      "task": "putting_dishes_away_after_cleaning",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/putting_dishes_away_after_cleaning/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Wildcard object domain requires public resolved bindings; cannot ground as one object"
+    },
+    {
+      "task": "preparing_lunch_box",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/preparing_lunch_box/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 6,
+      "clauses": 1,
+      "sha256": "f1de2c856d25434295813ff1eec15246250057d85c06274a46b65b53c9212e28"
+    },
+    {
+      "task": "loading_the_car",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/loading_the_car/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 4,
+      "clauses": 1,
+      "sha256": "c5efe2cb96a090c65bb0ef655a71c1e6143e0a4e379e9f03609d83d593cc6c8a"
+    },
+    {
+      "task": "carrying_in_groceries",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/carrying_in_groceries/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Wildcard object domain requires public resolved bindings; cannot ground as one object"
+    },
+    {
+      "task": "bringing_in_wood",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/bringing_in_wood/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 3,
+      "clauses": 1,
+      "sha256": "bf157bd45031dfe3db3054536bd76c861448498cb801a929f253927ad09706f0"
+    },
+    {
+      "task": "moving_boxes_to_storage",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/moving_boxes_to_storage/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 4,
+      "clauses": 2,
+      "sha256": "13c91058b0266345eec5a5019b3882f1a1ff794dec5643548b2d42927b700995"
+    },
+    {
+      "task": "bringing_water",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/bringing_water/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 3,
+      "clauses": 1,
+      "sha256": "90e7602fbec064f90c21e7921f582209b2a7a3436afd823231166c69ae489297"
+    },
+    {
+      "task": "tidying_bedroom",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/tidying_bedroom/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Wildcard object domain requires public resolved bindings; cannot ground as one object"
+    },
+    {
+      "task": "outfit_a_basic_toolbox",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/outfit_a_basic_toolbox/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 7,
+      "clauses": 1,
+      "sha256": "7500c3d563f851e74f083455bd3860ae271c887a64469dee3d76ad461c87e5c1"
+    },
+    {
+      "task": "sorting_vegetables",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/sorting_vegetables/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 39,
+      "clauses": 27,
+      "sha256": "f47375bd80491dcbf0f5918916f8501ddc8ac1ef4db86dfa91aff8ab4a7443a8"
+    },
+    {
+      "task": "collecting_childrens_toys",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/collecting_childrens_toys/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Wildcard object domain requires public resolved bindings; cannot ground as one object"
+    },
+    {
+      "task": "putting_shoes_on_rack",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/putting_shoes_on_rack/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 10,
+      "clauses": 1,
+      "sha256": "323a7477b480735aa1dcf41be5e43287394f2d28328f635f7003b8286f885281"
+    },
+    {
+      "task": "boxing_books_up_for_storage",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/boxing_books_up_for_storage/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 6,
+      "clauses": 1,
+      "sha256": "f9390495b5f55154080f84da11282c8b8610f6eb20461796cd1ae804f17604f7"
+    },
+    {
+      "task": "storing_food",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/storing_food/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Wildcard object domain requires public resolved bindings; cannot ground as one object"
+    },
+    {
+      "task": "clearing_food_from_table_into_fridge",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/clearing_food_from_table_into_fridge/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 7,
+      "clauses": 4,
+      "sha256": "840d8330b9a0e3d93f5d0f5ceb1880b4cd00c6fc44caac2eed002d9339f6b872"
+    },
+    {
+      "task": "assembling_gift_baskets",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/assembling_gift_baskets/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Unsupported logical operator: forpairs"
+    },
+    {
+      "task": "sorting_household_items",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/sorting_household_items/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 8,
+      "clauses": 1,
+      "sha256": "d8eb464ba273d8ccf3efa065bcc1adf759998b567b1d8fe880f5b8529600a3a9"
+    },
+    {
+      "task": "getting_organized_for_work",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/getting_organized_for_work/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 10,
+      "clauses": 1,
+      "sha256": "b4c6fcb70e1c810484c7b330fb4a2f31997029577c6a28d3fb240d1b58bd2544"
+    },
+    {
+      "task": "clean_up_your_desk",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/clean_up_your_desk/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 11,
+      "clauses": 1,
+      "sha256": "c81e592bf14dd7b2fbbc2a443a5f4989e5d0d038f20c27cc91a4339b3d14318e"
+    },
+    {
+      "task": "setting_the_fire",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/setting_the_fire/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 8,
+      "clauses": 1,
+      "sha256": "d7d62278c4be89fa1199239267784bbcbc87270a5fb64a6a9705ecfff4525c96"
+    },
+    {
+      "task": "clean_boxing_gloves",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/clean_boxing_gloves/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 2,
+      "clauses": 1,
+      "sha256": "66d60d8be91af3a343e47286eb99d8569c4d65419d5aae8d0af0efb2d8a6a976"
+    },
+    {
+      "task": "wash_a_baseball_cap",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/wash_a_baseball_cap/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 2,
+      "clauses": 1,
+      "sha256": "3be2a8557d0554eb2077cfeb2a9f4d8af45cad3521e046bedb9d3592f53208f2"
+    },
+    {
+      "task": "wash_dog_toys",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/wash_dog_toys/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 6,
+      "clauses": 1,
+      "sha256": "0b8d32a0ef37cef4db704d0e1b50d6f77f35414d60a73f0ebf5bfd161133a9b5"
+    },
+    {
+      "task": "hanging_pictures",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/hanging_pictures/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Wildcard object domain requires public resolved bindings; cannot ground as one object"
+    },
+    {
+      "task": "attach_a_camera_to_a_tripod",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/attach_a_camera_to_a_tripod/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 1,
+      "clauses": 1,
+      "sha256": "60e939c877d0f6e49d821fcbe71214c348cd7f7456cb43e769b05060b81c2d93"
+    },
+    {
+      "task": "clean_a_patio",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/clean_a_patio/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 1,
+      "clauses": 1,
+      "sha256": "70445355444eea08edd874531c35e43d94c9e0f0c65a310d3655931883688f15"
+    },
+    {
+      "task": "clean_a_trumpet",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/clean_a_trumpet/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 1,
+      "clauses": 1,
+      "sha256": "3d6019ad5d1f0e4e110217bdba0b43bd4ca0757ad9daae6e873ae5cfa8ffdedb"
+    },
+    {
+      "task": "spraying_for_bugs",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/spraying_for_bugs/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 2,
+      "clauses": 1,
+      "sha256": "600921b50306093798c7c69bf052fde7ecca9d86b5477fd853fa11c519107a5f"
+    },
+    {
+      "task": "spraying_fruit_trees",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/spraying_fruit_trees/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 2,
+      "clauses": 1,
+      "sha256": "f1b8448c47953c8ca646e0842b27d5058e94de03fa98e741d43350d0824dcd0a"
+    },
+    {
+      "task": "make_microwave_popcorn",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/make_microwave_popcorn/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 2,
+      "clauses": 1,
+      "sha256": "55bd49b760f5310fc8f698da208c6e20364b6ea659f5690afc1d4bc9726cf099"
+    },
+    {
+      "task": "cook_cabbage",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/cook_cabbage/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 4,
+      "clauses": 1,
+      "sha256": "af3c543f6c918bfe0f93c8fbc179baae2d304be20d85712cc371432a97b0c571"
+    },
+    {
+      "task": "chop_an_onion",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/chop_an_onion/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 4,
+      "clauses": 1,
+      "sha256": "16120ceda62efa21454fbba4f2a77db52a2c79b768747f3f14373aab206ebb63"
+    },
+    {
+      "task": "slicing_vegetables",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/slicing_vegetables/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 9,
+      "clauses": 1,
+      "sha256": "783060c491bc4ec9cd9ad2bb2e58331ccc895fb4b0f0af418f9e2437135b15d0"
+    },
+    {
+      "task": "chopping_wood",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/chopping_wood/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 8,
+      "clauses": 1,
+      "sha256": "2ec0e9adb666075101c888d43b1c0ef48434ab0051d80de20eb49bf75fb04837"
+    },
+    {
+      "task": "cook_hot_dogs",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/cook_hot_dogs/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 2,
+      "clauses": 1,
+      "sha256": "ecfdbe8e432fea1a7fd263e9d249ac219b7a9addaecfee8a6ac01f3c87b1af50"
+    },
+    {
+      "task": "cook_bacon",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/cook_bacon/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 7,
+      "clauses": 1,
+      "sha256": "1dca6a5d0b54bb71c654bb9730c381943d722b163a6d0e54bfccc5f609dcccdd"
+    },
+    {
+      "task": "freeze_pies",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/freeze_pies/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Unsupported logical operator: forpairs"
+    },
+    {
+      "task": "canning_food",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/canning_food/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 14,
+      "clauses": 4,
+      "sha256": "9a48bd418004101880d6f0089a5f99c27dbd279a182025904dbd5212dac34d98"
+    },
+    {
+      "task": "make_pizza",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/make_pizza/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 2,
+      "clauses": 1,
+      "sha256": "c1f24b4d8fa268325f353216932770052aa9ed8955a5b89155af48f60e732b23"
+    },
+    {
+      "task": "freeze_fruit",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/freeze_fruit/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Unsupported logical operator: forpairs"
+    },
+    {
+      "task": "cook_a_brisket",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/cook_a_brisket/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 3,
+      "clauses": 1,
+      "sha256": "7253ab392e533c90b1f768e17428578487243d8f123caf6e9337f8c3a23cd11f"
+    },
+    {
+      "task": "sorting_bottles_cans_and_paper",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/sorting_bottles_cans_and_paper/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 18,
+      "clauses": 6,
+      "sha256": "901c0fc08d3f8d721a69758deb455f9b8eaf89c4dee78e95a03bc20bc33fd1ac"
+    },
+    {
+      "task": "tidying_living_room",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/tidying_living_room/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Wildcard object domain requires public resolved bindings; cannot ground as one object"
+    },
+    {
+      "task": "putting_away_toys",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/putting_away_toys/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 16,
+      "clauses": 256,
+      "sha256": "be5b2d620e15ed4ca414f9488c8e49476e141d289f5ee87983cdef1e710d8dd8"
+    },
+    {
+      "task": "re_shelving_library_books",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/re_shelving_library_books/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Wildcard object domain requires public resolved bindings; cannot ground as one object"
+    },
+    {
+      "task": "make_rose_centerpieces",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/make_rose_centerpieces/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 4,
+      "clauses": 1,
+      "sha256": "e96f193f8d486ab3361f76334711a1b027981b605a299368d700d74e3195b304"
+    },
+    {
+      "task": "sweeping_garage",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/sweeping_garage/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 2,
+      "clauses": 1,
+      "sha256": "a4e9af08f357d4f469ab154a5a37803d569f296bcf7b3daccf45186adcce5ce2"
+    },
+    {
+      "task": "stacking_wood",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/stacking_wood/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "DNF expansion exceeds max_clauses; use base policy"
+    },
+    {
+      "task": "organizing_art_supplies",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/organizing_art_supplies/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 5,
+      "clauses": 1,
+      "sha256": "f9eb9644f8a873400d55c786ff916db6130715ab10fa5bda1379b201dfee1422"
+    },
+    {
+      "task": "scrubbing_bathroom_floor",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/scrubbing_bathroom_floor/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 1,
+      "clauses": 1,
+      "sha256": "954c249c54c5c56e3d2561cca682b508f4b8e0a9d5f426e290d0a4076b13d2ab"
+    },
+    {
+      "task": "bringing_paper_to_recycling",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/bringing_paper_to_recycling/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 3,
+      "clauses": 1,
+      "sha256": "7482ea993cf43e69f61191108c181224229a5c0b14d86c2e639b35b9987e98d7"
+    },
+    {
+      "task": "halve_an_egg",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/halve_an_egg/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 5,
+      "clauses": 1,
+      "sha256": "e6e8c6b524ddfd00459d01df59536f51d7ad5ae24c397920822573c3c3fa6672"
+    },
+    {
+      "task": "installing_smoke_detectors",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/installing_smoke_detectors/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 1,
+      "clauses": 1,
+      "sha256": "f376b8f00019255b73e56cd62825812e926e49787279f23b2ef30c0ca4e9555f"
+    },
+    {
+      "task": "setting_the_table",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/setting_the_table/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Unsupported logical operator: forpairs"
+    },
+    {
+      "task": "unloading_the_car",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/unloading_the_car/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 2,
+      "clauses": 1,
+      "sha256": "1e58f03f84c57ee2835c76fcbb1b42f893643306eb5fd09192e0b1e13cd48081"
+    },
+    {
+      "task": "turning_out_all_lights_before_sleep",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/turning_out_all_lights_before_sleep/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 5,
+      "clauses": 1,
+      "sha256": "b922c30c2f0bf4705fabcdc44827a81e433912677d913afef54308d755923d02"
+    },
+    {
+      "task": "boxing_food_after_dinner",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/boxing_food_after_dinner/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 6,
+      "clauses": 1,
+      "sha256": "807ff776b31242fd2a478d884217e16c350062ae531a93fb77406237c5753c3a"
+    },
+    {
+      "task": "cleaning_up_branches_and_twigs",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/cleaning_up_branches_and_twigs/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 5,
+      "clauses": 1,
+      "sha256": "a64272314473e3e02549af27925680551ac0763574b8e1139629231ece1db37b"
+    },
+    {
+      "task": "vacuuming_floors",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/vacuuming_floors/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 1,
+      "clauses": 1,
+      "sha256": "39a2a6d367b74df21749d06eaaf1919b29dc4387a98341cce812de35ab23bf43"
+    },
+    {
+      "task": "thawing_frozen_food",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/thawing_frozen_food/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 13,
+      "clauses": 4,
+      "sha256": "771cfb02f4462f4f29d27fff670735749f5e63bbf2941c70be49496b64eb9521"
+    },
+    {
+      "task": "clean_your_rusty_garden_tools",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/clean_your_rusty_garden_tools/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 5,
+      "clauses": 1,
+      "sha256": "ce75b76f03e771c55d00eae27e5611602d0c7b7c5f48057c857f76342b022c5b"
+    },
+    {
+      "task": "cook_a_frozen_pie",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/cook_a_frozen_pie/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 2,
+      "clauses": 1,
+      "sha256": "e8558c44ac148b100195a6e9b3725cc0f18dd23ea826f29327c874dcd6bd3387"
+    },
+    {
+      "task": "organizing_school_stuff",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/organizing_school_stuff/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 6,
+      "clauses": 1,
+      "sha256": "5118c0da1b73f21750fcafd0b2fb1c4859fb5f9cab539f5a62901c582ab183a7"
+    },
+    {
+      "task": "carrying_out_garden_furniture",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/carrying_out_garden_furniture/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 2,
+      "clauses": 1,
+      "sha256": "8da2796cbfd1724c32506ed4e65427fbee79a5026cef8d3c55a81312c100c1af"
+    },
+    {
+      "task": "put_together_a_basic_pruning_kit",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/put_together_a_basic_pruning_kit/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 4,
+      "clauses": 1,
+      "sha256": "36599882052a10aa3b79ddee6eb31e40ce1df2196529f70a9d59855d2dcf2256"
+    },
+    {
+      "task": "dispose_of_glass",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/dispose_of_glass/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 4,
+      "clauses": 1,
+      "sha256": "ecbc44ca0272d8783dd1c2e9c9f44e341a5acb175463b1aa2e317329fc56417b"
+    },
+    {
+      "task": "installing_a_modem",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/installing_a_modem/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 6,
+      "clauses": 2,
+      "sha256": "4965d015fa14a43d2a08c6b11c814db069c052b3c751e4f6540f2e5884c3d8b8"
+    },
+    {
+      "task": "make_cabinet_doors",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/make_cabinet_doors/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 1,
+      "clauses": 1,
+      "sha256": "c95ab26ec89f82936ad402aa2a9f406aad741aa10379b865ff917430e950ab08"
+    },
+    {
+      "task": "polishing_shoes",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/polishing_shoes/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 8,
+      "clauses": 2,
+      "sha256": "1866560549c57feee96608e55943ed3c656184e4dd82548cbf80dab57d8c2c40"
+    },
+    {
+      "task": "clean_up_broken_glass",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/clean_up_broken_glass/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 3,
+      "clauses": 1,
+      "sha256": "c06613f86a7afad2d04b71492389ab9bba157eeb75795204e1700b80030dfaac"
+    },
+    {
+      "task": "packing_meal_for_delivery",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/packing_meal_for_delivery/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Unsupported logical operator: forpairs"
+    },
+    {
+      "task": "store_batteries",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/store_batteries/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 6,
+      "clauses": 2,
+      "sha256": "df91a0f880215dff0d0137b409c406c79c6ef67efcf143bfabec19daf14add59"
+    },
+    {
+      "task": "store_honey",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/store_honey/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 1,
+      "clauses": 1,
+      "sha256": "ee21ac0bcb27d37c33732529d8d79f0fb57bb9ca832218cd5b91efe114197f04"
+    },
+    {
+      "task": "tidying_bathroom",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/tidying_bathroom/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 4,
+      "clauses": 1,
+      "sha256": "e206c6fbed1117e4a434505af629782cebfdbdd420698c2f6a1eabcf3b7517a9"
+    },
+    {
+      "task": "putting_dirty_dishes_in_sink",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/putting_dirty_dishes_in_sink/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 4,
+      "clauses": 1,
+      "sha256": "d4ebcc9e444c6b9f448330623d0a4eaef0af1fc2fe8a650e2e8174c61200053b"
+    },
+    {
+      "task": "make_gift_bags_for_baby_showers",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/make_gift_bags_for_baby_showers/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Unsupported logical operator: forpairs"
+    },
+    {
+      "task": "collecting_aluminum_cans",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/collecting_aluminum_cans/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 6,
+      "clauses": 1,
+      "sha256": "150dad84ed3b27019fc5850af6946c2c5342be4600e98728ff131e4e71b4ccbd"
+    },
+    {
+      "task": "rearrange_your_room",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/rearrange_your_room/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Wildcard object domain requires public resolved bindings; cannot ground as one object"
+    },
+    {
+      "task": "installing_a_fax_machine",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/installing_a_fax_machine/problem0.bddl",
+      "downloaded": true,
+      "status": "unsupported",
+      "reason": "Wildcard object domain requires public resolved bindings; cannot ground as one object"
+    },
+    {
+      "task": "composting_waste",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/composting_waste/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 2,
+      "clauses": 1,
+      "sha256": "66663f3d27e4f38dd93d81097a5bb853919ae04208e17ad2f957a3727bba3f4e"
+    },
+    {
+      "task": "store_produce",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/store_produce/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 8,
+      "clauses": 2,
+      "sha256": "4bf2ebf0fb3458f2607c7de72b38d0fb23e84505d142794d2b5e4bf190f88d20"
+    },
+    {
+      "task": "installing_a_scanner",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/installing_a_scanner/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 2,
+      "clauses": 1,
+      "sha256": "a986dacf967d4185a622f693f0485fbfd0c2c63130727a551f9b011520656d65"
+    },
+    {
+      "task": "clean_a_keyboard",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/clean_a_keyboard/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 1,
+      "clauses": 1,
+      "sha256": "ad7b0abd3167816e4d617a80533a231aaa55a48ed8e25b67bd1d3013066b70ec"
+    },
+    {
+      "task": "dispose_of_batteries",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/dispose_of_batteries/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 4,
+      "clauses": 1,
+      "sha256": "97cb15d185b2f9d64fde78905929a66598635b191b7d957083e578ecb7b29013"
+    },
+    {
+      "task": "cook_brussels_sprouts",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/cook_brussels_sprouts/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 26,
+      "clauses": 1,
+      "sha256": "873e5d28271c5b09bb554bde5b378dedfc53d195afbe460d3c6df52294f04367"
+    },
+    {
+      "task": "cook_broccolini",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/cook_broccolini/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 11,
+      "clauses": 1,
+      "sha256": "838e00bda78d768a1b68d8cb37d372f34c458fb38591c1a1f0338831dc8166ba"
+    },
+    {
+      "task": "setup_a_bar_for_a_cocktail_party",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/setup_a_bar_for_a_cocktail_party/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 27,
+      "clauses": 54,
+      "sha256": "2b2bbf20d80a9042b0d2d5e0b7021cf788768fd91e65bb45537ebb5bff55eb25"
+    },
+    {
+      "task": "laying_tile_floors",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/laying_tile_floors/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 20,
+      "clauses": 256,
+      "sha256": "bd85f90fbe495f2c35efc7a9ffa3d2c687cd0411e3e92e40c4de2788e9bd7e2b"
+    },
+    {
+      "task": "sorting_books_on_shelf",
+      "url": "https://raw.githubusercontent.com/StanfordVL/BEHAVIOR-1K/v3.9.2/bddl3/bddl/activity_definitions/sorting_books_on_shelf/problem0.bddl",
+      "downloaded": true,
+      "status": "supported",
+      "atoms": 24,
+      "clauses": 432,
+      "sha256": "faac376065d4d03bbf17addeb22d1afdec65dcbda38c6487c50eb74903bc6361"
+    }
+  ]
+}

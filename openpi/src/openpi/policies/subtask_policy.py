@@ -77,6 +77,21 @@ class SubtaskPolicy(Policy):
         return result
 
     def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:
+        result = self._infer_candidates(obs, 1, noise=noise)
+        result["actions"] = result["actions"][0]
+        return result
+
+    def infer_candidates(self, obs: dict, count: int) -> dict:
+        """Sample independent action chunks under one subtask decision.
+
+        Candidate sampling advances the action RNG for each chunk, while the
+        subtask refresh interval advances once for the whole decision.
+        """
+        if type(count) is not int or count < 1:
+            raise ValueError("count must be a positive integer")
+        return self._infer_candidates(obs, count)
+
+    def _infer_candidates(self, obs: dict, count: int, *, noise: np.ndarray | None = None) -> dict:
         started = time.monotonic()
         inputs = self._observation_transform(jax.tree.map(lambda x: x, obs))
         prompt = inputs.get("prompt")
@@ -145,11 +160,14 @@ class SubtaskPolicy(Policy):
         # including cached and externally provided subtasks. No high-level KV
         # cache is passed to sample_actions.
         prepared.update(self._tokenizer_transform.action_fields(label_tokens, state))
-        outputs = super().infer(self._pad(prepared), noise=noise)
+        outputs = [super(SubtaskPolicy, self).infer(self._pad(prepared), noise=noise) for _ in range(count)]
         self._calls_since_generation += 1
+        result = outputs[0]
+        result["actions"] = np.stack([item["actions"] for item in outputs])
         # Add text AFTER action-only output adapters so it survives B1KOutputs.
-        outputs["subtask"] = self._tokenizer.decode_subtask(label_tokens)
-        outputs["subtask_source"] = source
-        outputs["policy_timing"]["subtask_ms"] = generation_ms
-        outputs["policy_timing"]["total_ms"] = (time.monotonic() - started) * 1000
-        return outputs
+        result["subtask"] = self._tokenizer.decode_subtask(label_tokens)
+        result["subtask_source"] = source
+        result["policy_timing"]["infer_ms"] = sum(item["policy_timing"]["infer_ms"] for item in outputs)
+        result["policy_timing"]["subtask_ms"] = generation_ms
+        result["policy_timing"]["total_ms"] = (time.monotonic() - started) * 1000
+        return result

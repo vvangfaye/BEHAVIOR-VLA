@@ -104,3 +104,18 @@ def test_torch_policy_never_acts_on_incomplete_generation(tokenizer, invalid):
         policy.infer(source())
     assert not model.action_inputs
     assert policy._cached_tokens is None  # noqa: SLF001 -- failed generation must not populate the cache.
+
+
+def test_torch_joint_candidates_refresh_once_per_batch(tokenizer):
+    policy, model = make_policy(tokenizer, conditioning="subtask_only")
+    first = policy.infer_candidates(source(), 4)
+    assert first["actions"].shape == (4, 2, 4)
+    assert first["subtask_source"] == "generated"
+    assert len(model.generation_inputs) == 1
+    assert len(model.action_inputs) == 4
+    assert all(torch.equal(model.action_inputs[0].action_tokenized_prompt,
+                           item.action_tokenized_prompt) for item in model.action_inputs[1:])
+    assert policy.infer_candidates(source(), 4)["subtask_source"] == "cached"
+    assert len(model.generation_inputs) == 1
+    assert policy.infer_candidates(source(), 4)["subtask_source"] == "generated"
+    assert len(model.generation_inputs) == 2

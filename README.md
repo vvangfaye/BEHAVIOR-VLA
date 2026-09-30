@@ -60,6 +60,12 @@ JAX 的数据读取仍使用 PyTorch `DataLoader`，共享环境中的 Torch/视
 | 多任务评测 | [eval_sweep.sh](scripts/eval_sweep.sh) | `TASK_FILE`、`WORKERS` |
 | 离线动作误差诊断 | [eval_openloop.py](scripts/eval_openloop.py) | `--subtask-conditioning none/provided` |
 | 闭环结果汇总 | [summarize_closed_loop.py](scripts/summarize_closed_loop.py) | 不同 checkpoint 的结果目录 |
+| GoalKeeper 目标筛选研究原型 | [goalkeeper/README.md](goalkeeper/README.md) | 独立小头训练、候选动作筛选、可选闭环服务 |
+
+GoalKeeper 代码已放入 [goalkeeper/](goalkeeper/)；它使用本仓库的 OpenPI B1K 输入字段和
+`scripts/eval_b1k.sh` 评测入口。GoalKeeper 服务可在 joint checkpoint 上让同一轮
+候选动作共享一个预测 subtask，避免候选采样触发额外 subtask 刷新。配置方式、
+小头训练要求和验证边界见其 README。
 
 ## 3. JAX 训练
 

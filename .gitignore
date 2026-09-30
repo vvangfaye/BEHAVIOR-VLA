@@ -31,6 +31,8 @@ __pycache__/
 .hfd/
 .hf-shards/
 /nebula/config.sh
+/goalkeeper/build/
+/goalkeeper/src/*.egg-info/
 
 # Runtime logs and temporary files.
 *.log

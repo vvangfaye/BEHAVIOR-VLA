@@ -199,6 +199,50 @@ def test_factorized_policy_uses_current_observation_and_exact_tokens(model_setup
     assert not np.array_equal(high_inputs[0].tokenized_prompt, high_inputs[-1].tokenized_prompt)
 
 
+def test_joint_candidates_share_one_subtask_decision(model_setup, tokenizer, monkeypatch):
+    model, obs, _, _ = model_setup
+    policy = SubtaskPolicy(
+        model,
+        tokenizer_transform=transforms.TokenizeSubtaskPrompt(tokenizer, max_subtask_len=8),
+        subtask_interval=2,
+        output_transforms=[B1KOutputs(action_dim=4)],
+        rng=jax.random.key(3),
+    )
+    arrays = tokenizer.tokenize_subtask_training("turn on radio", "press radio", max_subtask_len=8)
+    ids = arrays[0][arrays[3]]
+    generations, samples = [], []
+
+    def generate(key, observation, **kwargs):
+        generations.append(observation)
+        return {"tokens": ids[None], "lengths": np.array([len(ids)]),
+                "has_eos": np.array([True]), "valid_prefix": np.array([True])}
+
+    def sample(key, observation, **kwargs):
+        samples.append((np.asarray(jax.random.key_data(key)), np.asarray(observation.tokenized_prompt)))
+        return jnp.full((1, 2, 4), len(samples), dtype=jnp.float32)
+
+    monkeypatch.setattr(policy, "_generate", generate)
+    monkeypatch.setattr(policy, "_sample_actions", sample)
+    source = simple_input(obs)
+    result = policy.infer_candidates(source, 4)
+    assert result["actions"].shape == (4, 2, 4)
+    np.testing.assert_array_equal(result["actions"][:, 0, 0], [1, 2, 3, 4])
+    assert result["subtask"] == "press radio"
+    assert result["subtask_source"] == "generated"
+    assert len(generations) == 1
+    assert policy._calls_since_generation == 1
+    assert all(np.array_equal(samples[0][1], item[1]) for item in samples[1:])
+    assert all(not np.array_equal(samples[0][0], item[0]) for item in samples[1:])
+    assert policy.infer_candidates(source, 2)["subtask_source"] == "cached"
+    assert len(generations) == 1
+    assert policy.infer_candidates(source, 2)["subtask_source"] == "generated"
+    assert len(generations) == 2
+    with pytest.raises(ValueError, match="count"):
+        policy.infer_candidates(source, 0)
+    policy.reset()
+    assert policy.infer_candidates(source, 2)["subtask_source"] == "generated"
+
+
 def test_b1k_wrapper_keeps_text_and_resets_on_instruction_change(tmp_path):
     class FakePolicy:
         def __init__(self):
