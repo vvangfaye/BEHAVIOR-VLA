@@ -29,6 +29,8 @@ def create_trained_policy(
     subtask_interval: int | None = None,
     subtask_temperature: float = 0.0,
     subtask_action_conditioning: str | None = None,
+    subtask_vote_window: int | None = None,
+    subtask_vote_threshold: int | None = None,
 ) -> _policy.Policy:
     """Create a policy from a trained checkpoint.
 
@@ -50,6 +52,10 @@ def create_trained_policy(
         presence of "model.safensors" in the checkpoint directory.
     """
     repack_transforms = repack_transforms or transforms.Group()
+    if (subtask_vote_window is not None or subtask_vote_threshold is not None) and not getattr(
+        train_config.model, "train_subtask_prediction", False
+    ):
+        raise ValueError("Temporal subtask voting requires a subtask-prediction model.")
     checkpoint_dir = download.maybe_download(str(checkpoint_dir))
     memory_contract = frame_memory.load(checkpoint_dir / "assets")
     if memory_contract is not None:
@@ -134,6 +140,8 @@ def create_trained_policy(
             "tokenizer_transform": tokenizers[0],
             "subtask_interval": subtask_interval,
             "subtask_temperature": subtask_temperature,
+            "subtask_vote_window": subtask_vote_window,
+            "subtask_vote_threshold": subtask_vote_threshold,
         }
     return policy_cls(
         model,

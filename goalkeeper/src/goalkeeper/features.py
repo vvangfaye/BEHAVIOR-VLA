@@ -13,7 +13,7 @@ class SiglipFeatures:
         self.model = AutoModel.from_pretrained(model_id, revision=revision, trust_remote_code=False).to(device).eval()
         self.processor = AutoProcessor.from_pretrained(model_id, revision=revision, trust_remote_code=False)
         self.device = device
-        self.feature_id = f"siglip-patch+text-v1:transformers-{transformers_version}:{model_id}@{revision}"
+        self.feature_id = f"siglip-camera-mean+text-v1:transformers-{transformers_version}:{model_id}@{revision}"
         self._text_cache = {}
         for parameter in self.model.parameters(): parameter.requires_grad_(False)
 
@@ -35,4 +35,5 @@ class SiglipFeatures:
     def encode_images(self, images: tuple[np.ndarray, ...]):
         inputs = self.processor(images=list(images), return_tensors="pt")
         pixels = inputs["pixel_values"].to(self.device)
-        return self.model.vision_model(pixel_values=pixels).last_hidden_state.float().cpu().numpy()
+        tokens = self.model.vision_model(pixel_values=pixels).last_hidden_state
+        return tokens.mean(dim=1, keepdim=True).float().cpu().numpy()

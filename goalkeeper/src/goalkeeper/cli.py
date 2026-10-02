@@ -18,15 +18,18 @@ def main(argv=None):
     train_cmd = commands.add_parser("train", help="Train the small goal head, not Comet")
     train_cmd.add_argument("manifest"); train_cmd.add_argument("output")
     train_cmd.add_argument("--epochs", type=int, default=20)
-    train_cmd.add_argument("--batch-size", type=int, default=16)
+    train_cmd.add_argument("--batch-size", "--global-batch-size", dest="batch_size", type=int, default=16,
+                           help="Global batch size; must divide WORLD_SIZE")
     train_cmd.add_argument("--learning-rate", type=float, default=3e-4)
     train_cmd.add_argument("--hidden-dim", type=int, default=128)
     train_cmd.add_argument("--device", default="auto")
     train_cmd.add_argument("--workers", type=int, default=0)
+    train_cmd.add_argument("--dataset-contract", help="Explicit dataset_contract.json (required for real data unless adjacent)")
     train_cmd.add_argument("--seed", type=int, default=7)
     cal = commands.add_parser("calibrate", help="Calibrate on independent initial-state groups")
     cal.add_argument("manifest"); cal.add_argument("checkpoint"); cal.add_argument("output")
     cal.add_argument("--device", default="cpu"); cal.add_argument("--min-count", type=int, default=30)
+    cal.add_argument("--dataset-contract", help="Explicit dataset_contract.json (required for real data unless adjacent)")
     evaluate = commands.add_parser("report", help="Aggregate original official metrics JSON")
     evaluate.add_argument("results"); evaluate.add_argument("expected", help="JSON array of [task,instance_id,rollout_id]")
     evaluate.add_argument("--baseline"); evaluate.add_argument("--output")
@@ -36,6 +39,15 @@ def main(argv=None):
     export.add_argument("--encoder", required=True); export.add_argument("--revision", required=True)
     export.add_argument("--device", default="cuda:0"); export.add_argument("--horizon", type=int, default=16)
     export.add_argument("--history", type=int, default=4)
+    export_batch = commands.add_parser("export-batch", help="Export and seal an explicit batch of training episodes")
+    export_batch.add_argument("spec"); export_batch.add_argument("output")
+    export_batch.add_argument("--encoder", required=True); export_batch.add_argument("--revision", required=True)
+    export_batch.add_argument("--device", default="cuda:0"); export_batch.add_argument("--horizon", type=int, default=16)
+    export_batch.add_argument("--history", type=int, default=4)
+    merge = commands.add_parser("merge", help="Merge feature manifests into a sealed formal dataset")
+    merge.add_argument("output"); merge.add_argument("manifests", nargs="+")
+    check = commands.add_parser("check", help="Verify a sealed dataset and all content hashes")
+    check.add_argument("dataset")
     serve = commands.add_parser("serve", help="Serve raw OpenPI + optional trained goal head")
     serve.add_argument("config", help="Explicit public task + model configuration JSON")
     args = parser.parse_args(argv)
@@ -72,6 +84,18 @@ def main(argv=None):
         from .features import SiglipFeatures
         options.pop("encoder"); options.pop("revision"); options.pop("device")
         result = {"manifest": export_episode(**options, features=SiglipFeatures(args.encoder, args.revision, args.device))}
+    elif command == "export-batch":
+        from .prepare import export_batch
+        from .features import SiglipFeatures
+        options.pop("encoder"); options.pop("revision"); options.pop("device")
+        result = {"manifest": export_batch(**options, features=SiglipFeatures(args.encoder, args.revision, args.device))}
+    elif command == "merge":
+        from .data import merge_manifests, check_dataset
+        manifest = merge_manifests(args.manifests, args.output)
+        result = {"manifest": manifest, "contract": check_dataset(Path(manifest).parent)}
+    elif command == "check":
+        from .data import check_dataset
+        result = check_dataset(args.dataset)
     else:
         serve_config(args.config); return 0
     print(json.dumps(result, ensure_ascii=False, indent=2))

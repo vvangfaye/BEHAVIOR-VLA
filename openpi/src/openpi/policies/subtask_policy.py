@@ -1,5 +1,7 @@
 """Task -> generated subtask -> continuous actions, using the training token format."""
 
+from collections import Counter
+from collections import deque
 from collections.abc import Sequence
 import contextlib
 import logging
@@ -26,14 +28,25 @@ class SubtaskPolicy(Policy):
         transforms: Sequence[transforms_lib.DataTransformFn] = (),
         subtask_interval: int = 1,
         subtask_temperature: float = 0.0,
+        subtask_vote_window: int | None = None,
+        subtask_vote_threshold: int | None = None,
         **kwargs,
     ):
         if not model.train_subtask_prediction:
             raise ValueError("SubtaskPolicy requires a subtask-prediction model.")
-        if not isinstance(subtask_interval, int) or subtask_interval < 1:
+        if type(subtask_interval) is not int or subtask_interval < 1:
             raise ValueError("subtask_interval must be a positive number of action-chunk requests.")
         if not math.isfinite(subtask_temperature) or subtask_temperature < 0:
             raise ValueError("subtask_temperature must be finite and nonnegative.")
+        if (subtask_vote_window is None) != (subtask_vote_threshold is None):
+            raise ValueError("subtask_vote_window and subtask_vote_threshold must be set together.")
+        if subtask_vote_window is not None:
+            if type(subtask_vote_window) is not int or subtask_vote_window < 2:
+                raise ValueError("subtask_vote_window must be an integer of at least 2.")
+            if type(subtask_vote_threshold) is not int or not 2 <= subtask_vote_threshold <= subtask_vote_window:
+                raise ValueError("subtask_vote_threshold must be between 2 and subtask_vote_window.")
+            if subtask_vote_threshold * 2 <= subtask_vote_window:
+                raise ValueError("subtask_vote_threshold must be a strict majority of subtask_vote_window.")
         conditioning = getattr(model, "subtask_action_conditioning", "task_and_subtask")
         if conditioning != tokenizer_transform.subtask_action_conditioning:
             raise ValueError("Model and tokenizer subtask_action_conditioning must match.")
@@ -44,6 +57,8 @@ class SubtaskPolicy(Policy):
         self._pad = transforms_lib.PadStatesAndActions(model.action_dim)
         self._interval = subtask_interval
         self._temperature = subtask_temperature
+        self._vote_window = subtask_vote_window
+        self._vote_threshold = subtask_vote_threshold
         self._generate = (
             model.generate_subtask
             if self._is_pytorch_model
@@ -57,6 +72,14 @@ class SubtaskPolicy(Policy):
             "subtask_interval": subtask_interval,
             "subtask_action_conditioning": conditioning,
         }
+        if self._vote_window is not None:
+            self._metadata.update(
+                {
+                    "subtask_vote_mode": "temporal_majority",
+                    "subtask_vote_window": self._vote_window,
+                    "subtask_vote_threshold": self._vote_threshold,
+                }
+            )
         self.reset()
 
     def reset(self):
@@ -65,8 +88,12 @@ class SubtaskPolicy(Policy):
 
     def reset_subtask(self):
         self._cached_tokens = None
+        self._cached_text = None
         self._last_prompt = None
         self._calls_since_generation = 0
+        self._request_index = 0
+        self._next_vote_id = 0
+        self._vote_history = deque(maxlen=self._vote_window)
 
     @staticmethod
     def _pack(inputs, arrays):
@@ -75,6 +102,57 @@ class SubtaskPolicy(Policy):
             zip(("tokenized_prompt", "tokenized_prompt_mask", "token_ar_mask", "token_loss_mask"), arrays, strict=True)
         )
         return result
+
+    @staticmethod
+    def _normalize_subtask(text: str) -> str:
+        normalized = " ".join(text.split())
+        if not normalized:
+            raise RuntimeError("Subtask generation produced empty text.")
+        return normalized
+
+    def _apply_temporal_vote(self, candidate_tokens: np.ndarray, candidate_text: str) -> tuple[np.ndarray, str, dict]:
+        committed_before = self._cached_text
+        if committed_before is None:
+            self._cached_tokens = candidate_tokens.copy()
+            self._cached_text = candidate_text
+            history = [candidate_text]
+            counts = {candidate_text: 1}
+            accepted = True
+            reason = "initial"
+        else:
+            self._vote_history.append((candidate_text, candidate_tokens.copy()))
+            history = [text for text, _ in self._vote_history]
+            counts = dict(sorted(Counter(history).items()))
+            winner = next((text for text, count in counts.items() if count >= self._vote_threshold), None)
+            accepted = winner is not None and winner != committed_before
+            if accepted:
+                winner_tokens = next(tokens for text, tokens in reversed(self._vote_history) if text == winner)
+                self._cached_tokens = winner_tokens.copy()
+                self._cached_text = winner
+                reason = "majority_switch"
+            elif winner == committed_before:
+                reason = "current_majority"
+            else:
+                reason = "no_majority"
+
+        event = {
+            "vote_id": self._next_vote_id,
+            "request_index": self._request_index,
+            "candidate": candidate_text,
+            "committed_before": committed_before,
+            "committed_after": self._cached_text,
+            "accepted": accepted,
+            "reason": reason,
+            "history": history,
+            "counts": counts,
+            "window": self._vote_window,
+            "threshold": self._vote_threshold,
+            "interval": self._interval,
+        }
+        self._next_vote_id += 1
+        if accepted:
+            self._vote_history.clear()
+        return self._cached_tokens, "generated" if accepted else "cached", event
 
     def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:
         result = self._infer_candidates(obs, 1, noise=noise)
@@ -105,12 +183,15 @@ class SubtaskPolicy(Policy):
         state = inputs["state"] if self._tokenizer_transform.discrete_state_input else None
         limit = self._tokenizer_transform.max_subtask_len
         generation_ms = 0.0
+        vote_event = None
         if "subtask" in inputs:
-            # Keep explicit subtask control, including oracle evaluation, separate
-            # from generation. It cannot seed a later autonomous cached subtask.
+            if self._vote_window is not None:
+                raise ValueError("Temporal subtask voting cannot be combined with an explicit subtask.")
             self._cached_tokens = None
+            self._cached_text = None
             prepared = self._tokenizer_transform(inputs)
             label_tokens = prepared["tokenized_prompt"][prepared["token_loss_mask"]]
+            label_text = self._normalize_subtask(self._tokenizer.decode_subtask(label_tokens))
             source = "provided"
         else:
             if self._cached_tokens is None or self._calls_since_generation >= self._interval:
@@ -140,21 +221,37 @@ class SubtaskPolicy(Policy):
                 generation_ms = (time.monotonic() - generation_start) * 1000
                 if not bool(result["valid_prefix"][0]) or not bool(result["has_eos"][0]):
                     self._cached_tokens = None
+                    self._cached_text = None
                     raise RuntimeError(
                         "Subtask generation did not finish with EOS within max_subtask_len; no actions were sampled. "
                         "Check the subtask-trained checkpoint and token budget."
                     )
-                label_tokens = result["tokens"][0, : int(result["lengths"][0])]
-                # Validate before committing any cache state.
-                arrays = self._tokenizer.tokenize_subtask_tokens(prompt, label_tokens, state, max_subtask_len=limit)
-                self._cached_tokens = label_tokens.copy()
+                candidate_tokens = result["tokens"][0, : int(result["lengths"][0])]
+                candidate_text = self._normalize_subtask(self._tokenizer.decode_subtask(candidate_tokens))
+                self._tokenizer.tokenize_subtask_tokens(prompt, candidate_tokens, state, max_subtask_len=limit)
                 self._calls_since_generation = 0
-                source = "generated"
-                logging.info("Generated subtask: %s", self._tokenizer.decode_subtask(label_tokens))
+                logging.info("Generated subtask: %s", candidate_text)
+                if self._vote_window is None:
+                    self._cached_tokens = candidate_tokens.copy()
+                    self._cached_text = candidate_text
+                    label_tokens = self._cached_tokens
+                    source = "generated"
+                else:
+                    label_tokens, source, vote_event = self._apply_temporal_vote(candidate_tokens, candidate_text)
+                    logging.info(
+                        "Subtask vote id=%d candidate=%r committed=%r accepted=%s history=%s",
+                        vote_event["vote_id"],
+                        vote_event["candidate"],
+                        vote_event["committed_after"],
+                        vote_event["accepted"],
+                        vote_event["history"],
+                    )
+                arrays = self._tokenizer.tokenize_subtask_tokens(prompt, label_tokens, state, max_subtask_len=limit)
             else:
                 label_tokens = self._cached_tokens
                 arrays = self._tokenizer.tokenize_subtask_tokens(prompt, label_tokens, state, max_subtask_len=limit)
                 source = "cached"
+            label_text = self._cached_text
             prepared = self._pack(inputs, arrays)
         # Rebuild from current state and the exact label on every action request,
         # including cached and externally provided subtasks. No high-level KV
@@ -162,11 +259,13 @@ class SubtaskPolicy(Policy):
         prepared.update(self._tokenizer_transform.action_fields(label_tokens, state))
         outputs = [super(SubtaskPolicy, self).infer(self._pad(prepared), noise=noise) for _ in range(count)]
         self._calls_since_generation += 1
+        self._request_index += 1
         result = outputs[0]
         result["actions"] = np.stack([item["actions"] for item in outputs])
-        # Add text AFTER action-only output adapters so it survives B1KOutputs.
-        result["subtask"] = self._tokenizer.decode_subtask(label_tokens)
+        result["subtask"] = label_text
         result["subtask_source"] = source
+        if vote_event is not None:
+            result["subtask_vote"] = vote_event
         result["policy_timing"]["infer_ms"] = sum(item["policy_timing"]["infer_ms"] for item in outputs)
         result["policy_timing"]["subtask_ms"] = generation_ms
         result["policy_timing"]["total_ms"] = (time.monotonic() - started) * 1000

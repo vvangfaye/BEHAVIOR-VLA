@@ -5,8 +5,10 @@ Input truth must be measured by a training-data replay/annotation process.
 """
 from pathlib import Path
 import json
+import tempfile
 import numpy as np
 from .goals import compile_bddl
+from .data import merge_manifests, write_record_archive
 
 
 def export_episode(episode, bddl, output, *, group_id, features, action_spec,
@@ -19,6 +21,10 @@ def export_episode(episode, bddl, output, *, group_id, features, action_spec,
     with np.load(episode, allow_pickle=False) as data:
         state, actions, truth, visibility = [data[k] for k in
                                             ("proprio", "actions", "truth", "visibility")]
+        if "source" in data and str(data["source"].item()) != source:
+            raise ValueError("Episode source disagrees with requested training source")
+        if "group_id" in data and str(data["group_id"].item()) != group_id:
+            raise ValueError("Episode group provenance disagrees with --group-id")
         if "rgb" in data:
             rgb = data["rgb"]
             if rgb.ndim != 5 or rgb.shape[1] != 3: raise ValueError("rgb must have shape [T+1,3,H,W,3]")
@@ -46,22 +52,49 @@ def export_episode(episode, bddl, output, *, group_id, features, action_spec,
     # Match inference: one recurrent update per H-action decision, not each frame.
     decision_times = list(range(0, steps - horizon + 1, horizon))
     cache = {t: features.encode_images(tuple(x[t] for x in cameras)) for t in decision_times}
-    rows = []
+    rows, records = [], []
     import hashlib
     episode_id = hashlib.sha256(f"{group_id}:{Path(episode).name}".encode()).hexdigest()[:20]
+    archive_name = f"{episode_id}.npz"
     for j, t in enumerate(decision_times):
         if j < history - 1: continue  # No repeated padding pretending to be evidence.
         times = decision_times[j - history + 1:j + 1]
         rid = f"{episode_id}-{t:07d}"
-        np.savez_compressed(root / f"{rid}.npz", visual=np.stack([cache[s] for s in times]),
-                            proprio=state[times], queries=queries, actions=actions[None, t:t + horizon],
-                            truth=truth[times], visibility=visibility[times],
-                            future_truth=truth[None, t + horizon],
-                            atom_keys=np.array([a.key for a in program.atoms]))
+        record_index = len(records)
+        records.append({"visual": np.stack([cache[s] for s in times]),
+                        "proprio": state[times], "actions": actions[None, t:t + horizon],
+                        "truth": truth[times], "visibility": visibility[times],
+                        "future_truth": truth[None, t + horizon]})
         rows.append({"id": rid, "group_id": group_id, "source": source,
-                     "record": f"{rid}.npz", "bddl": task_path.name,
+                     "record": archive_name, "record_index": record_index, "bddl": task_path.name,
                      "feature_id": features.feature_id, "action_spec": action_spec})
     if not rows: raise ValueError("Episode is too short for this history and horizon")
+    write_record_archive(root / archive_name, records, queries,
+                         np.array([a.key for a in program.atoms]))
     manifest = root / f"{episode_id}.jsonl"
     manifest.write_text("".join(json.dumps(row) + "\n" for row in rows))
     return str(manifest)
+
+
+def export_batch(spec, output, *, features, horizon=16, history=4):
+    """Export an explicit JSON/JSONL list of approved episode NPZ files and seal it."""
+    spec_path = Path(spec).resolve()
+    text = spec_path.read_text()
+    items = json.loads(text) if spec_path.suffix == ".json" else [json.loads(line) for line in text.splitlines() if line.strip()]
+    if not isinstance(items, list) or not items:
+        raise ValueError("Batch specification must contain at least one episode")
+    required = {"episode", "bddl", "group_id", "action_spec", "source"}
+    manifests = []
+    with tempfile.TemporaryDirectory(prefix="goalkeeper-export-") as temporary:
+        for index, item in enumerate(items):
+            if not isinstance(item, dict) or not required <= item.keys():
+                raise ValueError(f"Batch item {index} is missing: {required - set(item) if isinstance(item, dict) else required}")
+            if item["source"] not in ("training_demo", "training_rollout"):
+                raise ValueError("Batch export accepts approved training sources only")
+            episode = (spec_path.parent / item["episode"]).resolve()
+            bddl = (spec_path.parent / item["bddl"]).resolve()
+            manifests.append(export_episode(
+                episode, bddl, Path(temporary) / f"episode-{index:06d}",
+                group_id=item["group_id"], features=features, action_spec=item["action_spec"],
+                source=item["source"], horizon=horizon, history=history))
+        return merge_manifests(manifests, output, seal=True)

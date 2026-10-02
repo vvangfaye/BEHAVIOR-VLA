@@ -33,9 +33,14 @@ def test_episode_export_aligns_labels_to_executed_action_prefix(tmp_path):
     np.savez_compressed(episode, rgb=rgb, proprio=np.arange(steps + 1)[:, None].astype(np.float32),
                         actions=np.arange(steps)[:, None].astype(np.float32), truth=truth,
                         visibility=np.ones_like(truth), atom_keys=np.array([a.key for a in program.atoms]))
-    manifest = export_episode(episode, bddl, tmp_path / "out", group_id="training-scene-initial-state-0",
+    output = tmp_path / "out"
+    manifest = export_episode(episode, bddl, output, group_id="training-scene-initial-state-0",
                               features=Features(), action_spec="test", horizon=4, history=2)
-    records = [load_record(row) for row in load_manifest(manifest)]
+    rows = load_manifest(manifest)
+    assert [row["record_index"] for row in rows] == [0, 1]
+    assert len(list(output.glob("*.npz"))) == 1
+    assert len({row["record"] for row in rows}) == 1
+    records = [load_record(row) for row in rows]
     assert len(records) == 2
     first = records[0]
     assert first["proprio"][:, 0].tolist() == [0, 4]

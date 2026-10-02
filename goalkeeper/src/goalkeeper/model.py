@@ -109,7 +109,7 @@ def supervision_loss(out, labels, ranking_weight=0.2, preservation_penalty=0.5):
     visibility = labels["visibility"]
     current = labels["truth"]
     future = labels["future_truth"]
-    valid_current = atom_mask[:, None] & (visibility >= 0.5)
+    valid_current = atom_mask[:, None].expand_as(current)
     valid_visibility = atom_mask[:, None] & (visibility >= 0)
     candidate_mask = labels["candidate_mask"].bool()
     valid_future = atom_mask[:, None] & candidate_mask[:, :, None]

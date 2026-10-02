@@ -98,6 +98,163 @@ def test_policy_auto_provided_refresh_reset_and_missing_eos(model_setup, tokeniz
     assert "subtask" not in source
 
 
+def test_temporal_subtask_voting_switches_only_after_majority(model_setup, tokenizer, monkeypatch):
+    model, obs, _, _ = model_setup
+    model.subtask_action_conditioning = "subtask_only"
+    transform = transforms.TokenizeSubtaskPrompt(
+        tokenizer, max_subtask_len=8, subtask_action_conditioning="subtask_only"
+    )
+    policy = SubtaskPolicy(
+        model,
+        tokenizer_transform=transform,
+        subtask_interval=2,
+        subtask_vote_window=3,
+        subtask_vote_threshold=2,
+        output_transforms=[B1KOutputs(action_dim=4)],
+        sample_kwargs={"num_steps": 2},
+        rng=jax.random.key(3),
+    )
+
+    def tokens(text):
+        arrays = tokenizer.tokenize_subtask_training("turn on radio", text, max_subtask_len=8)
+        return arrays[0][arrays[3]]
+
+    press_tokens = tokens("press radio")
+    move_tokens = tokens("move to radio")
+    generated = iter((press_tokens, move_tokens, move_tokens))
+    action_inputs = []
+
+    def generate(key, observation, **kwargs):
+        ids = next(generated)
+        return {
+            "tokens": np.pad(ids, (0, 8 - len(ids)))[None],
+            "lengths": np.array([len(ids)]),
+            "has_eos": np.array([True]),
+            "valid_prefix": np.array([True]),
+        }
+
+    def sample(key, observation, **kwargs):
+        action_inputs.append(observation)
+        return jnp.zeros((1, 2, 4))
+
+    monkeypatch.setattr(policy, "_generate", generate)
+    monkeypatch.setattr(policy, "_sample_actions", sample)
+    source = simple_input(obs)
+    press_action_tokens = transform({**source, "subtask": "press radio"})["action_tokenized_prompt"]
+    move_action_tokens = transform({**source, "subtask": "move to radio"})["action_tokenized_prompt"]
+
+    initial = policy.infer(source)
+    assert initial["subtask"] == "press radio"
+    assert initial["subtask_source"] == "generated"
+    assert initial["subtask_vote"] == {
+        "vote_id": 0,
+        "request_index": 0,
+        "candidate": "press radio",
+        "committed_before": None,
+        "committed_after": "press radio",
+        "accepted": True,
+        "reason": "initial",
+        "history": ["press radio"],
+        "counts": {"press radio": 1},
+        "window": 3,
+        "threshold": 2,
+        "interval": 2,
+    }
+    assert "subtask_vote" not in policy.infer(source)
+
+    rejected = policy.infer(source)
+    assert rejected["subtask"] == "press radio"
+    assert rejected["subtask_source"] == "cached"
+    assert rejected["subtask_vote"]["candidate"] == "move to radio"
+    assert rejected["subtask_vote"]["accepted"] is False
+    assert rejected["subtask_vote"]["reason"] == "no_majority"
+    np.testing.assert_array_equal(action_inputs[-1].action_tokenized_prompt[0], press_action_tokens)
+    assert "subtask_vote" not in policy.infer(source)
+
+    accepted = policy.infer(source)
+    assert accepted["subtask"] == "move to radio"
+    assert accepted["subtask_source"] == "generated"
+    assert accepted["subtask_vote"]["accepted"] is True
+    assert accepted["subtask_vote"]["reason"] == "majority_switch"
+    assert accepted["subtask_vote"]["history"] == ["move to radio", "move to radio"]
+    assert accepted["subtask_vote"]["request_index"] == 4
+    np.testing.assert_array_equal(action_inputs[-1].action_tokenized_prompt[0], move_action_tokens)
+    assert not policy._vote_history
+
+
+def test_temporal_subtask_voting_uses_sliding_window_and_resets(model_setup, tokenizer, monkeypatch):
+    model, obs, _, _ = model_setup
+    transform = transforms.TokenizeSubtaskPrompt(tokenizer, max_subtask_len=8)
+    policy = SubtaskPolicy(
+        model,
+        tokenizer_transform=transform,
+        subtask_interval=1,
+        subtask_vote_window=3,
+        subtask_vote_threshold=2,
+        sample_kwargs={"num_steps": 2},
+        rng=jax.random.key(3),
+    )
+
+    def tokens(text):
+        arrays = tokenizer.tokenize_subtask_training("turn on radio", text, max_subtask_len=8)
+        return arrays[0][arrays[3]]
+
+    other_tokens = tokens("look at radio")
+    other_text = policy._normalize_subtask(tokenizer.decode_subtask(other_tokens))
+    generated = iter(
+        (
+            tokens("press radio"),
+            tokens("move to radio"),
+            other_tokens,
+            tokens("move to radio"),
+            tokens("press radio"),
+        )
+    )
+
+    def generate(key, observation, **kwargs):
+        ids = next(generated)
+        return {
+            "tokens": np.pad(ids, (0, 8 - len(ids)))[None],
+            "lengths": np.array([len(ids)]),
+            "has_eos": np.array([True]),
+            "valid_prefix": np.array([True]),
+        }
+
+    monkeypatch.setattr(policy, "_generate", generate)
+    source = simple_input(obs)
+    policy.infer(source)
+    assert policy.infer(source)["subtask"] == "press radio"
+    no_majority = policy.infer(source)
+    assert no_majority["subtask"] == "press radio"
+    assert no_majority["subtask_vote"]["history"] == ["move to radio", other_text]
+    switched = policy.infer(source)
+    assert switched["subtask"] == "move to radio"
+    assert switched["subtask_vote"]["history"] == ["move to radio", other_text, "move to radio"]
+
+    policy.reset()
+    reset_result = policy.infer(source)
+    assert reset_result["subtask"] == "press radio"
+    assert reset_result["subtask_vote"]["vote_id"] == 0
+    assert reset_result["subtask_vote"]["request_index"] == 0
+    with pytest.raises(ValueError, match="explicit subtask"):
+        policy.infer({**source, "subtask": "move to radio"})
+
+
+@pytest.mark.parametrize(
+    ("window", "threshold"),
+    [(3, None), (None, 2), (1, 1), (3, 1), (3, 4), (4, 2), (True, 2), (3, True)],
+)
+def test_temporal_subtask_voting_rejects_invalid_contract(model_setup, tokenizer, window, threshold):
+    model, _, _, _ = model_setup
+    with pytest.raises(ValueError, match="subtask_vote"):
+        SubtaskPolicy(
+            model,
+            tokenizer_transform=transforms.TokenizeSubtaskPrompt(tokenizer, max_subtask_len=8),
+            subtask_vote_window=window,
+            subtask_vote_threshold=threshold,
+        )
+
+
 @pytest.mark.parametrize("conditioning", ["task_and_subtask", "subtask_only"])
 @pytest.mark.parametrize("memory_enabled", [False, True])
 def test_factory_uses_autonomous_policy_with_b1k_adapters_and_real_generation(
@@ -131,8 +288,18 @@ def test_factory_uses_autonomous_policy_with_b1k_adapters_and_real_generation(
     # The service reconstructs memory settings from checkpoint metadata.
     config = dataclasses.replace(config_lib.get_config("pi05_b1k"),
                                  model=dataclasses.replace(model_config, framesamp_modul=False))
+    voting_kwargs = (
+        {"subtask_interval": 2, "subtask_vote_window": 3, "subtask_vote_threshold": 2}
+        if conditioning == "subtask_only"
+        else {}
+    )
     policy = policy_config.create_trained_policy(
-        config, tmp_path, norm_stats={}, default_prompt="turn on radio", sample_kwargs={"num_steps": 2}
+        config,
+        tmp_path,
+        norm_stats={},
+        default_prompt="turn on radio",
+        sample_kwargs={"num_steps": 2},
+        **voting_kwargs,
     )
     assert isinstance(policy, SubtaskPolicy)
     robot = ROBOT_REGISTRY["b1k/R1Pro"]
@@ -152,6 +319,9 @@ def test_factory_uses_autonomous_policy_with_b1k_adapters_and_real_generation(
     assert policy.metadata["subtask_action_conditioning"] == conditioning
     assert policy.metadata["subtask_interval"] == (2 if conditioning == "subtask_only" else 1)
     if conditioning == "subtask_only":
+        assert policy.metadata["subtask_vote_mode"] == "temporal_majority"
+        assert policy.metadata["subtask_vote_window"] == 3
+        assert policy.metadata["subtask_vote_threshold"] == 2
         with pytest.raises(ValueError, match="disagrees"):
             policy_config.create_trained_policy(
                 config, tmp_path, norm_stats={}, subtask_action_conditioning="task_and_subtask"
@@ -255,6 +425,8 @@ def test_b1k_wrapper_keeps_text_and_resets_on_instruction_change(tmp_path):
             result = {"actions": np.zeros((2, 23)), "subtask": obs.get("subtask", "press radio")}
             if obs.get("subtask") != "legacy override":
                 result["subtask_source"] = "provided" if "subtask" in obs else "generated"
+            if "subtask" not in obs:
+                result["subtask_vote"] = {"vote_id": len(self.calls) - 1, "candidate": "press radio"}
             return result
 
         def reset(self):
@@ -269,8 +441,12 @@ def test_b1k_wrapper_keeps_text_and_resets_on_instruction_change(tmp_path):
     wrapper.act(source)
     assert wrapper.last_subtasks == {0: "press radio"}
     assert wrapper.last_subtask_sources == {0: "generated"}
+    assert wrapper.last_subtask_votes == {
+        0: {"vote_id": 0, "candidate": "press radio", "batch_index": 0, "action_horizon": 2}
+    }
     wrapper.act(source)
     assert len(policy.calls) == 1
+    assert wrapper.last_subtask_votes == {}
     wrapper.act({**source, "subtask": "move to radio"})
     assert policy.calls[-1]["subtask"] == "move to radio"
     assert wrapper.last_subtasks == {0: "move to radio"}
@@ -291,6 +467,7 @@ def test_server_protocol_preserves_subtasks_and_episode_reset():
         def __init__(self):
             self.last_subtasks = {0: "press radio"}
             self.last_subtask_sources = {0: "provided"}
+            self.last_subtask_votes = {0: {"vote_id": 0, "candidate": "press radio"}}
             self.resets = 0
 
         def act(self, obs):
@@ -299,6 +476,7 @@ def test_server_protocol_preserves_subtasks_and_episode_reset():
         def reset(self):
             self.last_subtasks = {}
             self.last_subtask_sources = {}
+            self.last_subtask_votes = {}
             self.resets += 1
 
     class Socket:
@@ -328,6 +506,7 @@ def test_server_protocol_preserves_subtasks_and_episode_reset():
     assert socket.sent[1]["action"].shape == (23,)
     assert socket.sent[1]["subtasks"] == ["press radio"]
     assert socket.sent[1]["subtask_sources"] == ["provided"]
+    assert socket.sent[1]["subtask_votes"] == [{"vote_id": 0, "candidate": "press radio"}]
     assert policy.last_subtasks == {}
     assert policy.last_subtask_sources == {}
     assert policy.resets == 1
@@ -388,6 +567,10 @@ def test_b1k_server_cli_exposes_subtask_settings():
             "2",
             "--subtask-temperature",
             "0.2",
+            "--subtask-vote-window",
+            "3",
+            "--subtask-vote-threshold",
+            "2",
             "--server-token",
             "test-token",
         ],
@@ -395,4 +578,6 @@ def test_b1k_server_cli_exposes_subtask_settings():
     assert args.subtask_prediction
     assert args.subtask_interval == 2
     assert args.subtask_temperature == 0.2
+    assert args.subtask_vote_window == 3
+    assert args.subtask_vote_threshold == 2
     assert args.server_token == "test-token"

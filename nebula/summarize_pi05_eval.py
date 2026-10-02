@@ -2,6 +2,7 @@
 import argparse
 import json
 import math
+from collections import Counter, deque
 from pathlib import Path
 
 STATE_MACHINE_V1 = "state_machine_v1"
@@ -14,6 +15,7 @@ LEGACY_SEGMENTS_SHA256 = (
 TRAINING_ANNOTATION_SHA256 = (
     "870086137b5fac4ff8a701e6e539cdc99ee43d3efacb81028a2ae0b4f78fff2d"
 )
+SELECTOR_STALL_STEPS = 2048
 
 
 def final_q_score(result: dict) -> float:
@@ -115,7 +117,159 @@ def _nonempty_text(value: object, name: str) -> str:
     return value.strip()
 
 
-def validate_selector_rollout(result: dict) -> dict:
+def _positive_int(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def validate_subtask_voting_rollout(
+    result: dict,
+    *,
+    expected_action_horizon: int,
+    expected_interval: int,
+    expected_window: int,
+    expected_threshold: int,
+) -> dict:
+    conditioning = result.get("conditioning")
+    if not isinstance(conditioning, dict):
+        raise ValueError("conditioning must be an object")
+    voting = conditioning.get("subtask_voting")
+    expected_voting = {
+        "mode": "temporal_majority",
+        "action_horizon": expected_action_horizon,
+        "interval": expected_interval,
+        "window": expected_window,
+        "threshold": expected_threshold,
+        "oracle": False,
+        "privileged": False,
+        "official_benchmark": False,
+        "inference_ablation": True,
+    }
+    if voting != expected_voting:
+        raise ValueError(f"conditioning.subtask_voting is {voting!r}, expected {expected_voting!r}")
+    if conditioning.get("oracle") is not False or conditioning.get("privileged") is not False:
+        raise ValueError("temporal subtask voting must be non-oracle and non-privileged")
+    if result.get("selector_events") or result.get("selector_summary"):
+        raise ValueError("temporal subtask voting rollout must not contain selector diagnostics")
+
+    steps = _positive_int(result.get("steps"), "steps")
+    events = result.get("subtask_vote_events")
+    if not isinstance(events, list) or not events:
+        raise ValueError("subtask_vote_events must be a nonempty list")
+    expected_votes = (steps - 1) // (expected_action_horizon * expected_interval) + 1
+    if len(events) != expected_votes:
+        raise ValueError(
+            f"subtask_vote_events contains {len(events)} votes, expected {expected_votes} for {steps} steps"
+        )
+
+    previous_committed = None
+    accepted_texts = []
+    reasons = Counter()
+    candidates = Counter()
+    rolling_history = deque(maxlen=expected_window)
+    for index, event in enumerate(events):
+        if not isinstance(event, dict):
+            raise ValueError("each subtask vote event must be an object")
+        vote_id = _nonnegative_int(event.get("vote_id"), "subtask vote id")
+        request_index = _nonnegative_int(event.get("request_index"), "subtask vote request_index")
+        step = _nonnegative_int(event.get("step"), "subtask vote step")
+        if vote_id != index:
+            raise ValueError(f"subtask vote id is {vote_id}, expected {index}")
+        expected_request_index = index * expected_interval
+        if request_index != expected_request_index:
+            raise ValueError(
+                f"subtask vote request_index is {request_index}, expected {expected_request_index}"
+            )
+        expected_step = request_index * expected_action_horizon
+        if step != expected_step:
+            raise ValueError(f"subtask vote step is {step}, expected {expected_step}")
+        if event.get("action_horizon") != expected_action_horizon:
+            raise ValueError("subtask vote action_horizon does not match expected contract")
+        if event.get("interval") != expected_interval:
+            raise ValueError("subtask vote interval does not match expected contract")
+        if event.get("window") != expected_window:
+            raise ValueError("subtask vote window does not match expected contract")
+        if event.get("threshold") != expected_threshold:
+            raise ValueError("subtask vote threshold does not match expected contract")
+        if event.get("batch_index") != 0:
+            raise ValueError("subtask vote batch_index must be 0")
+        candidate = _nonempty_text(event.get("candidate"), "subtask vote candidate")
+        committed_before = event.get("committed_before")
+        if committed_before is not None:
+            committed_before = _nonempty_text(committed_before, "subtask vote committed_before")
+        committed_after = _nonempty_text(event.get("committed_after"), "subtask vote committed_after")
+        if committed_before != previous_committed:
+            raise ValueError("subtask vote committed_before does not match the previous decision")
+
+        rolling_history.append(candidate)
+        expected_history = list(rolling_history)
+        history = event.get("history")
+        if history != expected_history:
+            raise ValueError(f"subtask vote history is {history!r}, expected {expected_history!r}")
+        counts = dict(sorted(Counter(expected_history).items()))
+        if event.get("counts") != counts:
+            raise ValueError("subtask vote counts do not match reconstructed history")
+        accepted = event.get("accepted")
+        if not isinstance(accepted, bool):
+            raise ValueError("subtask vote accepted must be a boolean")
+        reason = _nonempty_text(event.get("reason"), "subtask vote reason")
+        winner = next((text for text, count in counts.items() if count >= expected_threshold), None)
+        if index == 0:
+            if not accepted or reason != "initial" or committed_before is not None or committed_after != candidate:
+                raise ValueError("first subtask vote must be an accepted initial decision")
+        else:
+            expected_accepted = winner is not None and winner != committed_before
+            expected_reason = "majority_switch" if expected_accepted else "current_majority" if winner else "no_majority"
+            expected_committed = winner if expected_accepted else committed_before
+            if accepted != expected_accepted or reason != expected_reason or committed_after != expected_committed:
+                raise ValueError("subtask vote decision does not match reconstructed temporal majority")
+        if accepted:
+            accepted_texts.append(committed_after)
+            rolling_history.clear()
+        reasons[reason] += 1
+        candidates[candidate] += 1
+        previous_committed = committed_after
+
+    summary = result.get("subtask_vote_summary")
+    expected_summary = {
+        "mode": "temporal_majority",
+        "action_horizon": expected_action_horizon,
+        "interval": expected_interval,
+        "window": expected_window,
+        "threshold": expected_threshold,
+        "total_votes": len(events),
+        "accepted_switches": reasons.get("majority_switch", 0),
+        "rejected_votes": sum(
+            count for reason, count in reasons.items() if reason not in {"initial", "majority_switch"}
+        ),
+        "reasons": dict(sorted(reasons.items())),
+        "candidates": dict(sorted(candidates.items())),
+    }
+    if summary != expected_summary:
+        raise ValueError(f"subtask_vote_summary is {summary!r}, expected {expected_summary!r}")
+
+    generated_texts = [
+        _nonempty_text(event.get("subtask"), "generated subtask event")
+        for event in result.get("subtask_events", [])
+        if event.get("source") == "generated"
+    ]
+    if generated_texts != accepted_texts:
+        raise ValueError(
+            f"generated subtask decisions {generated_texts!r} do not match accepted votes {accepted_texts!r}"
+        )
+    return {
+        "total_votes": len(events),
+        "accepted_switches": reasons.get("majority_switch", 0),
+        "rejected_votes": expected_summary["rejected_votes"],
+        "reasons": dict(sorted(reasons.items())),
+        "candidates": dict(sorted(candidates.items())),
+    }
+
+
+def validate_selector_rollout(
+    result: dict, expected_debounce_refreshes: int | None = None
+) -> dict:
     conditioning = result.get("conditioning")
     if not isinstance(conditioning, dict):
         raise ValueError("conditioning must be an object")
@@ -170,6 +324,49 @@ def validate_selector_rollout(result: dict) -> dict:
     if selector_summary.get("task_name") != result["task"]:
         raise ValueError("selector_summary.task_name must match the rollout task")
 
+    debounce_refreshes = selector_summary.get("debounce_refreshes")
+    stall_steps = selector_summary.get("stall_steps")
+    conditioning_debounce = conditioning.get("selector_debounce_refreshes")
+    conditioning_stall_steps = conditioning.get("selector_stall_steps")
+    selector_contract_values = (
+        debounce_refreshes,
+        stall_steps,
+        conditioning_debounce,
+        conditioning_stall_steps,
+    )
+    if expected_debounce_refreshes is not None or any(
+        value is not None for value in selector_contract_values
+    ):
+        debounce_refreshes = _positive_int(
+            debounce_refreshes, "selector_summary.debounce_refreshes"
+        )
+        stall_steps = _positive_int(stall_steps, "selector_summary.stall_steps")
+        conditioning_debounce = _positive_int(
+            conditioning_debounce, "conditioning.selector_debounce_refreshes"
+        )
+        conditioning_stall_steps = _positive_int(
+            conditioning_stall_steps, "conditioning.selector_stall_steps"
+        )
+        if conditioning_debounce != debounce_refreshes:
+            raise ValueError(
+                "conditioning.selector_debounce_refreshes must match "
+                "selector_summary.debounce_refreshes"
+            )
+        if conditioning_stall_steps != stall_steps:
+            raise ValueError(
+                "conditioning.selector_stall_steps must match selector_summary.stall_steps"
+            )
+    if expected_debounce_refreshes is not None:
+        if debounce_refreshes != expected_debounce_refreshes:
+            raise ValueError(
+                f"selector_summary.debounce_refreshes is {debounce_refreshes!r}, "
+                f"expected {expected_debounce_refreshes!r}"
+            )
+        if stall_steps != SELECTOR_STALL_STEPS:
+            raise ValueError(
+                f"selector_summary.stall_steps is {stall_steps!r}, expected {SELECTOR_STALL_STEPS!r}"
+            )
+
     validated_action_requests = _nonnegative_int(
         selector_summary.get("validated_action_requests"),
         "selector_summary.validated_action_requests",
@@ -212,6 +409,8 @@ def validate_selector_rollout(result: dict) -> dict:
         "entered": entered,
         "completed": completed,
         "stalled": stalled,
+        "debounce_refreshes": debounce_refreshes,
+        "stall_steps": stall_steps,
     }
 
 
@@ -267,6 +466,7 @@ def load_worker_statuses(
     require_videos: bool,
     require_subtask_events: bool,
     require_selector_events: bool,
+    require_subtask_vote_events: bool = False,
 ) -> tuple[list[dict], list[str], list[str], list[dict], list[dict]]:
     if expected_workers is None:
         return [], [], [], [], []
@@ -316,6 +516,9 @@ def load_worker_statuses(
                     "completed_videos": per_worker if require_videos else None,
                     "rollouts_with_subtask_events": per_worker
                     if require_subtask_events
+                    else None,
+                    "rollouts_with_subtask_vote_events": per_worker
+                    if require_subtask_vote_events
                     else None,
                     "rollouts_with_selector_events": per_worker
                     if require_selector_events
@@ -401,6 +604,12 @@ def main() -> None:
     parser.add_argument("--require-subtask-events", action="store_true")
     parser.add_argument("--require-generated-subtasks", action="store_true")
     parser.add_argument("--require-selector-events", action="store_true")
+    parser.add_argument("--expected-selector-debounce-refreshes", type=int)
+    parser.add_argument("--require-subtask-vote-events", action="store_true")
+    parser.add_argument("--expected-subtask-vote-action-horizon", type=int)
+    parser.add_argument("--expected-subtask-vote-interval", type=int)
+    parser.add_argument("--expected-subtask-vote-window", type=int)
+    parser.add_argument("--expected-subtask-vote-threshold", type=int)
     parser.add_argument("--require-complete", action="store_true")
     args = parser.parse_args()
 
@@ -408,6 +617,34 @@ def main() -> None:
         parser.error(
             "--require-generated-subtasks and --require-selector-events are mutually exclusive"
         )
+    if args.require_subtask_vote_events and args.require_selector_events:
+        parser.error("subtask voting and selector validation are mutually exclusive")
+    expected_vote_values = (
+        args.expected_subtask_vote_action_horizon,
+        args.expected_subtask_vote_interval,
+        args.expected_subtask_vote_window,
+        args.expected_subtask_vote_threshold,
+    )
+    if args.require_subtask_vote_events:
+        if any(value is None for value in expected_vote_values):
+            parser.error("subtask voting requires expected action horizon, interval, window, and threshold")
+        if any(value < 1 for value in expected_vote_values):
+            parser.error("expected subtask voting values must be positive")
+        if args.expected_subtask_vote_window < 2 or not (
+            2 <= args.expected_subtask_vote_threshold <= args.expected_subtask_vote_window
+        ):
+            parser.error("invalid expected subtask voting window or threshold")
+        if args.expected_subtask_vote_threshold * 2 <= args.expected_subtask_vote_window:
+            parser.error("expected subtask voting threshold must be a strict majority")
+    elif any(value is not None for value in expected_vote_values):
+        parser.error("expected subtask voting values require --require-subtask-vote-events")
+    if args.expected_selector_debounce_refreshes is not None:
+        if args.expected_selector_debounce_refreshes < 1:
+            parser.error("--expected-selector-debounce-refreshes must be positive")
+        if not args.require_selector_events:
+            parser.error(
+                "--expected-selector-debounce-refreshes requires --require-selector-events"
+            )
     if args.expected_task and args.expected_tasks:
         parser.error("--expected-task and --expected-tasks are mutually exclusive")
     expected_task_value = args.expected_tasks or args.expected_task
@@ -531,11 +768,23 @@ def main() -> None:
     invalid_selector_rollouts = []
     selector_total_recoveries = 0
     selector_total_stalls = 0
+    selector_debounce_refreshes: set[int] = set()
+    selector_stall_steps: set[int] = set()
     selector_phase_counts: dict[str, dict[str, int]] = {}
     if args.require_selector_events:
         for key in selected_keys:
+            raw_summary = results_by_key[key].get("selector_summary")
+            if isinstance(raw_summary, dict):
+                raw_debounce = raw_summary.get("debounce_refreshes")
+                raw_stall_steps = raw_summary.get("stall_steps")
+                if isinstance(raw_debounce, int) and not isinstance(raw_debounce, bool):
+                    selector_debounce_refreshes.add(raw_debounce)
+                if isinstance(raw_stall_steps, int) and not isinstance(raw_stall_steps, bool):
+                    selector_stall_steps.add(raw_stall_steps)
             try:
-                diagnostics = validate_selector_rollout(results_by_key[key])
+                diagnostics = validate_selector_rollout(
+                    results_by_key[key], args.expected_selector_debounce_refreshes
+                )
             except (KeyError, TypeError, ValueError) as exc:
                 invalid_selector_rollouts.append(
                     {
@@ -560,6 +809,39 @@ def main() -> None:
                 counts["completed"] += diagnostics["completed"].get(phase, 0)
                 counts["stalled"] += diagnostics["stalled"].get(phase, 0)
     selector_phase_counts = dict(sorted(selector_phase_counts.items()))
+
+    invalid_subtask_vote_rollouts = []
+    vote_total = 0
+    vote_accepted_switches = 0
+    vote_rejected = 0
+    vote_reasons = Counter()
+    vote_candidates = Counter()
+    vote_switches_per_rollout = Counter()
+    if args.require_subtask_vote_events:
+        for key in selected_keys:
+            try:
+                diagnostics = validate_subtask_voting_rollout(
+                    results_by_key[key],
+                    expected_action_horizon=args.expected_subtask_vote_action_horizon,
+                    expected_interval=args.expected_subtask_vote_interval,
+                    expected_window=args.expected_subtask_vote_window,
+                    expected_threshold=args.expected_subtask_vote_threshold,
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                invalid_subtask_vote_rollouts.append(
+                    {
+                        "key": list(key),
+                        "path": str(result_paths[key]),
+                        "error": str(exc),
+                    }
+                )
+                continue
+            vote_total += diagnostics["total_votes"]
+            vote_accepted_switches += diagnostics["accepted_switches"]
+            vote_rejected += diagnostics["rejected_votes"]
+            vote_reasons.update(diagnostics["reasons"])
+            vote_candidates.update(diagnostics["candidates"])
+            vote_switches_per_rollout[diagnostics["accepted_switches"]] += 1
 
     all_video_paths = set(args.results_root.rglob("videos/*.mp4"))
     expected_video_paths = set()
@@ -613,6 +895,7 @@ def main() -> None:
             args.require_videos,
             args.require_subtask_events,
             args.require_selector_events,
+            args.require_subtask_vote_events,
         )
     except ValueError as exc:
         parser.error(str(exc))
@@ -699,12 +982,37 @@ def main() -> None:
     if args.require_selector_events:
         summary["selector_diagnostics"] = {
             "selector": STATE_MACHINE_V1,
+            "expected_debounce_refreshes": args.expected_selector_debounce_refreshes,
+            "expected_stall_steps": (
+                SELECTOR_STALL_STEPS
+                if args.expected_selector_debounce_refreshes is not None
+                else None
+            ),
+            "observed_debounce_refreshes": sorted(selector_debounce_refreshes),
+            "observed_stall_steps": sorted(selector_stall_steps),
             "valid_rollouts": count - len(invalid_selector_rollouts),
             "invalid_rollout_keys": [item["key"] for item in invalid_selector_rollouts],
             "invalid_rollouts": invalid_selector_rollouts,
             "total_recoveries": selector_total_recoveries,
             "total_stalls": selector_total_stalls,
             "per_phase": selector_phase_counts,
+        }
+    if args.require_subtask_vote_events:
+        summary["subtask_voting_diagnostics"] = {
+            "mode": "temporal_majority",
+            "action_horizon": args.expected_subtask_vote_action_horizon,
+            "interval": args.expected_subtask_vote_interval,
+            "window": args.expected_subtask_vote_window,
+            "threshold": args.expected_subtask_vote_threshold,
+            "valid_rollouts": count - len(invalid_subtask_vote_rollouts),
+            "invalid_rollout_keys": [item["key"] for item in invalid_subtask_vote_rollouts],
+            "invalid_rollouts": invalid_subtask_vote_rollouts,
+            "total_votes": vote_total,
+            "accepted_switches": vote_accepted_switches,
+            "rejected_votes": vote_rejected,
+            "reasons": dict(sorted(vote_reasons.items())),
+            "candidates": dict(sorted(vote_candidates.items())),
+            "switches_per_rollout": dict(sorted(vote_switches_per_rollout.items())),
         }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
@@ -732,6 +1040,7 @@ def main() -> None:
         or bool(invalid_subtask_events)
         or bool(invalid_generated_subtasks)
         or bool(invalid_selector_rollouts)
+        or bool(invalid_subtask_vote_rollouts)
     )
     if args.require_complete and incomplete:
         raise SystemExit(2)

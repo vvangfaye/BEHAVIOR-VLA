@@ -21,6 +21,9 @@ class LearnedPredictor:
             raise ValueError("Synthetic smoke-test weights cannot be deployed as a competition policy")
         if calibration["checkpoint_sha256"] != hashlib.sha256(Path(checkpoint).read_bytes()).hexdigest():
             raise ValueError("Calibration belongs to a different checkpoint")
+        contract_hash = self.artifact.get("dataset_contract_sha256")
+        if not contract_hash or calibration.get("dataset_contract_sha256") != contract_hash:
+            raise ValueError("Calibration and checkpoint dataset contracts differ")
         if self.artifact["feature_id"] != features.feature_id or self.artifact["action_spec"] != action_spec:
             raise ValueError("Feature encoder or action specification mismatch")
         self.calibrators = {k: ReliabilityCalibrator(**calibration[k]) for k in ("current", "future", "visibility")}

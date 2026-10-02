@@ -621,6 +621,11 @@ def fake_base_module(recorded=None):
         parser.add_argument("--prompt-mode", default="whole_task")
         parser.add_argument("--external-subtask")
         parser.add_argument("--external-subtask-selector")
+        parser.add_argument("--selector-debounce-refreshes", type=int)
+        parser.add_argument("--subtask-vote-action-horizon", type=int)
+        parser.add_argument("--subtask-vote-interval", type=int)
+        parser.add_argument("--subtask-vote-window", type=int)
+        parser.add_argument("--subtask-vote-threshold", type=int)
         parser.add_argument("--output-dir", default="/tmp/eval")
         parser.add_argument(
             "--write-video", action=argparse.BooleanOptionalAction, default=False
@@ -679,6 +684,7 @@ def fake_base_module(recorded=None):
         DEFAULT_EVAL_SEED=0,
         seed_everything=lambda seed: seed,
         verify_external_subtask_rollout=lambda *_args, **_kwargs: None,
+        verify_subtask_voting_rollout=lambda *_args, **_kwargs: None,
         logger=logger,
     )
 
@@ -750,6 +756,8 @@ def test_tracked_queue_runner_owns_instance_execution(tmp_path):
             self.conditioning_metadata = {}
             self.prompt_events = []
             self.subtask_events = []
+            self.subtask_vote_events = []
+            self.subtask_vote_summary = None
             self.selector_events = []
             self.selector_summary = None
             self.final_goal_state = {}
@@ -791,7 +799,19 @@ def test_tracked_queue_runner_claims_executes_and_publishes(tmp_path):
     recorded = {}
     base = fake_base_module(recorded)
     args = queue_runner.parse_args(
-        queue_runner_argv(tmp_path, "--expected-server-token", "test-token"),
+        queue_runner_argv(
+            tmp_path,
+            "--expected-server-token",
+            "test-token",
+            "--subtask-vote-action-horizon",
+            "16",
+            "--subtask-vote-interval",
+            "2",
+            "--subtask-vote-window",
+            "3",
+            "--subtask-vote-threshold",
+            "2",
+        ),
         base_module=base,
     )
 
@@ -807,6 +827,14 @@ def test_tracked_queue_runner_claims_executes_and_publishes(tmp_path):
     assert recorded["instances"] == [301, 302]
     assert recorded["cfg"]["task"] == {"name": task}
     assert recorded["cfg"]["model"]["expected_server_token"] == "test-token"
+    assert recorded["cfg"]["model"]["expected_subtask_vote_action_horizon"] == 16
+    assert recorded["cfg"]["model"]["expected_subtask_vote_interval"] == 2
+    assert recorded["cfg"]["model"]["expected_subtask_vote_window"] == 3
+    assert recorded["cfg"]["model"]["expected_subtask_vote_threshold"] == 2
+    assert recorded["cfg"]["subtask_vote_action_horizon"] == 16
+    assert recorded["cfg"]["subtask_vote_interval"] == 2
+    assert recorded["cfg"]["subtask_vote_window"] == 3
+    assert recorded["cfg"]["subtask_vote_threshold"] == 2
     assert queue.snapshot()["counts"] == {
         "pending": 0,
         "running": 0,

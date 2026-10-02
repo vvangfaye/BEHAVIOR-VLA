@@ -50,6 +50,7 @@ class B1KPolicyWrapper:
         self._last_subtask = None
         self.last_subtasks = {}
         self.last_subtask_sources = {}
+        self.last_subtask_votes = {}
         self._memory_control_step = 0
 
     def _clear_action_buffers(self):
@@ -61,6 +62,7 @@ class B1KPolicyWrapper:
         self.step_counter = None
         self.last_subtasks = {}
         self.last_subtask_sources = {}
+        self.last_subtask_votes = {}
 
     def _resolve_prompt(self, obs: dict) -> str:
         prompt = obs.get("prompt")
@@ -90,6 +92,12 @@ class B1KPolicyWrapper:
             self.last_subtask_sources[index] = result["subtask_source"]
         else:
             self.last_subtask_sources.pop(index, None)
+        if "subtask_vote" in result:
+            self.last_subtask_votes[index] = {
+                **result["subtask_vote"],
+                "batch_index": index,
+                "action_horizon": self.action_horizon,
+            }
         return result
 
     def _ensure_batch_initialized(self, batch_size: int, action_dim: int = None):
@@ -413,6 +421,7 @@ class B1KPolicyWrapper:
 
     def act(self, input_obs):
         """Dispatch to the appropriate action method based on control mode."""
+        self.last_subtask_votes = {}
         prompt = self._resolve_prompt(input_obs)
         subtask = input_obs.get("subtask")
         if subtask is not None and not isinstance(subtask, str):

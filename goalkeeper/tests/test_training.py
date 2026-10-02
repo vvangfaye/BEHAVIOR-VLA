@@ -1,12 +1,15 @@
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import numpy as np
 import pytest
 import torch
 from goalkeeper.synthetic import make_dataset
 from goalkeeper.data import load_manifest, load_record, collate
 from goalkeeper.model import ModelConfig, GoalTransitionModel, supervision_loss
-from goalkeeper.training import train, calibrate
+from goalkeeper.training import train, calibrate, per_rank_batch_size
 from goalkeeper.artifacts import load_checkpoint
 from goalkeeper.calibration import ReliabilityCalibrator
 from goalkeeper.policy import LearnedPredictor
@@ -25,6 +28,41 @@ def test_group_splits_and_reject_eval_instances(dataset, tmp_path):
     row = json.loads(Path(dataset).read_text().splitlines()[0]); row["source"] = "public_test"
     bad = tmp_path / "bad.jsonl"; bad.write_text(json.dumps(row))
     with pytest.raises(ValueError): load_manifest(bad)
+
+
+def test_global_batch_is_converted_to_per_rank():
+    assert per_rank_batch_size(128, 8) == 16
+    with pytest.raises(ValueError, match="divisible"):
+        per_rank_batch_size(130, 8)
+
+
+def test_two_process_gloo_training_uses_global_batch_contract(tmp_path):
+    manifest = make_dataset(tmp_path / "ddp-data", groups=40, windows=1)
+    output = tmp_path / "ddp-output"
+    root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(root / "src")
+    result = subprocess.run(
+        [sys.executable, "-m", "torch.distributed.run", "--standalone", "--nproc-per-node=2",
+         "-m", "goalkeeper.cli", "train", manifest, str(output), "--epochs", "1",
+         "--global-batch-size", "8", "--hidden-dim", "32", "--device", "cpu"],
+        cwd=root, env=env, text=True, capture_output=True, timeout=120, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    _, artifact = load_checkpoint(output / "best.pt")
+    assert artifact["world_size"] == 2
+    assert artifact["global_batch_size"] == 8
+    assert artifact["per_rank_batch_size"] == 4
+
+
+def test_unknown_visibility_does_not_remove_current_truth_supervision(dataset):
+    rows = load_manifest(dataset)
+    batch = collate([load_record(rows[0])])
+    batch["visibility"].fill_(-1)
+    model = GoalTransitionModel(ModelConfig(visual_dim=8, text_dim=8, proprio_dim=2, action_dim=2, horizon=4, hidden_dim=32))
+    losses = supervision_loss(model(batch["visual"], batch["proprio"], batch["queries"], batch["actions"]), batch)
+    assert losses["current"] > 0
+    assert losses["visibility"] == 0
 
 
 def test_action_conditioned_model_has_finite_gradients(dataset):
@@ -51,7 +89,10 @@ def test_training_checkpoint_calibration_end_to_end(dataset, tmp_path):
     assert len(history) == 2
     model, artifact = load_checkpoint(tmp_path / "best.pt")
     assert artifact["synthetic"] is True
+    assert artifact["global_batch_size"] == artifact["per_rank_batch_size"] == 8
+    assert all(np.isfinite(value) for value in artifact["first_step_metrics"].values())
     result = calibrate(dataset, tmp_path / "best.pt", tmp_path / "calibration.json", min_count=2)
+    assert result["dataset_contract_sha256"] == artifact["dataset_contract_sha256"]
     assert not set(result["groups"]) & set(artifact["train_groups"])
     assert 0 <= result["future_brier"] <= 1
     with pytest.raises(ValueError, match="Synthetic"):
