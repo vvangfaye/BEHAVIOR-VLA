@@ -1,0 +1,2 @@
+# OmniGibson 3.9.3's pinned Warp dependency, official PyPI Linux x86-64 wheel.
+warp-lang==1.12.0 --hash=sha256:a1436f60a1881cd94f787e751a83fc0987626be2d3e2b4e74c64a6947c6d1266

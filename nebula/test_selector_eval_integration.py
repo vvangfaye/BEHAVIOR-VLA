@@ -43,6 +43,8 @@ def selector_result() -> dict:
             "selector_labels_sha256": SELECTOR_LABELS_SHA256,
             "legacy_segments_sha256": LEGACY_SEGMENTS_SHA256,
             "training_annotation_sha256": TRAINING_ANNOTATION_SHA256,
+            "selector_debounce_refreshes": 3,
+            "selector_stall_steps": 2048,
             "source": "provided",
             "subtask_source": "provided",
             "oracle": True,
@@ -65,6 +67,8 @@ def selector_result() -> dict:
             "valid": True,
             "mode": SELECTOR,
             "task_name": TASK,
+            "debounce_refreshes": 3,
+            "stall_steps": 2048,
             "recoveries": 2,
             "stalls": [{"phase": "pick_sack_from_car"}],
             "phase_completion_counts": {"move_to_sack_in_car": 1},
@@ -98,12 +102,101 @@ def generated_result() -> dict:
     return result
 
 
+def voting_result() -> dict:
+    result = generated_result()
+    result["steps"] = 65
+    result["conditioning"]["subtask_voting"] = {
+        "mode": "temporal_majority",
+        "action_horizon": 16,
+        "interval": 2,
+        "window": 3,
+        "threshold": 2,
+        "oracle": False,
+        "privileged": False,
+        "official_benchmark": False,
+        "inference_ablation": True,
+    }
+    result["subtask_events"] = [
+        {"step": 0, "subtask": "move to paper bag", "source": "generated"},
+        {"step": 1, "subtask": "move to paper bag", "source": "cached"},
+        {"step": 64, "subtask": "pick up paper bag", "source": "generated"},
+    ]
+    result["subtask_vote_events"] = [
+        {
+            "step": 0,
+            "vote_id": 0,
+            "request_index": 0,
+            "batch_index": 0,
+            "action_horizon": 16,
+            "candidate": "move to paper bag",
+            "committed_before": None,
+            "committed_after": "move to paper bag",
+            "accepted": True,
+            "reason": "initial",
+            "history": ["move to paper bag"],
+            "counts": {"move to paper bag": 1},
+            "interval": 2,
+            "window": 3,
+            "threshold": 2,
+        },
+        {
+            "step": 32,
+            "vote_id": 1,
+            "request_index": 2,
+            "batch_index": 0,
+            "action_horizon": 16,
+            "candidate": "pick up paper bag",
+            "committed_before": "move to paper bag",
+            "committed_after": "move to paper bag",
+            "accepted": False,
+            "reason": "no_majority",
+            "history": ["pick up paper bag"],
+            "counts": {"pick up paper bag": 1},
+            "interval": 2,
+            "window": 3,
+            "threshold": 2,
+        },
+        {
+            "step": 64,
+            "vote_id": 2,
+            "request_index": 4,
+            "batch_index": 0,
+            "action_horizon": 16,
+            "candidate": "pick up paper bag",
+            "committed_before": "move to paper bag",
+            "committed_after": "pick up paper bag",
+            "accepted": True,
+            "reason": "majority_switch",
+            "history": ["pick up paper bag", "pick up paper bag"],
+            "counts": {"pick up paper bag": 2},
+            "interval": 2,
+            "window": 3,
+            "threshold": 2,
+        },
+    ]
+    result["subtask_vote_summary"] = {
+        "mode": "temporal_majority",
+        "action_horizon": 16,
+        "interval": 2,
+        "window": 3,
+        "threshold": 2,
+        "total_votes": 3,
+        "accepted_switches": 1,
+        "rejected_votes": 1,
+        "reasons": {"initial": 1, "majority_switch": 1, "no_majority": 1},
+        "candidates": {"move to paper bag": 1, "pick up paper bag": 2},
+    }
+    return result
+
+
 def run_summarizer(
     tmp_path: Path,
     result: dict,
     *,
     require_selector: bool,
     require_generated: bool = False,
+    require_voting: bool = False,
+    expected_selector_debounce_refreshes: int | None = None,
 ) -> tuple[subprocess.CompletedProcess, dict]:
     results_root = tmp_path / "results"
     result_dir = results_root / "pi05" / TASK / "json"
@@ -135,20 +228,48 @@ def run_summarizer(
     ]
     if require_selector:
         command.append("--require-selector-events")
+    if expected_selector_debounce_refreshes is not None:
+        command.extend(
+            (
+                "--expected-selector-debounce-refreshes",
+                str(expected_selector_debounce_refreshes),
+            )
+        )
     if require_generated:
         command.extend(("--require-subtask-events", "--require-generated-subtasks"))
+    if require_voting:
+        command.extend(
+            (
+                "--require-subtask-vote-events",
+                "--expected-subtask-vote-action-horizon",
+                "16",
+                "--expected-subtask-vote-interval",
+                "2",
+                "--expected-subtask-vote-window",
+                "3",
+                "--expected-subtask-vote-threshold",
+                "2",
+            )
+        )
     completed = subprocess.run(command, capture_output=True, text=True, check=False)
     return completed, json.loads(output.read_text())
 
 
 def test_selector_diagnostics_are_validated_and_aggregated(tmp_path):
     completed, summary = run_summarizer(
-        tmp_path, selector_result(), require_selector=True
+        tmp_path,
+        selector_result(),
+        require_selector=True,
+        expected_selector_debounce_refreshes=3,
     )
 
     assert completed.returncode == 0, completed.stderr
     assert summary["selector_diagnostics"] == {
         "selector": SELECTOR,
+        "expected_debounce_refreshes": 3,
+        "expected_stall_steps": 2048,
+        "observed_debounce_refreshes": [3],
+        "observed_stall_steps": [2048],
         "valid_rollouts": 1,
         "invalid_rollout_keys": [],
         "invalid_rollouts": [],
@@ -159,6 +280,21 @@ def test_selector_diagnostics_are_validated_and_aggregated(tmp_path):
             "pick_sack_from_car": {"entered": 1, "completed": 0, "stalled": 1},
         },
     }
+
+
+def test_selector_debounce_mismatch_fails_completeness(tmp_path):
+    completed, summary = run_summarizer(
+        tmp_path,
+        selector_result(),
+        require_selector=True,
+        expected_selector_debounce_refreshes=5,
+    )
+
+    assert completed.returncode == 2
+    diagnostics = summary["selector_diagnostics"]
+    assert diagnostics["expected_debounce_refreshes"] == 5
+    assert diagnostics["valid_rollouts"] == 0
+    assert "expected 5" in diagnostics["invalid_rollouts"][0]["error"]
 
 
 def test_default_summary_schema_omits_selector_diagnostics(tmp_path):
@@ -228,6 +364,69 @@ def test_generated_subtasks_are_validated(tmp_path, events):
     assert summary["invalid_generated_subtasks"] == []
 
 
+def test_temporal_subtask_voting_is_validated_and_aggregated(tmp_path):
+    completed, summary = run_summarizer(
+        tmp_path,
+        voting_result(),
+        require_selector=False,
+        require_generated=True,
+        require_voting=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert summary["subtask_voting_diagnostics"] == {
+        "mode": "temporal_majority",
+        "action_horizon": 16,
+        "interval": 2,
+        "window": 3,
+        "threshold": 2,
+        "valid_rollouts": 1,
+        "invalid_rollout_keys": [],
+        "invalid_rollouts": [],
+        "total_votes": 3,
+        "accepted_switches": 1,
+        "rejected_votes": 1,
+        "reasons": {"initial": 1, "majority_switch": 1, "no_majority": 1},
+        "candidates": {"move to paper bag": 1, "pick up paper bag": 2},
+        "switches_per_rollout": {"1": 1},
+    }
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda result: result["conditioning"]["subtask_voting"].update(threshold=3),
+        lambda result: result["subtask_vote_events"][0].update(window=4),
+        lambda result: result["subtask_vote_events"][0].update(action_horizon=8),
+        lambda result: result["subtask_vote_events"][0].update(accepted=False),
+        lambda result: result["subtask_vote_events"][0].update(committed_after="other"),
+        lambda result: result["subtask_vote_events"][1].update(
+            history=["move to paper bag", "pick up paper bag"],
+            counts={"move to paper bag": 1, "pick up paper bag": 1},
+        ),
+        lambda result: result["subtask_vote_events"].pop(1),
+        lambda result: result["subtask_vote_summary"].update(total_votes=2),
+        lambda result: result.update(selector_events=[{"step": 0}]),
+    ],
+)
+def test_temporal_subtask_voting_violation_fails_completeness(tmp_path, mutate):
+    result = voting_result()
+    mutate(result)
+
+    completed, summary = run_summarizer(
+        tmp_path,
+        result,
+        require_selector=False,
+        require_generated=True,
+        require_voting=True,
+    )
+
+    assert completed.returncode == 2
+    diagnostics = summary["subtask_voting_diagnostics"]
+    assert diagnostics["valid_rollouts"] == 0
+    assert diagnostics["invalid_rollout_keys"] == [[TASK, 301, 0]]
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -268,10 +467,14 @@ def run_shell(
         "BASE_PORT",
         "CLUSTER_FILE",
         "EVAL_WORKERS",
+        "EXECUTE_HORIZON",
         "EXTERNAL_SUBTASK_SELECTOR",
         "PI05_CKPT",
         "PI05_MODEL_FORMAT",
+        "SELECTOR_DEBOUNCE_REFRESHES",
         "SUBTASK_INTERVAL",
+        "SUBTASK_VOTE_WINDOW",
+        "SUBTASK_VOTE_THRESHOLD",
     ):
         env.pop(name, None)
     env.update(overrides)
@@ -338,6 +541,60 @@ def test_eval_script_rejects_invalid_selector_configuration(overrides, task, mes
     assert message in completed.stderr
 
 
+@pytest.mark.parametrize("value", ["0", "-1", "1.5", "invalid"])
+def test_eval_script_rejects_invalid_selector_debounce(value):
+    completed = run_shell(
+        EVAL_SCRIPT,
+        TASK,
+        EXTERNAL_SUBTASK_SELECTOR=SELECTOR,
+        SELECTOR_DEBOUNCE_REFRESHES=value,
+        SUBTASK_PREDICTION="1",
+    )
+
+    assert completed.returncode == 2
+    assert "SELECTOR_DEBOUNCE_REFRESHES must be a positive integer" in completed.stderr
+
+
+def test_eval_script_rejects_selector_debounce_without_selector():
+    completed = run_shell(
+        EVAL_SCRIPT,
+        TASK,
+        SELECTOR_DEBOUNCE_REFRESHES="5",
+        SUBTASK_PREDICTION="1",
+    )
+
+    assert completed.returncode == 2
+    assert "requires EXTERNAL_SUBTASK_SELECTOR=state_machine_v1" in completed.stderr
+
+
+def test_eval_script_requires_complete_temporal_voting_contract():
+    completed = run_shell(
+        EVAL_SCRIPT,
+        TASK,
+        SUBTASK_PREDICTION="1",
+        SUBTASK_INTERVAL="2",
+        SUBTASK_VOTE_WINDOW="3",
+    )
+
+    assert completed.returncode == 2
+    assert "SUBTASK_VOTE_THRESHOLD" in completed.stderr
+
+
+def test_eval_script_rejects_temporal_voting_with_selector():
+    completed = run_shell(
+        EVAL_SCRIPT,
+        TASK,
+        SUBTASK_PREDICTION="1",
+        SUBTASK_INTERVAL="2",
+        SUBTASK_VOTE_WINDOW="3",
+        SUBTASK_VOTE_THRESHOLD="2",
+        EXTERNAL_SUBTASK_SELECTOR=SELECTOR,
+    )
+
+    assert completed.returncode == 2
+    assert "cannot be combined" in completed.stderr
+
+
 def test_submit_script_rejects_selector_outside_supported_profiles():
     completed = run_shell(
         SUBMIT_SCRIPT,
@@ -380,6 +637,63 @@ def test_submit_script_rejects_subtask_interval_without_prediction():
     assert "SUBTASK_INTERVAL requires SUBTASK_PREDICTION=1" in completed.stderr
 
 
+@pytest.mark.parametrize(
+    ("window", "threshold", "message"),
+    [
+        ("3", "", "between 2 and SUBTASK_VOTE_WINDOW"),
+        ("", "2", "integer of at least 2"),
+        ("1", "1", "integer of at least 2"),
+        ("4", "2", "strict majority"),
+    ],
+)
+def test_submit_script_rejects_invalid_subtask_voting(window, threshold, message):
+    completed = run_shell(
+        SUBMIT_SCRIPT,
+        SUBTASK_PREDICTION="1",
+        SUBTASK_INTERVAL="2",
+        SUBTASK_VOTE_WINDOW=window,
+        SUBTASK_VOTE_THRESHOLD=threshold,
+    )
+
+    assert completed.returncode == 2
+    assert message in completed.stderr
+
+
+def test_submit_script_requires_explicit_interval_for_subtask_voting():
+    completed = run_shell(
+        SUBMIT_SCRIPT,
+        SUBTASK_PREDICTION="1",
+        SUBTASK_VOTE_WINDOW="3",
+        SUBTASK_VOTE_THRESHOLD="2",
+    )
+
+    assert completed.returncode == 2
+    assert "explicit SUBTASK_INTERVAL" in completed.stderr
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "1.5", "invalid"])
+def test_submit_script_rejects_invalid_selector_debounce(value):
+    completed = run_shell(
+        SUBMIT_SCRIPT,
+        EXTERNAL_SUBTASK_SELECTOR=SELECTOR,
+        SELECTOR_DEBOUNCE_REFRESHES=value,
+        SMOKE_TASK=TASK,
+    )
+
+    assert completed.returncode == 2
+    assert "SELECTOR_DEBOUNCE_REFRESHES must be a positive integer" in completed.stderr
+
+
+def test_submit_script_rejects_selector_debounce_without_selector():
+    completed = run_shell(
+        SUBMIT_SCRIPT,
+        SELECTOR_DEBOUNCE_REFRESHES="5",
+    )
+
+    assert completed.returncode == 2
+    assert "requires EXTERNAL_SUBTASK_SELECTOR=state_machine_v1" in completed.stderr
+
+
 def test_submit_script_requires_explicit_torch_checkpoint():
     completed = run_shell(SUBMIT_SCRIPT, PI05_MODEL_FORMAT="torch")
 
@@ -408,6 +722,52 @@ def test_nebula_propagates_and_records_subtask_interval():
     assert '"subtask_interval_source": subtask_interval_source' in worker_source
     assert (
         'grep -Fq "subtask refresh every $SUBTASK_INTERVAL requests"' in worker_source
+    )
+
+
+def test_nebula_propagates_and_records_temporal_subtask_voting():
+    submit_source = SUBMIT_SCRIPT.read_text()
+    worker_source = WORKER_SCRIPT.read_text()
+    eval_source = EVAL_SCRIPT.read_text()
+
+    assert '--subtask-vote-action-horizon "$EXECUTE_HORIZON"' in eval_source
+    assert '--subtask-vote-window "$SUBTASK_VOTE_WINDOW"' in eval_source
+    assert '--subtask-vote-threshold "$SUBTASK_VOTE_THRESHOLD"' in eval_source
+    assert 'write_setting SUBTASK_VOTE_WINDOW "$SUBTASK_VOTE_WINDOW"' in submit_source
+    assert 'write_setting SUBTASK_VOTE_THRESHOLD "$SUBTASK_VOTE_THRESHOLD"' in submit_source
+    assert 'write_setting EXECUTE_HORIZON "$EXECUTE_HORIZON"' in submit_source
+    assert worker_source.count('SUBTASK_VOTE_WINDOW="$SUBTASK_VOTE_WINDOW"') == 2
+    assert worker_source.count('SUBTASK_VOTE_THRESHOLD="$SUBTASK_VOTE_THRESHOLD"') == 2
+    assert worker_source.count('EXECUTE_HORIZON="$EXECUTE_HORIZON"') >= 2
+    assert '"subtask_voting": (' in submit_source
+    assert '"subtask_voting": ({' in worker_source
+    assert "rollouts_with_subtask_vote_events" in worker_source
+    assert "require-subtask-vote-events" in worker_source
+    assert "expected-subtask-vote-action-horizon" in worker_source
+    assert "expected-subtask-vote-window" in worker_source
+
+
+def test_nebula_propagates_and_records_selector_debounce():
+    submit_source = SUBMIT_SCRIPT.read_text()
+    worker_source = WORKER_SCRIPT.read_text()
+    eval_source = EVAL_SCRIPT.read_text()
+
+    assert '--selector-debounce-refreshes "$SELECTOR_DEBOUNCE_REFRESHES"' in eval_source
+    assert (
+        'write_setting SELECTOR_DEBOUNCE_REFRESHES "$SELECTOR_DEBOUNCE_REFRESHES"'
+        in submit_source
+    )
+    assert "requested_debounce_refreshes" in submit_source
+    assert "effective_debounce_refreshes" in submit_source
+    assert "stall_steps" in submit_source
+    assert worker_source.count(
+        'SELECTOR_DEBOUNCE_REFRESHES="$SELECTOR_DEBOUNCE_REFRESHES"'
+    ) == 2
+    assert "requested_selector_debounce" in worker_source
+    assert "effective_selector_debounce" in worker_source
+    assert (
+        '--expected-selector-debounce-refreshes "$SELECTOR_DEBOUNCE_EFFECTIVE"'
+        in worker_source
     )
 
 
@@ -452,10 +812,10 @@ def test_full4_supports_parameterized_eight_gpu_topology():
     submit_source = SUBMIT_SCRIPT.read_text()
     worker_source = WORKER_SCRIPT.read_text()
 
-    assert 'if [[ "$EVAL_PROFILE" == full4 && "$EVAL_WORKERS" == 8 ]]' in submit_source
+    assert 'if [[ ( "$EVAL_PROFILE" == full4 || "$EVAL_PROFILE" == subtasks100 ) && "$EVAL_WORKERS" == 8 ]]' in submit_source
     assert "full4 profile requires EVAL_WORKERS=4 or 8" in submit_source
     assert (
-        '[[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 ]]'
+        '[[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 || "$EVAL_PROFILE" == subtasks100 ]]'
         in worker_source
     )
     assert (
@@ -498,6 +858,7 @@ def _write_two_task_worker_statuses(status_root: Path, worker_count: int) -> Non
             "completed_rollouts": expected_rollouts,
             "completed_videos": expected_rollouts,
             "rollouts_with_subtask_events": expected_rollouts,
+            "rollouts_with_subtask_vote_events": 0,
             "rollouts_with_selector_events": 0,
             "exit_code": 0,
         }
@@ -525,6 +886,45 @@ def test_two_task_worker_status_layouts_are_valid(tmp_path, worker_count):
     assert not unexpected
     assert not invalid
     assert not mismatches
+
+
+def test_two_task_worker_status_requires_vote_coverage(tmp_path):
+    status_root = tmp_path / "status"
+    _write_two_task_worker_statuses(status_root, 8)
+    for path in status_root.glob("worker-*.json"):
+        value = json.loads(path.read_text())
+        value["rollouts_with_subtask_vote_events"] = value["expected_rollouts"]
+        path.write_text(json.dumps(value))
+
+    *_, mismatches = load_worker_statuses(
+        status_root,
+        8,
+        "two_tasks",
+        ["carrying_in_groceries", "make_rose_centerpieces"],
+        120,
+        True,
+        True,
+        False,
+        True,
+    )
+    assert not mismatches
+
+    path = status_root / "worker-0.json"
+    value = json.loads(path.read_text())
+    value["rollouts_with_subtask_vote_events"] = 14
+    path.write_text(json.dumps(value))
+    *_, mismatches = load_worker_statuses(
+        status_root,
+        8,
+        "two_tasks",
+        ["carrying_in_groceries", "make_rose_centerpieces"],
+        120,
+        True,
+        True,
+        False,
+        True,
+    )
+    assert mismatches
 
 
 def test_two_task_worker_status_rejects_wrong_eight_worker_assignment(tmp_path):
@@ -590,7 +990,16 @@ def test_submit_records_eight_worker_port_contract():
     assert "worker port range exceeds 65535" in source
 
 
-def run_worker_validation(tmp_path, *, subtask_prediction: str, subtask_interval: str):
+def run_worker_validation(
+    tmp_path,
+    *,
+    subtask_prediction: str,
+    subtask_interval: str = "",
+    subtask_vote_window: str = "",
+    subtask_vote_threshold: str = "",
+    selector: str = "",
+    selector_debounce_refreshes: str = "",
+):
     nebula_dir = tmp_path / "repo" / "nebula"
     nebula_dir.mkdir(parents=True)
     worker = nebula_dir / WORKER_SCRIPT.name
@@ -605,6 +1014,11 @@ def run_worker_validation(tmp_path, *, subtask_prediction: str, subtask_interval
                 "WRITE_VIDEO=1",
                 f"SUBTASK_PREDICTION={subtask_prediction}",
                 f"SUBTASK_INTERVAL={subtask_interval}",
+                f"SUBTASK_VOTE_WINDOW={subtask_vote_window}",
+                f"SUBTASK_VOTE_THRESHOLD={subtask_vote_threshold}",
+                f"EXTERNAL_SUBTASK_SELECTOR={selector}",
+                f"SELECTOR_DEBOUNCE_REFRESHES={selector_debounce_refreshes}",
+                "SMOKE_TASK=carrying_in_groceries",
                 "SMOKE_EVAL_GPU=1",
             )
         )
@@ -632,6 +1046,63 @@ def test_worker_rejects_subtask_interval_without_prediction(tmp_path):
 
     assert completed.returncode == 1
     assert "SUBTASK_INTERVAL requires SUBTASK_PREDICTION=1" in completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("window", "threshold", "message"),
+    [
+        ("3", "", "between 2 and SUBTASK_VOTE_WINDOW"),
+        ("", "2", "integer of at least 2"),
+        ("4", "2", "strict majority"),
+    ],
+)
+def test_worker_rejects_invalid_subtask_voting(tmp_path, window, threshold, message):
+    completed = run_worker_validation(
+        tmp_path,
+        subtask_prediction="1",
+        subtask_interval="2",
+        subtask_vote_window=window,
+        subtask_vote_threshold=threshold,
+    )
+
+    assert completed.returncode == 1
+    assert message in completed.stderr
+
+
+def test_worker_requires_explicit_interval_for_subtask_voting(tmp_path):
+    completed = run_worker_validation(
+        tmp_path,
+        subtask_prediction="1",
+        subtask_vote_window="3",
+        subtask_vote_threshold="2",
+    )
+
+    assert completed.returncode == 1
+    assert "explicit SUBTASK_INTERVAL" in completed.stderr
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "1.5", "invalid"])
+def test_worker_rejects_invalid_selector_debounce(tmp_path, value):
+    completed = run_worker_validation(
+        tmp_path,
+        subtask_prediction="1",
+        selector=SELECTOR,
+        selector_debounce_refreshes=value,
+    )
+
+    assert completed.returncode == 1
+    assert "SELECTOR_DEBOUNCE_REFRESHES must be a positive integer" in completed.stderr
+
+
+def test_worker_rejects_selector_debounce_without_selector(tmp_path):
+    completed = run_worker_validation(
+        tmp_path,
+        subtask_prediction="1",
+        selector_debounce_refreshes="5",
+    )
+
+    assert completed.returncode == 1
+    assert "requires EXTERNAL_SUBTASK_SELECTOR=state_machine_v1" in completed.stderr
 
 
 def test_worker_rejects_selector_outside_supported_profiles(tmp_path):

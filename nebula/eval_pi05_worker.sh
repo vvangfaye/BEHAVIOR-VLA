@@ -11,6 +11,10 @@ PI05_MODEL_FORMAT="${PI05_MODEL_FORMAT:-jax}"
 SMOKE_TASK="${SMOKE_TASK:-turning_on_radio}"
 SMOKE_EVAL_GPU="${SMOKE_EVAL_GPU:-1}"
 SUBTASK_INTERVAL="${SUBTASK_INTERVAL:-}"
+SUBTASK_VOTE_WINDOW="${SUBTASK_VOTE_WINDOW:-}"
+SUBTASK_VOTE_THRESHOLD="${SUBTASK_VOTE_THRESHOLD:-}"
+EXECUTE_HORIZON="${EXECUTE_HORIZON:-16}"
+SELECTOR_DEBOUNCE_REFRESHES="${SELECTOR_DEBOUNCE_REFRESHES:-}"
 CLUSTER_FILE="${CLUSTER_FILE:-}"
 
 log() { printf '[%(%F %T)T] %s\n' -1 "$*"; }
@@ -28,10 +32,10 @@ case "$PI05_MODEL_FORMAT" in
     *) fail "PI05_MODEL_FORMAT must be jax or torch" ;;
 esac
 case "$EVAL_PROFILE" in
-    smoke|speed|two_tasks|reduced|full|full4) ;;
-    *) fail "EVAL_PROFILE must be smoke, speed, two_tasks, reduced, full, or full4" ;;
+    smoke|speed|two_tasks|reduced|full|full4|subtasks100) ;;
+    *) fail "EVAL_PROFILE must be smoke, speed, two_tasks, reduced, full, full4, or subtasks100" ;;
 esac
-if [[ ( "$EVAL_PROFILE" == full || "$EVAL_PROFILE" == full4 ) && "$CONFIRM_FULL" != 1 ]]; then
+if [[ ( "$EVAL_PROFILE" == full || "$EVAL_PROFILE" == full4 || "$EVAL_PROFILE" == subtasks100 ) && "$CONFIRM_FULL" != 1 ]]; then
     fail "full evaluation requires CONFIRM_FULL=1"
 fi
 [[ "$EVAL_WORKERS" =~ ^[1-9][0-9]*$ ]] || fail "EVAL_WORKERS must be a positive integer"
@@ -39,9 +43,23 @@ fi
 (( BASE_PORT + EVAL_WORKERS - 1 <= 65535 )) || fail "worker port range exceeds 65535"
 [[ "$WRITE_VIDEO" == 0 || "$WRITE_VIDEO" == 1 ]] || fail "WRITE_VIDEO must be 0 or 1"
 [[ "$SUBTASK_PREDICTION" == 0 || "$SUBTASK_PREDICTION" == 1 ]] || fail "SUBTASK_PREDICTION must be 0 or 1"
+[[ "$EXECUTE_HORIZON" =~ ^[1-9][0-9]*$ ]] || fail "EXECUTE_HORIZON must be a positive integer"
 if [[ -n "$SUBTASK_INTERVAL" ]]; then
     [[ "$SUBTASK_INTERVAL" =~ ^[1-9][0-9]*$ ]] || fail "SUBTASK_INTERVAL must be a positive integer"
     [[ "$SUBTASK_PREDICTION" == 1 ]] || fail "SUBTASK_INTERVAL requires SUBTASK_PREDICTION=1"
+fi
+if [[ -n "$SUBTASK_VOTE_WINDOW" || -n "$SUBTASK_VOTE_THRESHOLD" ]]; then
+    [[ "$SUBTASK_VOTE_WINDOW" =~ ^[1-9][0-9]*$ ]] && (( SUBTASK_VOTE_WINDOW >= 2 )) \
+        || fail "SUBTASK_VOTE_WINDOW must be an integer of at least 2"
+    [[ "$SUBTASK_VOTE_THRESHOLD" =~ ^[1-9][0-9]*$ ]] \
+        && (( SUBTASK_VOTE_THRESHOLD >= 2 && SUBTASK_VOTE_THRESHOLD <= SUBTASK_VOTE_WINDOW )) \
+        || fail "SUBTASK_VOTE_THRESHOLD must be between 2 and SUBTASK_VOTE_WINDOW"
+    (( SUBTASK_VOTE_THRESHOLD * 2 > SUBTASK_VOTE_WINDOW )) \
+        || fail "SUBTASK_VOTE_THRESHOLD must be a strict majority of SUBTASK_VOTE_WINDOW"
+    [[ "$SUBTASK_PREDICTION" == 1 && -n "$SUBTASK_INTERVAL" ]] \
+        || fail "Temporal subtask voting requires SUBTASK_PREDICTION=1 and an explicit SUBTASK_INTERVAL"
+    [[ -z "$EXTERNAL_SUBTASK_SELECTOR" && -z "${EXTERNAL_SUBTASK:-}" ]] \
+        || fail "Temporal subtask voting cannot be combined with external subtask conditioning"
 fi
 [[ "$SMOKE_EVAL_GPU" =~ ^[0-9]+$ ]] || fail "SMOKE_EVAL_GPU must be a non-negative integer"
 if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
@@ -59,6 +77,16 @@ if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     fi
     [[ -z "${EXTERNAL_SUBTASK:-}" ]] \
         || fail "EXTERNAL_SUBTASK and EXTERNAL_SUBTASK_SELECTOR are mutually exclusive"
+fi
+if [[ -n "$SELECTOR_DEBOUNCE_REFRESHES" ]]; then
+    [[ "$SELECTOR_DEBOUNCE_REFRESHES" =~ ^[1-9][0-9]*$ ]] \
+        || fail "SELECTOR_DEBOUNCE_REFRESHES must be a positive integer"
+    [[ "$EXTERNAL_SUBTASK_SELECTOR" == state_machine_v1 ]] \
+        || fail "SELECTOR_DEBOUNCE_REFRESHES requires EXTERNAL_SUBTASK_SELECTOR=state_machine_v1"
+fi
+SELECTOR_DEBOUNCE_EFFECTIVE=""
+if [[ "$EXTERNAL_SUBTASK_SELECTOR" == state_machine_v1 ]]; then
+    SELECTOR_DEBOUNCE_EFFECTIVE="${SELECTOR_DEBOUNCE_REFRESHES:-3}"
 fi
 if [[ "$EVAL_PROFILE" == speed && "$EVAL_WORKERS" != 4 ]]; then
     fail "speed profile requires EVAL_WORKERS=4"
@@ -97,7 +125,35 @@ else
     require_file "$CHECKPOINT_SOURCE/params/_METADATA"
     [[ ! -e "$CHECKPOINT_SOURCE/model.safetensors" ]] || fail "JAX checkpoint must not contain model.safetensors"
 fi
-if [[ "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 || "$PI05_MODEL_FORMAT" == torch ]]; then
+check_free_gb /dev/shm 40
+RAW_STAGE_BYTES=0
+if [[ "$EVAL_PROFILE" == subtasks100 ]]; then
+    RAW_STAGE_BYTES="$(python3 - "$SCRIPT_DIR/subtask_panel.json" "$SCRIPT_DIR/subtask_raw_inventory.json" \
+        "${SUBTASK_VALIDATION_ENABLED:-0}" "${SUBTASK_COLLECTION_ENABLED:-0}" "$SCRIPT_DIR" <<'RAW_STORAGE'
+import json, sys
+from pathlib import Path
+panel=json.load(open(sys.argv[1]));inventory=json.load(open(sys.argv[2]))
+selected=panel['samples']
+if sys.argv[3]=='1':
+    plan=json.load(open(Path(sys.argv[5])/'subtask_validation_plan.json'))
+    ids=set(plan['sample_ids']);selected=[s for s in selected if s['sample_id'] in ids]
+elif sys.argv[4]=='1':
+    plan=json.load(open(Path(sys.argv[5])/'subtask_collection_plan.json'))
+    ids={t['sample_id'] for t in plan['trials']};selected=[s for s in selected if s['sample_id'] in ids]
+paths={f"task-{s['task_index']:04d}/episode_{s['raw_episode_id']:08d}.hdf5" for s in selected}
+print(sum(item['bytes'] for item in inventory['episodes'] if item['relative_path'] in paths))
+RAW_STORAGE
+)"
+fi
+COLLECTION_RESULT_BYTES=0
+if [[ "${SUBTASK_COLLECTION_ENABLED:-0}" == 1 ]]; then
+    COLLECTION_RESULT_BYTES="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["maximum_output_bytes"])' "$SCRIPT_DIR/subtask_collection_plan.json")"
+fi
+python3 "$SCRIPT_DIR/eval_storage.py" check --asset-root "$ASSET_ROOT" \
+    --checkpoint "$CHECKPOINT_SOURCE" --runtime-parent /var/tmp --raw-bytes "$RAW_STAGE_BYTES" --result-bytes "$COLLECTION_RESULT_BYTES"
+
+
+if [[ "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 || "$EVAL_PROFILE" == subtasks100 || "$PI05_MODEL_FORMAT" == torch ]]; then
     require_file "$CHECKPOINT_SOURCE/_CHECKPOINT_METADATA"
     require_file "$CHECKPOINT_SOURCE/SHA256SUMS.inference"
     require_file "$CHECKPOINT_SOURCE/_READY"
@@ -113,7 +169,7 @@ fi
 
 mapfile -t GPU_ROWS < <(nvidia-smi --query-gpu=index,name,driver_version --format=csv,noheader)
 REQUIRED_GPUS=2
-[[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 ]] \
+[[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 || "$EVAL_PROFILE" == subtasks100 ]] \
     && REQUIRED_GPUS="$EVAL_WORKERS"
 (( ${#GPU_ROWS[@]} >= REQUIRED_GPUS )) || fail "closed-loop evaluation requires at least $REQUIRED_GPUS GPUs"
 printf '%s\n' "${GPU_ROWS[@]}"
@@ -126,8 +182,6 @@ case "$DRIVER" in
     580.*) ;;
     *) log "WARNING: driver $DRIVER is unverified; smoke evaluation will validate RTX startup" ;;
 esac
-check_free_gb /dev/shm 40
-check_free_gb /var/tmp 120
 
 log "run id: $RUN_ID"
 log "profile: $EVAL_PROFILE"
@@ -136,7 +190,9 @@ log "checkpoint: $CHECKPOINT_SOURCE"
 log "policy environment: $PI05_ENV_ARCHIVE"
 log "persistent output: $PERSISTENT_OUTPUT"
 if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
-    log "selector diagnostic: selector=$EXTERNAL_SUBTASK_SELECTOR label_format=legacy oracle=true privileged=true official_benchmark=false"
+    log "selector diagnostic: selector=$EXTERNAL_SUBTASK_SELECTOR debounce_refreshes=$SELECTOR_DEBOUNCE_EFFECTIVE stall_steps=2048 label_format=legacy oracle=true privileged=true official_benchmark=false"
+elif [[ -n "$SUBTASK_VOTE_WINDOW" ]]; then
+    log "temporal subtask voting: action_horizon=$EXECUTE_HORIZON interval=$SUBTASK_INTERVAL window=$SUBTASK_VOTE_WINDOW threshold=$SUBTASK_VOTE_THRESHOLD oracle=false privileged=false official_benchmark=false inference_ablation=true"
 fi
 if [[ "$NEBULA_WORKER_DRY_RUN" == 1 ]]; then
     log "worker dry-run passed; no runtime directories were created"
@@ -231,11 +287,23 @@ else
     ln -s "$PI05_ENV" "$REPO_ROOT/openpi/.venv"
 fi
 
+log "installing verified offline OmniGibson runtime dependency"
+"$EVAL_ENV/bin/python" "$SCRIPT_DIR/eval_runtime.py" verify --wheel-dir "$SCRIPT_DIR/runtime-wheels"
+"$EVAL_ENV/bin/python" -m pip install --no-index --no-deps --no-cache-dir --force-reinstall --require-hashes \
+    --find-links "$SCRIPT_DIR/runtime-wheels" -r "$SCRIPT_DIR/requirements-eval-runtime.txt"
+log "checking Warp CUDA and bundled evaluation imports before large-file staging"
+mkdir -p "$OMNIGIBSON_DATA_PATH" "$RUNTIME_ROOT/early-import-check"
+env CUDA_VISIBLE_DEVICES=0 PYTHONNOUSERSITE=1 OMNI_KIT_ACCEPT_EULA=YES \
+    OMNIGIBSON_DATA_PATH="$OMNIGIBSON_DATA_PATH" OMNIGIBSON_APPDATA_PATH="$RUNTIME_ROOT/early-import-check" \
+    OMNIGIBSON_HEADLESS=1 OMNIGIBSON_DISABLE_TORCH_COMPILE=1 \
+    LD_LIBRARY_PATH="$EVAL_ENV/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    "$EVAL_ENV/bin/python" "$SCRIPT_DIR/check_eval_runtime.py" --cache-dir "$RUNTIME_ROOT/warp-cache"
+
 log "restoring OpenPI cache"
 mkdir -p "$OPENPI_DATA_HOME"
-tar -xf "$OPENPI_CACHE_ARCHIVE" -C "$OPENPI_DATA_HOME"
+"$EVAL_ENV/bin/python" "$SCRIPT_DIR/eval_storage.py" tokenizer \
+    --archive "$OPENPI_CACHE_ARCHIVE" --destination "$OPENPI_DATA_HOME"
 require_file "$OPENPI_DATA_HOME/big_vision/paligemma_tokenizer.model"
-require_file "$OPENPI_DATA_HOME/openpi-assets/checkpoints/pi05_base/params/_METADATA"
 
 log "copying inference checkpoint from OSS"
 mkdir -p "$LOCAL_CHECKPOINT"
@@ -252,7 +320,7 @@ if [[ -f "$CHECKPOINT_SOURCE/_CHECKPOINT_METADATA" ]]; then
     cp "$CHECKPOINT_SOURCE/_CHECKPOINT_METADATA" "$LOCAL_CHECKPOINT/"
 fi
 require_file "$LOCAL_CHECKPOINT/assets/$PI05_REPO_ID/norm_stats.json"
-if [[ "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 || "$PI05_MODEL_FORMAT" == torch ]]; then
+if [[ "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE" == full4 || "$EVAL_PROFILE" == subtasks100 || "$PI05_MODEL_FORMAT" == torch ]]; then
     cp "$CHECKPOINT_SOURCE/SHA256SUMS.inference" "$LOCAL_CHECKPOINT/"
     (
         cd "$LOCAL_CHECKPOINT"
@@ -262,22 +330,15 @@ fi
 
 log "copying and extracting simulator assets"
 mkdir -p "$LOCAL_ASSETS" "$OMNIGIBSON_DATA_PATH"
-cp "$ASSET_ROOT/behavior-1k-assets-3.9.0.zip" \
-    "$ASSET_ROOT/omnigibson-robot-assets-3.8.2.zip" \
-    "$ASSET_ROOT/2026-challenge-task-instances.zip" \
-    "$ASSET_ROOT/omnigibson.key" "$LOCAL_ASSETS/"
-cp "$ASSET_ROOT/SHA256SUMS" "$LOCAL_ASSETS/"
-(
-    cd "$LOCAL_ASSETS"
-    sha256sum -c SHA256SUMS
-)
+# The persistent archives already passed SHA256 above. Extract directly to
+# avoid keeping another full local copy of every zip alongside expanded assets.
 mkdir -p "$OMNIGIBSON_DATA_PATH/behavior-1k-assets" \
     "$OMNIGIBSON_DATA_PATH/omnigibson-robot-assets" \
     "$OMNIGIBSON_DATA_PATH/2026-challenge-task-instances"
-unzip -q "$LOCAL_ASSETS/behavior-1k-assets-3.9.0.zip" -d "$OMNIGIBSON_DATA_PATH/behavior-1k-assets"
-unzip -q "$LOCAL_ASSETS/omnigibson-robot-assets-3.8.2.zip" -d "$OMNIGIBSON_DATA_PATH/omnigibson-robot-assets"
-unzip -q "$LOCAL_ASSETS/2026-challenge-task-instances.zip" -d "$OMNIGIBSON_DATA_PATH/2026-challenge-task-instances"
-cp "$LOCAL_ASSETS/omnigibson.key" "$OMNIGIBSON_DATA_PATH/omnigibson.key"
+unzip -q "$ASSET_ROOT/behavior-1k-assets-3.9.0.zip" -d "$OMNIGIBSON_DATA_PATH/behavior-1k-assets"
+unzip -q "$ASSET_ROOT/omnigibson-robot-assets-3.8.2.zip" -d "$OMNIGIBSON_DATA_PATH/omnigibson-robot-assets"
+unzip -q "$ASSET_ROOT/2026-challenge-task-instances.zip" -d "$OMNIGIBSON_DATA_PATH/2026-challenge-task-instances"
+cp "$ASSET_ROOT/omnigibson.key" "$OMNIGIBSON_DATA_PATH/omnigibson.key"
 require_file "$OMNIGIBSON_DATA_PATH/behavior-1k-assets/VERSION"
 require_file "$OMNIGIBSON_DATA_PATH/omnigibson-robot-assets/VERSION"
 require_file "$OMNIGIBSON_DATA_PATH/2026-challenge-task-instances/metadata/task.jsonl"
@@ -306,6 +367,9 @@ else
 fi
 IMPORT_CHECK_RUNTIME="$RUNTIME_ROOT/omnigibson-import-check"
 IMPORT_CHECK_GPU=1
+if [[ "$EVAL_PROFILE" == subtasks100 && "$EVAL_WORKERS" == 1 ]]; then
+    IMPORT_CHECK_GPU=0
+fi
 if [[ "$EVAL_PROFILE" == smoke && "$PI05_MODEL_FORMAT" == torch ]]; then
     IMPORT_CHECK_GPU="$SMOKE_EVAL_GPU"
 fi
@@ -317,11 +381,50 @@ env CUDA_VISIBLE_DEVICES="$IMPORT_CHECK_GPU" PYTHONNOUSERSITE=1 OMNI_KIT_ACCEPT_
     LD_LIBRARY_PATH="$EVAL_ENV/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     VK_ICD_FILENAMES="$EVAL_ENV/share/vulkan/icd.d/nvidia_icd.json" \
     __EGL_VENDOR_LIBRARY_FILENAMES="$EVAL_ENV/share/glvnd/egl_vendor.d/10_nvidia.json" \
-    "$EVAL_ENV/bin/python" -c 'import bddl, isaacsim, omnigibson, torch; assert torch.cuda.is_available(); print(omnigibson.__file__, torch.cuda.get_device_name())'
+    "$EVAL_ENV/bin/python" -c 'import bddl, isaacsim, omnigibson, omnigibson.eval.eval, torch; assert torch.cuda.is_available(); print(omnigibson.__file__, torch.cuda.get_device_name())'
 LD_LIBRARY_PATH="$EVAL_ENV/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
 VK_ICD_FILENAMES="$EVAL_ENV/share/vulkan/icd.d/nvidia_icd.json" \
 __EGL_VENDOR_LIBRARY_FILENAMES="$EVAL_ENV/share/glvnd/egl_vendor.d/10_nvidia.json" \
     "$EVAL_ENV/bin/vulkaninfo" --summary | grep -E 'Vulkan Instance Version|deviceName|driverInfo'
+
+if [[ "$EVAL_PROFILE" == subtasks100 ]]; then
+    VALIDATION_ARGS=()
+    if [[ "${SUBTASK_COLLECTION_ENABLED:-0}" == 1 ]]; then
+        [[ "$EVAL_WORKERS" == 1 && "${SUBTASK_VALIDATION_ENABLED:-0}" == 0 ]] || fail "collection requires one GPU and no validation plan"
+        VALIDATION_ARGS=(--collection-plan "$SCRIPT_DIR/subtask_collection_plan.json")
+        log "collecting frozen subtask attempts on one GPU"
+    elif [[ "${SUBTASK_VALIDATION_ENABLED:-0}" == 1 ]]; then
+        [[ "$EVAL_WORKERS" == 1 ]] || fail "subtask validation requires one GPU"
+        VALIDATION_ARGS=(--validation-plan "$SCRIPT_DIR/subtask_validation_plan.json")
+        log "running limited subtask state validation on one GPU"
+    else
+        [[ "$EVAL_WORKERS" == 4 || "$EVAL_WORKERS" == 8 ]] || fail "subtasks100 requires 4 or 8 workers"
+        log "running frozen 100-task subtask diagnostic with $EVAL_WORKERS co-located policy/simulator workers"
+    fi
+    [[ "$PI05_MODEL_FORMAT" == jax && "$SUBTASK_PREDICTION" == 1 && "$WRITE_VIDEO" == 1 ]] || fail "subtasks100 requires a joint JAX checkpoint and videos"
+    touch "$PERSISTENT_OUTPUT/_RUNNING"
+    LD_LIBRARY_PATH="$EVAL_ENV/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$EVAL_ENV/bin/python" -c 'import h5py, numpy; print("Subtask state reader:", h5py.__version__)'
+    setsid env OPENPI_DATA_HOME="$OPENPI_DATA_HOME" EXECUTE_HORIZON="$EXECUTE_HORIZON" \
+        LD_LIBRARY_PATH="$EVAL_ENV/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        OMNIGIBSON_HEADLESS=1 OMNIGIBSON_DISABLE_TORCH_COMPILE=1 \
+        "$EVAL_ENV/bin/python" "$SCRIPT_DIR/subtask_eval.py" run \
+        --panel "$SCRIPT_DIR/subtask_panel.json" --inventory "$SCRIPT_DIR/subtask_raw_inventory.json" \
+        --raw-source "$SUBTASK_RAW_SOURCE" --raw-root "$RUNTIME_ROOT/subtask-raw" \
+        --run-root "$LOCAL_RESULTS" --run-id "$RUN_ID" --persistent-output "$PERSISTENT_OUTPUT" \
+        --checkpoint "$LOCAL_CHECKPOINT" --checkpoint-source "$CHECKPOINT_SOURCE" --repo-id "$PI05_REPO_ID" \
+        --eval-env "$EVAL_ENV" --pi05-env "$PI05_ENV" --asset-path "$OMNIGIBSON_DATA_PATH" \
+        --workers "$EVAL_WORKERS" --base-port "$BASE_PORT" \
+        --sample-max-steps "$SUBTASK_SAMPLE_MAX_STEPS" "${VALIDATION_ARGS[@]}" &
+    EVAL_PIDS+=("$!")
+    status=0
+    wait "${EVAL_PIDS[0]}" || status=$?
+    EVAL_PIDS=()
+    (( status == 0 )) || fail "subtask diagnostic failed with exit code $status"
+    require_file "$PERSISTENT_OUTPUT/_SUCCESS"
+    log "subtask diagnostic complete: $PERSISTENT_OUTPUT"
+    exit 0
+fi
 
 case "$EVAL_PROFILE" in
     smoke)
@@ -508,6 +611,10 @@ if bool($SUBTASK_PREDICTION):
         else (2 if action_conditioning == "subtask_only" else 1)
     )
     subtask_interval_source = "explicit" if requested_subtask_interval else "policy_default"
+requested_selector_debounce = "$SELECTOR_DEBOUNCE_REFRESHES"
+effective_selector_debounce = (
+    int(requested_selector_debounce or 3) if selector else None
+)
 path = pathlib.Path("$PERSISTENT_OUTPUT/manifest.json")
 path.write_text(json.dumps({
     "run_id": "$RUN_ID",
@@ -529,7 +636,19 @@ path.write_text(json.dumps({
     "subtask_action_conditioning": action_conditioning,
     "subtask_interval": subtask_interval,
     "subtask_interval_source": subtask_interval_source,
+    "action_horizon": int("$EXECUTE_HORIZON"),
     "subtask_temperature": (0.0 if bool($SUBTASK_PREDICTION) else None),
+    "subtask_voting": ({
+        "mode": "temporal_majority",
+        "action_horizon": int("$EXECUTE_HORIZON"),
+        "interval": int("$SUBTASK_INTERVAL"),
+        "window": int("$SUBTASK_VOTE_WINDOW"),
+        "threshold": int("$SUBTASK_VOTE_THRESHOLD"),
+        "oracle": False,
+        "privileged": False,
+        "official_benchmark": False,
+        "inference_ablation": True,
+    } if "$SUBTASK_VOTE_WINDOW" else None),
     "external_subtask_selector": selector,
     "selector_diagnostics": ({
         "selector": selector,
@@ -537,6 +656,11 @@ path.write_text(json.dumps({
         "selector_labels_sha256": "fd785101426544b24ce756a84e72e2f5971776cfe6ebf7bde18e5ff7fb58ac04",
         "legacy_segments_sha256": "999c58103ad91046d3a1215e202ab2022c645b55524261b3eeed6d66e7f1322d",
         "training_annotation_sha256": "870086137b5fac4ff8a701e6e539cdc99ee43d3efacb81028a2ae0b4f78fff2d",
+        "requested_debounce_refreshes": (
+            int(requested_selector_debounce) if requested_selector_debounce else None
+        ),
+        "effective_debounce_refreshes": effective_selector_debounce,
+        "stall_steps": 2048,
         "oracle": True,
         "privileged": True,
         "official_benchmark": False,
@@ -554,6 +678,7 @@ path.write_text(json.dumps({
     "expected_rollouts": $EXPECTED_ROLLOUTS,
     "expected_videos": ($EXPECTED_ROLLOUTS if bool($WRITE_VIDEO) else 0),
     "require_subtask_events": bool($SUBTASK_PREDICTION),
+    "require_subtask_vote_events": bool("$SUBTASK_VOTE_WINDOW"),
     "require_selector_events": bool(selector),
     "driver": "$DRIVER",
     "eval_workers": $EVAL_WORKERS,
@@ -589,7 +714,10 @@ if [[ "$EVAL_PROFILE" == speed || "$EVAL_PROFILE" == two_tasks || "$EVAL_PROFILE
         log "launching $EVAL_PROFILE worker=$worker tasks=[$tasks] indices=[$indices] gpu=$worker port=$port"
         setsid env MODEL=pi05 PI05_CKPT="$LOCAL_CHECKPOINT" PI05_REPO_ID="$PI05_REPO_ID" \
             PI05_ENV="$PI05_ENV" SUBTASK_PREDICTION="$SUBTASK_PREDICTION" \
-            SUBTASK_INTERVAL="$SUBTASK_INTERVAL" EXTERNAL_SUBTASK_SELECTOR="$EXTERNAL_SUBTASK_SELECTOR" \
+            SUBTASK_INTERVAL="$SUBTASK_INTERVAL" SUBTASK_VOTE_WINDOW="$SUBTASK_VOTE_WINDOW" \
+            SUBTASK_VOTE_THRESHOLD="$SUBTASK_VOTE_THRESHOLD" EXECUTE_HORIZON="$EXECUTE_HORIZON" \
+            EXTERNAL_SUBTASK_SELECTOR="$EXTERNAL_SUBTASK_SELECTOR" \
+            SELECTOR_DEBOUNCE_REFRESHES="$SELECTOR_DEBOUNCE_REFRESHES" \
             MAX_TOKEN_LEN="$POLICY_MAX_TOKEN_LEN" MAX_SUBTASK_LEN=64 SUBTASK_TEMPERATURE=0 \
             PROMPT_MODE=whole_task MODE=public_test \
             SERVER_GPU="$worker" EVAL_GPU="$worker" PORT="$port" EVAL_ENV="$EVAL_ENV" \
@@ -642,6 +770,9 @@ status = {
     "completed_rollouts": len(results),
     "completed_videos": sum(1 for path in root.rglob("videos/*.mp4") if path.stat().st_size > 0),
     "rollouts_with_subtask_events": sum(bool(result.get("subtask_events")) for result in results),
+    "rollouts_with_subtask_vote_events": sum(
+        bool(result.get("subtask_vote_events")) and bool(result.get("subtask_vote_summary")) for result in results
+    ),
     "rollouts_with_selector_events": sum(
         bool(result.get("selector_events")) and bool(result.get("selector_summary")) for result in results
     ),
@@ -669,7 +800,10 @@ else
         set +e
         setsid env MODEL=pi05 PI05_CKPT="$LOCAL_CHECKPOINT" PI05_REPO_ID="$PI05_REPO_ID" \
             PI05_ENV="$PI05_ENV" SUBTASK_PREDICTION="$SUBTASK_PREDICTION" \
-            SUBTASK_INTERVAL="$SUBTASK_INTERVAL" EXTERNAL_SUBTASK_SELECTOR="$EXTERNAL_SUBTASK_SELECTOR" \
+            SUBTASK_INTERVAL="$SUBTASK_INTERVAL" SUBTASK_VOTE_WINDOW="$SUBTASK_VOTE_WINDOW" \
+            SUBTASK_VOTE_THRESHOLD="$SUBTASK_VOTE_THRESHOLD" EXECUTE_HORIZON="$EXECUTE_HORIZON" \
+            EXTERNAL_SUBTASK_SELECTOR="$EXTERNAL_SUBTASK_SELECTOR" \
+            SELECTOR_DEBOUNCE_REFRESHES="$SELECTOR_DEBOUNCE_REFRESHES" \
             MAX_TOKEN_LEN="$POLICY_MAX_TOKEN_LEN" MAX_SUBTASK_LEN=64 SUBTASK_TEMPERATURE=0 \
             PROMPT_MODE=whole_task MODE=public_test \
             SERVER_GPU=0 EVAL_GPU="$SERIAL_EVAL_GPU" PORT="$BASE_PORT" EVAL_ENV="$EVAL_ENV" \
@@ -736,11 +870,19 @@ if [[ "$SUBTASK_PREDICTION" == 1 && -n "$SUBTASK_INTERVAL" ]]; then
                 log "$EVAL_PROFILE worker $worker server log does not confirm SUBTASK_INTERVAL=$SUBTASK_INTERVAL"
                 status=1
             fi
+            if [[ -n "$SUBTASK_VOTE_WINDOW" ]] && ! grep -Fq "Subtask vote id=" "$server_log"; then
+                log "$EVAL_PROFILE worker $worker server log contains no temporal subtask votes"
+                status=1
+            fi
         done
     else
         server_log="$LOCAL_RESULTS/pi05/server_$BASE_PORT.log"
         if ! grep -Fq "subtask refresh every $SUBTASK_INTERVAL requests" "$server_log"; then
             log "$EVAL_PROFILE server log does not confirm SUBTASK_INTERVAL=$SUBTASK_INTERVAL"
+            status=1
+        fi
+        if [[ -n "$SUBTASK_VOTE_WINDOW" ]] && ! grep -Fq "Subtask vote id=" "$server_log"; then
+            log "$EVAL_PROFILE server log contains no temporal subtask votes"
             status=1
         fi
     fi
@@ -803,6 +945,18 @@ elif [[ "$EVAL_PROFILE" == smoke && -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     SUMMARY_ARGS+=(--require-subtask-events --require-selector-events)
 elif [[ "$EVAL_PROFILE" == smoke && "$SUBTASK_PREDICTION" == 1 ]]; then
     SUMMARY_ARGS+=(--require-subtask-events --require-generated-subtasks)
+fi
+if [[ -n "$SUBTASK_VOTE_WINDOW" ]]; then
+    SUMMARY_ARGS+=(
+        --require-subtask-vote-events
+        --expected-subtask-vote-action-horizon "$EXECUTE_HORIZON"
+        --expected-subtask-vote-interval "$SUBTASK_INTERVAL"
+        --expected-subtask-vote-window "$SUBTASK_VOTE_WINDOW"
+        --expected-subtask-vote-threshold "$SUBTASK_VOTE_THRESHOLD"
+    )
+fi
+if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
+    SUMMARY_ARGS+=(--expected-selector-debounce-refreshes "$SELECTOR_DEBOUNCE_EFFECTIVE")
 fi
 set +e
 "$PI05_ENV/bin/python" "$SCRIPT_DIR/summarize_pi05_eval.py" "${SUMMARY_ARGS[@]}"

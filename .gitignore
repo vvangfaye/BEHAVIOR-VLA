@@ -1,7 +1,10 @@
 # The upstream repositories are flattened into this workspace repository.
 
-# Large local source trees, datasets, generated views, models, and training artifacts.
-/BEHAVIOR-1K/
+# BEHAVIOR source is vendored; simulator datasets and local runtime files remain local.
+/BEHAVIOR-1K/datasets/
+/BEHAVIOR-1K/omnigibson.key
+
+# Large datasets, generated views, models, and training artifacts.
 /dataset_views/
 /datasets/
 /data/
@@ -43,3 +46,6 @@ wandb/
 
 # Generated experiment results; keep reusable code in scripts/.
 /experiments/
+
+# Downloaded Linux wheels for offline evaluation environment repair.
+/nebula/runtime-wheels/

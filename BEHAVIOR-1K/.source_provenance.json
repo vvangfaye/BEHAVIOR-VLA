@@ -1,0 +1,12 @@
+{
+  "oss_prefix": "oss://traffic-model/wangfaye/code_snapshots/behavior_20261006_175852_291109",
+  "archive_bytes": 3445560,
+  "archive_sha256": "dbdcaf9666cd5744fd3e582353d882f110f1492dd18c2ff6ad7f4eb6cf3abf3d",
+  "entry_count": 2451,
+  "evaluator_bytes": 44461,
+  "evaluator_sha256": "22644b6a6515ee3c3978e0adff00d7e92a01c96d962a89dcea1cdd90336f7179",
+  "has_subtask_sample": false,
+  "has_external_subtask_selector": true,
+  "snapshot_version": "3.9.0",
+  "scope": "NAS evaluation source subset; application adapters are maintained in scripts/"
+}

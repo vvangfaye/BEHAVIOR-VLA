@@ -1,0 +1,30 @@
+{
+  "repository": "https://github.com/StanfordVL/BEHAVIOR-1K",
+  "release_tag": "v3.9.3-post1",
+  "commit": "bd049de3119acdcdf2334fe9e1ebe060fa20c108",
+  "omnigibson_version": "3.9.3",
+  "previous_upstream_tag": "v3.9.0",
+  "previous_upstream_commit": "6559858f7c814143f08be27830d24fac16a12058",
+  "nas_baseline_commit": "640e241",
+  "nas_snapshot_provenance": ".source_provenance.json",
+  "scope": "Runtime packages omnigibson, bddl and gello; OmniGibson tests; package metadata, setup scripts and licenses. Excludes full documentation site, asset pipeline, knowledgebase web app and eval-jobqueue.",
+  "local_changes": [
+    "OmniGibson/omnigibson/utils/python_utils.py",
+    "OmniGibson/omnigibson/eval/eval.py",
+    "OmniGibson/omnigibson/eval/evaluator.py",
+    "OmniGibson/omnigibson/eval/policies.py",
+    "OmniGibson/omnigibson/eval/utils/network_utils.py",
+    "OmniGibson/omnigibson/eval/subtask_selectors.py",
+    "OmniGibson/omnigibson/eval/single_env.py"
+  ],
+  "relocated_official_files": {
+    "batched_eval.py": {
+      "upstream_path": "OmniGibson/omnigibson/eval/eval.py",
+      "sha256": "93c4dbf4a6bcdf17f2edcafda7132a3b83bebf6d5dba3dda90d7c157862d4ccd"
+    },
+    "batched_evaluator.py": {
+      "upstream_path": "OmniGibson/omnigibson/eval/evaluator.py",
+      "sha256": "7c66958717945b7c2f618cb6d779828ebcd945c4c4968193360d787f576cb4e5"
+    }
+  }
+}

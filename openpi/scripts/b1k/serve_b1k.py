@@ -43,6 +43,8 @@ class Args:
     server_token: str | None = None
     # Record the policy's behavior for debugging.
     record: bool = False
+    # Enable explicitly reproducible collection seeds; ordinary evaluation keeps defaults.
+    collection_seeding: bool = False
     # Use the joint subtask-trained checkpoint and generate text before actions.
     subtask_prediction: bool = False
     # Use a selector-provided subtask as the only language prompt for an action-only checkpoint.
@@ -54,11 +56,22 @@ class Args:
     # None reads checkpoint assets; old checkpoints default to task_and_subtask.
     subtask_action_conditioning: str | None = None
     subtask_temperature: float = 0.0
+    subtask_vote_window: int | None = None
+    subtask_vote_threshold: int | None = None
 
 
 def main(args: Args) -> None:
     if args.server_token is not None and not args.server_token.strip():
         raise ValueError("server_token must be nonempty")
+    if type(args.action_horizon) is not int or args.action_horizon < 1:
+        raise ValueError("action_horizon must be a positive integer")
+    voting_requested = args.subtask_vote_window is not None or args.subtask_vote_threshold is not None
+    if (args.subtask_vote_window is None) != (args.subtask_vote_threshold is None):
+        raise ValueError("--subtask-vote-window and --subtask-vote-threshold must be set together.")
+    if voting_requested and not args.subtask_prediction:
+        raise ValueError("Temporal subtask voting requires --subtask-prediction.")
+    if voting_requested and args.provided_subtask_as_prompt:
+        raise ValueError("Temporal subtask voting cannot use provided-subtask prompt mode.")
 
     # Load task from registry
     task_bucket, task_name = args.task.split("/")
@@ -113,8 +126,11 @@ def main(args: Args) -> None:
         subtask_interval=args.subtask_interval,
         subtask_temperature=args.subtask_temperature,
         subtask_action_conditioning=args.subtask_action_conditioning,
+        subtask_vote_window=args.subtask_vote_window,
+        subtask_vote_threshold=args.subtask_vote_threshold,
     )
     policy_metadata = dict(policy.metadata)
+    policy_metadata["action_horizon"] = args.action_horizon
     if args.provided_subtask_as_prompt:
         policy_metadata["conditioning_mode"] = "provided_subtask_as_prompt"
     logging.info(
@@ -137,6 +153,11 @@ def main(args: Args) -> None:
         max_len=config.model.action_horizon,
         provided_subtask_as_prompt=args.provided_subtask_as_prompt,
     )
+
+    if args.collection_seeding:
+        from openpi.shared.collection_seeding import SeededCollectionPolicy
+        policy = SeededCollectionPolicy(policy)
+        policy_metadata["collection_seeding"] = True
 
     hostname = socket.gethostname()
     local_ip = socket.gethostbyname(hostname)

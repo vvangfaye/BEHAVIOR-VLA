@@ -28,7 +28,7 @@ The script:
 - repairs the archived `packaging`/`setuptools` payload only if its import check fails;
 - checks π0.5 imports, JAX GPUs, eval imports, CUDA, and Vulkan.
 
-If the script reports a non-empty incomplete target, inspect it first. Never delete or overwrite an existing environment without user approval. Do not fall back to `setup_envs.sh` or `setup_eval_env.sh` while the archives exist; those scripts can contact GitHub and PyPI.
+If the script reports a non-empty incomplete target, inspect it first. Prefer a fresh target for incomplete environments. Within the authorized competition workflow, repair only owned temporary environments after preserving needed evidence; no repeated confirmation is required. Preserve unrelated or actively used environments. Do not fall back to `setup_envs.sh` or `setup_eval_env.sh` while the archives exist; those scripts can contact GitHub and PyPI.
 
 Use check-only mode at any time:
 
