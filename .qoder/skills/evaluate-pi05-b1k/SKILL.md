@@ -11,7 +11,7 @@ Reuse the repository launchers and validator. Do not recreate policy serving, si
 
 1. Work from `/mnt/workspace/wangfaye/code/BEHAVIOR-Challenge` and inspect `git status` before relying on local code.
 2. Never read, print, copy, upload, summarize, or commit `nebula/config.sh`. Let `nebula/submit_pi05_eval.sh` source it internally. Keep shell tracing disabled and never print a complete remote environment.
-3. Require explicit user approval immediately before an actual Nebula submission, job stop, output deletion, Git push, or other shared/destructive action. A prior submission approval or dry run does not authorize another submission.
+3. Proceed autonomously with Nebula submissions, failed-job stops, necessary retries and Git pushes within the user-authorized competition workflow after their concrete preflights pass. The user has requested that these operations do not require repeated confirmation. Preserve evidence and needed checkpoints/results; use fresh run IDs and output roots. Do not expand to unrelated resources or work outside the requested scope.
 4. Use a fresh run ID, output root, ports, and runtime roots. Never launch into an existing result directory; stale JSON can produce false completeness or duplicate rollouts.
 5. Before launching locally, inspect all GPUs and compute processes. Never stop or reuse unrelated processes:
 
@@ -156,7 +156,7 @@ Count only completed JSON files; a video can exist while its rollout is still ru
 
 Inspect log growth and selected signatures with dedicated search tools. Expected progress includes `app ready`, `Result:`, and `Eval summary:`. Treat `CUDA out of memory`, segmentation faults, ray-tracing pipeline failures, invalid Vulkan initialization, Python tracebacks after rollout startup, or a worker exit without its expected JSON count as failures.
 
-Do not restart successful shards. For a failed shard, preserve evidence, determine the missing rollout keys, and obtain approval before a replacement run if it could duplicate or overwrite results.
+Do not restart successful shards. For a failed shard, preserve evidence, determine missing rollout keys, and preflight a fresh replacement run that avoids duplicate or overwritten results. Proceed under the ongoing task authorization.
 
 ## Submit through Nebula
 
@@ -184,7 +184,7 @@ DRY_RUN=1 KEEP_BUNDLE=1 \
 
 Inspect only bundle filenames and contract output. Verify the bundle does not contain `nebula/config.sh`. Do not print file contents that may contain credentials.
 
-After the dry run passes, summarize the exact checkpoint, profile, rollout count, worker/GPU topology, conditioning, output root, and cost/blast radius. Obtain explicit user approval, then repeat the same command without `DRY_RUN` and `KEEP_BUNDLE`.
+After the dry run passes, summarize the exact checkpoint, profile, rollout count, worker/GPU topology, conditioning, output root, and cost/blast radius. Proceed under the user's ongoing task authorization and repeat the same preflighted command without `DRY_RUN` and `KEEP_BUNDLE`; no per-submission confirmation is required.
 
 Save and report the receipt path and submitted IID. If CLI output is interrupted or ambiguous, do not resubmit. Check the receipt and use ordinary targeted AIHub status only; never request detailed status or print the remote environment.
 
@@ -204,7 +204,7 @@ Expected persistent artifacts include:
 <output>/_RUNNING | _FAILED | _SUCCESS
 ```
 
-Do not automatically resubmit `_FAILED`, incomplete, or ambiguous jobs. Diagnose first and ask before a new submission. Never delete completed formal results unless explicitly requested.
+Diagnose `_FAILED` or incomplete jobs before retrying; preserve evidence and use a fresh preflighted run under the ongoing authorization. For ambiguous jobs, establish authoritative state before any retry. Never delete completed formal results unless explicitly requested.
 
 ## Validate and summarize final results
 
@@ -246,3 +246,8 @@ Report:
 - comparison against only evaluations with matching task, instances, rollouts, prompt mode, and evaluator contract.
 
 Do not infer closed-loop success from open-loop L1/RMSE, and do not treat partial-run metrics as final.
+## Long exact-state restoration and WebSocket liveness
+
+Full-panel start materialization replays every recorded state through the latest requested frame before the first rollout. It can take tens of minutes. The BEHAVIOR client and B1K policy server disable heartbeat timers so this work or first JAX compilation cannot cause a false `1011 keepalive ping timeout`. Existing process/episode supervision and socket closure handling remain authoritative. Never interpret this exception as model failure, and never blindly retry an inference request because it would alter stochastic state.
+
+After changing connection liveness, validate actual loopback reset/action semantics and run a bounded one-L20 GPU probe that includes late starts beyond frame 20,000. Require complete named-state results, nonempty videos and eligible actual late-start actions; the earlier 0–541-frame probe alone does not cover a long idle connection. Use `STATE_REPLAY_BEGIN/PROGRESS/COMPLETE` logs to distinguish ongoing materialization from rollout or transport failure. Preserve failed-run evidence, use fresh run/output roots and include network code in paired comparison fingerprints.

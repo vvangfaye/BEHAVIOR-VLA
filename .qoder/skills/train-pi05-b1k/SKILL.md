@@ -20,9 +20,9 @@ nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_memory --format=c
 Use `ps -o user,pid,lstart,cmd -p "$PID"` for ambiguous processes. Never stop, reuse, or oversubscribe a device owned by an unrelated process. Recheck immediately before launch.
 
 3. Give every new run a fresh `EXP_NAME`, log path, assets ID, checkpoint root, and Nebula output root. Reuse them only for an intentional resume.
-4. Never read, print, copy, upload, or commit `nebula/config.sh`. Let the approved launcher source it internally. Never hardcode credentials or enable shell tracing.
+4. Never read, print, copy, upload, or commit `nebula/config.sh`. Let the repository launcher source it internally. Never hardcode credentials or enable shell tracing.
 5. Never call `ai-hub-cli train status --detail`; detailed metadata can expose worker environment values. Use ordinary targeted status only.
-6. Require explicit user approval before an actual Nebula submission, job stop, checkpoint deletion, Git push, or another externally visible/destructive action. A dry run is not approval to submit.
+6. Proceed autonomously with preflighted training submissions, failed-job stops, necessary resumes/retries and Git pushes within the user-authorized competition workflow. The user has requested no repeated confirmations. Preserve needed checkpoints and formal results, use fresh attempts/output roots, and keep actions within the requested scope.
 
 ## Choose the training objective
 
@@ -79,6 +79,22 @@ Create a held-out split only when the user wants offline validation:
 ```
 
 The split keeps each `(task_index, task_instance_id)` group on one side. It refuses a nonempty output directory. For training all retained episodes, pass `EPISODES_FILE=$RETAINED_EPISODES` and omit `VAL_EPISODES_FILE`.
+
+## Bounded collection fine-tuning
+
+For the low-success-subtask experiment initialized from verified checkpoint 1375000, use `nebula/submit_subtask_finetune.sh prepare` followed by `submit` after preflight, under the user's existing autonomous authorization. See `docs/subtask_data_improvement.md` for all inputs. Do not substitute the full100 multihost job: this adapter uses one host, explicit successful new trajectories, selected original replay and a fresh optimizer.
+
+After actual collection completes, use `scripts/select_subtask_replay.py select` with the frozen paired retest plan to choose whole original episodes from measured successful unique frame yield. Retain exact target prompts and the same distinct control tasks, exclude reserved instances, and record the realized new-frame fraction. Feed its `original_episode_ids.txt` to the existing OSS replay stager; a source audit alone does not justify training.
+
+Require real completed collection artifacts with `ready_for_export=true`; preserve the frozen held-out instances for both new data and replay. Default bounded training to one host with 4 H20 GPUs in `demand_specific_na175_h20`, batch 8, 1000 steps after the two-step smoke. Freeze queue/card in the preparation plan and verify actual GPU names before training. Keep simulator collection and closed-loop evaluation on L20. Keep `task_and_subtask`, 32-step model windows, PyAV decoding and the exact base norm statistics. Preparation freezes OSS inputs and bundled code, while the worker revalidates/exports actual data and runs `scripts/finetune_subtask_collection.py`.
+
+Use a fresh run/preparation/output for every retry, inspect an ambiguous submission's recorded IID, and never repeat its claim. Successful code tests or synthetic codec fixtures do not establish GPU training or improvement. Require the actual training receipt, verified staged inference manifest and final OSS `_SUCCESS` before independent paired retesting.
+
+## Authorized H20 placeholder reclamation
+
+The user has identified MEGA jobs in `demand_specific_na175_h20` as placeholders and explicitly permits stopping them automatically when resources are needed for this competition's training. No further per-action approval is required.
+
+Reclaim only after the actual training data/model/bundle preflight passes and the intended bounded training allocation is blocked by insufficient capacity. Read queue availability and jobs using ordinary metadata APIs; require the exact queue, an unambiguous MEGA placeholder identity and active status. Refresh the specific task's metadata immediately before stopping it, preserve a receipt and stop only enough confirmed placeholders for the requested allocation. Recheck resource availability before releasing another job. If task identity, queue membership or query results are ambiguous, leave that task running and continue diagnosis; a failed or empty queue query is not proof of zero free GPUs. Do not stop other training jobs or use broad process kills. This is agent-managed reclamation at submission time, not a blanket cleanup on launcher startup.
 
 ## Optional FrameSamp visual memory
 
@@ -213,7 +229,7 @@ test ! -e "$BUNDLE_DIR/nebula/config.sh"
 
 Use only known cluster JSON files: normally `nebula/multihost_cluster.json`; use `nebula/multihost_cluster_4gpu.json` only for a compatible development contract. Do not pass arbitrary files through `CLUSTER_FILE`.
 
-After explicit submission approval, repeat the exact command without `DRY_RUN` and `KEEP_BUNDLE`. Use separate run/output roots for `discover`, `preflight`, `smoke`, and `full` unless resuming:
+After the concrete submission preflight passes, repeat the exact command without `DRY_RUN` and `KEEP_BUNDLE` under the ongoing task authorization; do not ask for per-submission confirmation. Use separate run/output roots for `discover`, `preflight`, `smoke`, and `full` unless resuming:
 
 ```text
 discover → preflight → smoke → full
@@ -253,7 +269,7 @@ assets/
 
 Also verify all ranks agree on the latest step and that the original profile, dataset, topology, batch, repo ID, conditioning mode, and contract are unchanged.
 
-Resume with the same `RUN_ID`, `OUTPUT_ROOT`, `EXP_NAME`, `REPO_ID`, and `DATASET_PROFILE`; set `MODE=full RESUME=1`; create a fresh `ATTEMPT_ID` and `JOB_NAME`. Dry-run and obtain approval again before submitting.
+Resume with the same `RUN_ID`, `OUTPUT_ROOT`, `EXP_NAME`, `REPO_ID`, and `DATASET_PROFILE`; set `MODE=full RESUME=1`; create a fresh `ATTEMPT_ID` and `JOB_NAME`. Dry-run the concrete resume configuration and submit under the ongoing authorization without repeated confirmation.
 
 Only stop a job after an explicit request. First wait for and verify the desired complete checkpoint, then use ordinary status and:
 

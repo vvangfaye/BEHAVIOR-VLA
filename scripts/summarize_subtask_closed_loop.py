@@ -215,6 +215,14 @@ def _validate_result(
         if result.get(name) != value:
             errors.append(f"{name} is {result.get(name)!r}, expected {value!r}")
 
+    if result.get("result_state") == "source_excluded":
+        from subtask_source_exclusion import validate_source_exclusion
+        try:
+            validate_source_exclusion(result, sample, fingerprint, raw_provenance)
+        except (ValueError, TypeError, KeyError) as error:
+            errors.append(str(error))
+        return errors
+
     success = result.get("success")
     eligible = result.get("metric_eligible")
     result_state = result.get("result_state")
@@ -442,7 +450,8 @@ def _group_summary(
         "scheduled_segments": len(scheduled),
         "valid_results": len(results),
         "metric_eligible": len(eligible),
-        "setup_excluded": len(results) - len(eligible),
+        "setup_excluded": sum(result["result_state"] == "setup_excluded" for result in results),
+        "source_excluded": sum(result["result_state"] == "source_excluded" for result in results),
         "unsupported": len(exclusions),
         "successes": len(successes),
         "completion_rate": len(successes) / len(eligible) if eligible else None,
@@ -521,6 +530,12 @@ def summarize(
             raw_provenance.get(sample["sample_id"]),
             max_steps,
         )
+        if not errors and result.get("result_state") != "source_excluded" and run_manifest is not None and run_manifest.get("state_protocol") == "recorded_native_fields_v1":
+            from recorded_native_state import validate_baseline_result
+            try:
+                validate_baseline_result(result, sample, raw_provenance.get(sample["sample_id"]), max_steps)
+            except (ValueError, TypeError, KeyError, AttributeError) as error:
+                errors.append(str(error))
         if errors:
             invalid_results.append(
                 {"sample_id": sample["sample_id"], "path": str(path), "errors": errors}
@@ -571,9 +586,12 @@ def summarize(
     prompt_groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for sample in samples:
         prompt_groups[(sample["task"], sample["subtask"])].append(sample)
-    for (task, prompt), values in sorted(prompt_groups.items()):
+    prompt_exclusions: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for item in exclusions:
+        prompt_exclusions[(item["task"], item["subtask"])].append(item)
+    for task, prompt in sorted(set(prompt_groups) | set(prompt_exclusions)):
         per_prompt_label.setdefault(task, {})[prompt] = _group_summary(
-            values, [], result_by_sample
+            prompt_groups[(task, prompt)], prompt_exclusions[(task, prompt)], result_by_sample
         )
 
     unsupported_annotations = [
@@ -605,7 +623,13 @@ def summarize(
             "evidence": result["setup_evidence"],
         }
         for sample, result in valid_results
-        if not result["metric_eligible"]
+        if result["result_state"] == "setup_excluded"
+    ]
+    source_exclusions = [
+        {"sample_id": sample["sample_id"], "task": sample["task"],
+         "skill_description": sample["skill_description"], "subtask": sample["subtask"],
+         "reason": result["source_exclusion_reason"], "evidence": result["source_evidence"]}
+        for sample, result in valid_results if result["result_state"] == "source_excluded"
     ]
 
     overall = _group_summary(samples, exclusions, result_by_sample)
@@ -634,6 +658,7 @@ def summarize(
         "held_out": False,
         "training_set_diagnostic": True,
         "checkpoint": checkpoint,
+        "run_id": run_manifest.get("run_id") if run_manifest is not None else None,
         "panel_fingerprint": panel["fingerprint"],
         "expected_episode_jobs": len(panel.get("episodes", [])),
         "expected_annotated_segments": len(samples) + len(exclusions),
@@ -642,6 +667,15 @@ def summarize(
         "accounted_annotations": accounted,
         "coverage": accounted / (len(samples) + len(exclusions)),
         "overall": overall,
+        "sample_max_steps": max_steps,
+        "state_fidelity": {
+            "contract": "recorded_native_fields_v1",
+            "required": run_manifest is not None and run_manifest.get("state_protocol") == "recorded_native_fields_v1",
+            "verified": not incomplete and run_manifest is not None and run_manifest.get("state_protocol") == "recorded_native_fields_v1",
+            "eligible_results_verified": overall["metric_eligible"] if run_manifest is not None and run_manifest.get("state_protocol") == "recorded_native_fields_v1" else 0,
+            "source_excluded": overall["source_excluded"],
+            "unrecorded_physics_caches_or_timers_verified": False,
+        },
         "successes": overall["successes"],
         "success_rate": overall["completion_rate"],
         "per_task": per_task,
@@ -649,6 +683,7 @@ def summarize(
         "per_prompt_label": per_prompt_label,
         "per_label": per_prompt_label,
         "setup_exclusions": setup_exclusions,
+        "source_exclusions": source_exclusions,
         "unsupported_annotations": unsupported_annotations,
         "missing_results": missing_results,
         "unexpected_results": unexpected_results,

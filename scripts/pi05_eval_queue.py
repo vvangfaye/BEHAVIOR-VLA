@@ -219,20 +219,23 @@ class EvaluationQueue:
         return {row["key"]: json.loads(row["value"]) for row in rows}
 
     def claim(
-        self, task: str, worker: str, attempt_root: str | Path
+        self, task: str, worker: str, attempt_root: str | Path, *, instance_id: int | None = None
     ) -> JobLease | None:
         if not task.strip() or not worker.strip():
             raise ValueError("task and worker must be nonempty")
+        if instance_id is not None and (type(instance_id) is not int or instance_id < 0):
+            raise ValueError("instance_id must be a nonnegative integer")
         attempt_root = Path(attempt_root).expanduser().resolve()
         with self._immediate() as connection:
             row = connection.execute(
                 """
                 SELECT * FROM jobs
                 WHERE task = ? AND state = 'pending' AND attempts < max_attempts
+                  AND (? IS NULL OR instance_id = ?)
                 ORDER BY CASE WHEN attempts = 0 THEN 0 ELSE 1 END, attempts, instance_id
                 LIMIT 1
                 """,
-                (task,),
+                (task, instance_id, instance_id),
             ).fetchone()
             if row is None:
                 return None
@@ -380,6 +383,13 @@ class EvaluationQueue:
                 "rollout result identity does not match "
                 f"{(task, instance_id, rollout_id)!r}"
             )
+        if value.get("result_state") == "source_excluded":
+            from subtask_source_exclusion import validate_source_exclusion
+            try:
+                validate_source_exclusion(value)
+            except (ValueError, TypeError, KeyError) as error:
+                raise ArtifactValidationError(str(error)) from error
+            return
         if not isinstance(value["task"], str) or not value["task"].strip():
             raise ArtifactValidationError("rollout task must be a nonempty string")
         for name in ("instance_id", "rollout_id", "steps"):
@@ -487,6 +497,13 @@ class EvaluationQueue:
 
     @staticmethod
     def _result_is_metric_eligible(value: dict) -> bool:
+        if value.get("result_state") == "source_excluded":
+            from subtask_source_exclusion import validate_source_exclusion
+            try:
+                validate_source_exclusion(value)
+            except (ValueError, TypeError, KeyError) as error:
+                raise ArtifactValidationError(str(error)) from error
+            return False
         metric_eligible = value.get("metric_eligible")
         result_state = value.get("result_state")
         if not isinstance(metric_eligible, bool):

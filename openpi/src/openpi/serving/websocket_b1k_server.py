@@ -55,6 +55,9 @@ class WebsocketPolicyServer:
             compression=None,
             max_size=None,
             process_request=_health_check,
+            # Scene restoration and the first JAX compile can starve heartbeat
+            # replies for minutes. Process/episode supervision owns liveness.
+            ping_interval=None,
         ) as server:
             await server.serve_forever()
 
@@ -88,6 +91,8 @@ class WebsocketPolicyServer:
                     subtask_sources = getattr(self._policy, "last_subtask_sources", None)
                     if subtask_sources and all(i in subtask_sources for i in subtask_indices):
                         action["subtask_sources"] = [subtask_sources[i] for i in subtask_indices]
+                if subtask_votes := getattr(self._policy, "last_subtask_votes", None):
+                    action["subtask_votes"] = [subtask_votes[i] for i in sorted(subtask_votes)]
                 action["server_timing"] = {
                     "infer_ms": infer_time * 1000,
                 }

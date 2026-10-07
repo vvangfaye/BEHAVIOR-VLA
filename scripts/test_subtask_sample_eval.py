@@ -563,7 +563,9 @@ def test_preflight_groups_episode_hash_and_open_with_per_sample_evidence(
     assert report["episodes"][0]["sample_ids"] == ["sample-1", "sample-2"]
     assert report["episodes"][0]["state_layout"] == "trailing_state"
     assert len(report["episodes"][0]["sha256"]) == 64
-    assert report["samples"] == [
+    row_hash = __import__('hashlib').sha256(np.ones(6, dtype=np.float32).tobytes()).hexdigest()
+    assert all(item['selected_state_sha256'] == row_hash for item in report['samples'])
+    assert [{k:v for k,v in item.items() if k != 'selected_state_sha256'} for item in report["samples"]] == [
         {
             "sample_id": "sample-1",
             "episode_index": 1,
@@ -949,7 +951,7 @@ def test_runner_processes_and_publishes_complete_episode_bundle(tmp_path, monkey
     queue = FakeQueue(None)
     monkeypatch.setattr(runner, "EvaluationQueue", lambda _: queue)
     monkeypatch.setattr(runner, "load_panel", lambda _: panel)
-    monkeypatch.setattr(runner, "load_episode_cache", lambda path, samples: {"cache": True})
+    monkeypatch.setattr(runner, "load_episode_cache", lambda path, samples, **kwargs: {"cache": True, "grasp_serialization_audit": {"legacy_missing_assisted_grasp_state": False}})
     monkeypatch.setattr(runner, "_build_evaluator_cfg", lambda *args: object())
 
     evaluator = object()
@@ -978,9 +980,9 @@ def test_runner_processes_and_publishes_complete_episode_bundle(tmp_path, monkey
     )
     executed = []
 
-    def run_sample(base, evaluator, args, sample, cache, materialized, output, fingerprint):
+    def run_sample(base, evaluator, args, sample, cache, materialized, output, fingerprint, **kwargs):
         executed.append((sample["rollout_id"], materialized["sample_id"]))
-        return {"rollout_id": sample["rollout_id"]}
+        return {"rollout_id": sample["rollout_id"], "metric_eligible": False}
 
     monkeypatch.setattr(runner, "run_sample", run_sample)
 
@@ -1016,7 +1018,7 @@ def test_runner_processes_and_publishes_complete_episode_bundle(tmp_path, monkey
 
     results = runner.run(args, base_module=base)
 
-    assert results == [{"rollout_id": 0}, {"rollout_id": 1}]
+    assert [r["rollout_id"] for r in results] == [0, 1]
     assert len(create_calls) == 1
     assert executed == [(0, "sample-1"), (1, "sample-2")]
     assert runner._artifact_stem(first).endswith("_0")
