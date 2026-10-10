@@ -7,6 +7,7 @@ import argparse
 import copy
 import json
 import math
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -21,6 +22,7 @@ MAX_SAMPLE_STEPS = 2048
 DEBOUNCE_STEPS = 3
 QUEUE_PROFILE = "training_subtask_closed_loop_episode_segments"
 EVALUATION_KIND = "training_subtask_closed_loop"
+FULL_SNAPSHOT_FORMAT = "named_simulator_state_v1"
 
 
 class InvalidSampleState(RuntimeError):
@@ -494,12 +496,17 @@ def _unwrap_environment(env: object) -> object:
     return current
 
 
-def _apply_transition(scene: object, transition: dict[str, Any]) -> None:
+def _apply_transition(
+    scene: object,
+    transition: dict[str, Any],
+    recorded_scene_file: dict[str, Any],
+) -> None:
     import omnigibson as og
     import torch as th
     from omnigibson.envs.data_wrapper import (
         _is_system_particle_template_info,
         _is_system_particle_template_name,
+        _recorded_non_kin_state_name_union,
     )
     from omnigibson.utils.python_utils import create_object_from_init_info
 
@@ -518,10 +525,16 @@ def _apply_transition(scene: object, transition: dict[str, Any]) -> None:
         if obj is None:
             raise InvalidSampleState(f"Transition removes missing object {name!r}")
         scene.remove_object(obj)
+    recorded_non_kin_names = _recorded_non_kin_state_name_union(recorded_scene_file)
     for index, info in enumerate(objects.get("add", [])):
         if _is_system_particle_template_info(info, added_systems):
             continue
         obj = create_object_from_init_info(info)
+        # Match DataPlaybackWrapper: transition objects have no per-object
+        # initial schema. Exclude fields absent from the recording before the
+        # next flat row is deserialized, so subsequent object UUIDs stay aligned.
+        if recorded_non_kin_names is not None:
+            obj._recorded_non_kin_state_names = set(recorded_non_kin_names)
         scene.add_object(obj)
         obj.set_position(th.ones(3) * (100.0 + 5 * index))
     og.sim.step()
@@ -649,7 +662,48 @@ _EPISODE_IDENTITY_FIELDS = (
 )
 
 
-def load_episode_cache(path: Path, samples: list[dict[str, Any]]) -> dict[str, Any]:
+def recorded_grasp_serialization_audit(episode_cache: dict[str, Any]) -> dict[str, Any]:
+    """Detect legacy recordings whose held-object constraints cannot be restored.
+
+    A sentinel anywhere in a sparse row is only a capability signal. It does
+    not prove the robot block decoded correctly; runtime verification remains
+    necessary. In particular, absence is not evidence that the demo held no
+    object when its robot state used the legacy controller layout.
+    """
+    import numpy as np
+
+    config = episode_cache["recorded_config"]
+    robots = config.get("robots", [])
+    registry = episode_cache["scene_file"].get("state", {}).get("registry", {}).get("object_registry", {})
+    states = episode_cache["states"]
+    sizes = episode_cache["state_sizes"]
+    sentinel = np.float32(1e8 + 123456)  # OmniGibson Robot._AG_MAGIC
+    frames_with_sentinel = sum(
+        bool(np.any(row[:int(size)] == sentinel)) for row, size in zip(states, sizes)
+    )
+    robot_rows = []
+    for config_robot in robots:
+        name = config_robot.get("name")
+        state = registry.get(name, {})
+        mode = config_robot.get("grasping_mode", "physical")
+        legacy = "controllers" in state and "controller_groups" not in state
+        unavailable = mode in ("assisted", "sticky") and legacy and frames_with_sentinel == 0
+        robot_rows.append({"robot": name, "grasping_mode": mode,
+                           "legacy_controller_layout": legacy,
+                           "legacy_missing_assisted_grasp_state": unavailable})
+    return {"contract": "recorded_grasp_serialization_v1",
+            "inspected_prefix_frames": len(states),
+            "frames_with_ag_magic": frames_with_sentinel,
+            "robots": robot_rows,
+            "legacy_missing_assisted_grasp_state": any(
+                row["legacy_missing_assisted_grasp_state"] for row in robot_rows
+            ),
+            "runtime_grasp_restoration_verified": False}
+
+
+def load_episode_cache(
+    path: Path, samples: list[dict[str, Any]], *, allow_unverified_grasp_state: bool = False,
+) -> dict[str, Any]:
     """Read and validate one raw episode once for all of its target starts."""
     if not samples:
         raise ValueError("Episode must contain at least one sample")
@@ -682,6 +736,9 @@ def load_episode_cache(path: Path, samples: list[dict[str, Any]]) -> dict[str, A
                 "sha256": digest,
             }
         max_target_start = max(int(sample["start"]) for sample in samples)
+        # Later recorded grasps supply annotation identity only. Restoration and
+        # policy observations still use each original sample's exact start.
+        max_identity_frame = max(int(sample.get("end", sample["start"] + 1)) - 1 for sample in samples)
         group = data[details["demo_group"]]
         transitions = json.loads(group.attrs["transitions"])
         transition_by_step = _transition_map(transitions)
@@ -695,15 +752,27 @@ def load_episode_cache(path: Path, samples: list[dict[str, Any]]) -> dict[str, A
                 name: np.asarray(group["init_metadata"][name][...]).copy()
                 for name in group["init_metadata"]
             },
-            "states": np.asarray(group["state"][: max_target_start + 1]).copy(),
+            "states": np.asarray(group["state"][: max(max_target_start, max_identity_frame) + 1]).copy(),
             "state_sizes": np.asarray(
-                group["state_size"][: max_target_start + 1]
+                group["state_size"][: max(max_target_start, max_identity_frame) + 1]
             ).copy(),
             "transitions": transitions,
             "transition_by_step": transition_by_step,
             "sample_evidence": sample_evidence,
             "max_target_start": max_target_start,
+            "source_samples": {sample["sample_id"]: copy.deepcopy(sample) for sample in samples},
         }
+    cache["grasp_serialization_audit"] = recorded_grasp_serialization_audit(cache)
+    # The recorded initial scene alone does not prove what a later serialized
+    # frame (including state[0]) restores. Missing grasp channels require an
+    # explicit restoration diagnostic rather than assuming no object was held.
+    if (cache["grasp_serialization_audit"]["legacy_missing_assisted_grasp_state"]
+            and not allow_unverified_grasp_state):
+        raise InvalidSampleState(
+            "Legacy assisted-grasp recording has no serialized grasp constraints; "
+            "exact held-object restoration is unverified. "
+            "Use an explicit restoration diagnostic before scoring or collection."
+        )
     return cache
 
 
@@ -794,8 +863,13 @@ def _dump_full_simulator_state(scene: object, simulator: object) -> Any:
     previous_filter = registry._dump_filter
     registry.set_dump_filter(dump_filter=lambda obj: True)
     try:
-        state = simulator.dump_state(serialized=True)
-        return state.clone() if hasattr(state, "clone") else copy.deepcopy(state)
+        # Raw demo rows use the recording's field order, while a full runtime
+        # dump contains all current states. Flattening that dump and reading it
+        # with the demo schema shifts object UUID offsets. Keep named fields.
+        state = simulator.dump_state(serialized=False)
+        if not isinstance(state, dict):
+            raise InvalidSampleState("Full simulator snapshot must be a named state dictionary")
+        return copy.deepcopy(state)
     finally:
         registry.set_dump_filter(dump_filter=previous_filter)
 
@@ -811,6 +885,11 @@ def materialize_episode_start_states(
     from omnigibson.macros import gm
 
     _validate_recorded_episode(evaluator, episode_cache, samples[0])
+    grasp_audit = episode_cache.get("grasp_serialization_audit", {})
+    if grasp_audit.get("legacy_missing_assisted_grasp_state"):
+        raise InvalidSampleState(
+            "Unverified legacy assisted-grasp state cannot enter exact scoring materialization"
+        )
     _restore_episode_baseline(evaluator, episode_cache)
     states = th.as_tensor(episode_cache["states"])
     state_sizes = episode_cache["state_sizes"]
@@ -818,6 +897,12 @@ def materialize_episode_start_states(
     transition_steps = sorted(transition_by_step)
     snapshots_by_frame = {}
     transition_rules_enabled = gm.ENABLE_TRANSITION_RULES
+    import time
+    started = last_progress = time.monotonic()
+    loaded = 0
+    last_frame = max(int(sample["start"]) for sample in samples)
+    print(f"STATE_REPLAY_BEGIN task={samples[0]['task']} episode={samples[0]['episode_index']} "
+          f"last_frame={last_frame} requested_starts={len(samples)}", flush=True)
     with gm.unlocked():
         gm.ENABLE_TRANSITION_RULES = False
     try:
@@ -829,17 +914,27 @@ def materialize_episode_start_states(
                 og.sim.load_state(
                     states[frame, : int(state_sizes[frame])], serialized=True
                 )
+                loaded += 1
+                now = time.monotonic()
+                if loaded % 1000 == 0 or now - last_progress >= 30:
+                    print(f"STATE_REPLAY_PROGRESS frame={frame}/{last_frame} loaded={loaded} "
+                          f"captured={len(snapshots_by_frame)} elapsed_seconds={now-started:.1f}", flush=True)
+                    last_progress = now
             elif action == "capture":
                 og.sim.update_handles()
                 snapshots_by_frame[frame] = _dump_full_simulator_state(
                     evaluator.env.scene, og.sim
                 )
             else:
-                _apply_transition(evaluator.env.scene, transition_by_step[frame])
+                _apply_transition(
+                    evaluator.env.scene, transition_by_step[frame], episode_cache["scene_file"]
+                )
     finally:
         with gm.unlocked():
             gm.ENABLE_TRANSITION_RULES = transition_rules_enabled
 
+    print(f"STATE_REPLAY_COMPLETE loaded={loaded} captured={len(snapshots_by_frame)} "
+          f"elapsed_seconds={time.monotonic()-started:.1f}", flush=True)
     materialized = {}
     for sample in samples:
         frame = int(sample["start"])
@@ -856,10 +951,12 @@ def materialize_episode_start_states(
                 "state_prefix_samples": frame + 1,
                 "topology_transition_steps": prefix_steps,
                 "full_snapshot": True,
+                "full_snapshot_format": FULL_SNAPSHOT_FORMAT,
             }
         )
         materialized[sample["sample_id"]] = {
             "state": snapshots_by_frame[frame],
+            "state_format": FULL_SNAPSHOT_FORMAT,
             "transition_steps": prefix_steps,
             "restoration": evidence,
         }
@@ -886,6 +983,26 @@ def _reset_evaluator_rollout(evaluator: object) -> None:
     evaluator.n_trials = 0
 
 
+def _validate_full_snapshot_objects(simulator: object, state: dict) -> None:
+    """Refuse missing/extra objects that dictionary loading could silently skip."""
+    if set(state) != set(range(len(simulator.scenes))):
+        raise InvalidSampleState("Full snapshot scene indices do not match the simulator")
+    for index, scene in enumerate(simulator.scenes):
+        try:
+            expected = state[index]["registry"]["object_registry"]
+        except (KeyError, TypeError) as error:
+            raise InvalidSampleState("Full snapshot lacks its named object registry") from error
+        if not isinstance(expected, dict):
+            raise InvalidSampleState("Full snapshot object registry must be a dictionary")
+        actual = {obj.name for obj in scene.object_registry.objects}
+        if set(expected) != actual:
+            missing = sorted(set(expected) - actual)
+            extra = sorted(actual - set(expected))
+            raise InvalidSampleState(
+                f"Full snapshot object topology differs in scene {index}: missing={missing}, extra={extra}"
+            )
+
+
 def restore_materialized_sample_state(
     evaluator: object,
     episode_cache: dict[str, Any],
@@ -894,6 +1011,8 @@ def restore_materialized_sample_state(
     import omnigibson as og
     from omnigibson.macros import gm
 
+    if materialized.get("state_format") != FULL_SNAPSHOT_FORMAT or not isinstance(materialized.get("state"), dict):
+        raise InvalidSampleState("Materialized snapshot has an unsupported state format")
     _restore_episode_baseline(evaluator, episode_cache)
     transition_rules_enabled = gm.ENABLE_TRANSITION_RULES
     with gm.unlocked():
@@ -901,12 +1020,24 @@ def restore_materialized_sample_state(
     try:
         for step in materialized["transition_steps"]:
             _apply_transition(
-                evaluator.env.scene, episode_cache["transition_by_step"][step]
+                evaluator.env.scene, episode_cache["transition_by_step"][step],
+                episode_cache["scene_file"],
             )
-        og.sim.load_state(materialized["state"], serialized=True)
+        _validate_full_snapshot_objects(og.sim, materialized["state"])
+        # Some state loaders modify their input. Each restore gets its own copy
+        # so samples sharing a target frame cannot mutate the cached snapshot.
+        og.sim.load_state(copy.deepcopy(materialized["state"]), serialized=False)
+        _validate_full_snapshot_objects(og.sim, materialized["state"])
         og.sim.update_handles()
         for _ in range(3):
             og.sim.render()
+        # Recorded topology changes run with transition rules disabled, so the
+        # simulator does not refresh rule candidates when objects are replaced.
+        # Rebuild the native caches from the restored scene before model steps.
+        for scene in og.sim.scenes:
+            transition_rule_api = getattr(scene, "transition_rule_api", None)
+            if transition_rule_api is not None:
+                transition_rule_api.refresh_all_rules()
     finally:
         with gm.unlocked():
             gm.ENABLE_TRANSITION_RULES = transition_rules_enabled
@@ -923,6 +1054,7 @@ def create_sample_evaluator(
 ) -> object:
     import omnigibson as og
     from hydra.utils import instantiate
+    from omnigibson.envs.data_wrapper import _add_recorded_non_kin_states_to_scene_file
     from omnigibson.eval import evaluator as evaluator_module
     from omnigibson.macros import gm
 
@@ -970,9 +1102,17 @@ def create_sample_evaluator(
             recorded_robot, self.robot_eval_config = _configure_recorded_robot(
                 recorded_robots[0], evaluator_robot, self.robot_eval_config
             )
+            self.configure_robot_cameras(recorded_robot, env_wrapper)
             self.robot_name = recorded_robot.get("name")
             self._policy_robot_name = evaluator_robot["name"]
             config["robots"] = [recorded_robot]
+            # Environment construction loads the saved scene state before the
+            # playback wrapper can align its schema. Restore recorded state
+            # classes at construction, as native HDF5 playback already does.
+            _add_recorded_non_kin_states_to_scene_file(
+                scene_file=config["scene"]["scene_file"],
+                recorded_scene_files=[completed_scene_file],
+            )
             env = og.Environment(configs=config)
             env._eval_robot_config = self.robot_eval_config
             self._exact_state_scene_file = completed_scene_file
@@ -1115,14 +1255,45 @@ def run_sample(
     materialized: dict[str, Any],
     output_dir: Path,
     panel_fingerprint: str,
+    *, trajectory_writer: object | None = None,
+    restoration_validator: object | None = None,
 ) -> dict[str, Any]:
+    retest_seed = None
+    seed_text = os.environ.get("PI05_PAIRED_RETEST_SEED", "")
+    if seed_text:
+        from subtask_paired_retest import policy_seed
+        from collect_b1k_subtasks import SeededClient
+        retest_seed = policy_seed(int(seed_text), panel_fingerprint, sample["sample_id"])
+        base.seed_everything(retest_seed)
+        if not isinstance(evaluator.policy, SeededClient):
+            evaluator.policy = SeededClient(evaluator.policy)
+        evaluator.policy.next_seed = retest_seed
     evaluator.external_subtask = sample["subtask"]
     restoration = restore_materialized_sample_state(
         evaluator, episode_cache, materialized
     )
+    native_context = None
+    if restoration_validator is not None:
+        restoration.update(restoration_validator(evaluator))
+        if 'history_recovery_source' in restoration:
+            native_context = (episode_cache, restoration['history_recovery_source'])
+    else:
+        from recorded_native_state import is_native_recording, decode_start, validate_runtime
+        if is_native_recording(episode_cache):
+            proof = validate_runtime(decode_start(episode_cache, sample), evaluator)
+            restoration["recorded_native_source"] = proof
+            native_context = (episode_cache, proof)
     with base.gm.unlocked():
         base.gm.ENABLE_TRANSITION_RULES = True
-    monitor = CompletionMonitor(evaluator, sample["predicate"], sample)
+    if sample["predicate"].get("kind") == "role_bound":
+        from subtask_completion import RoleCompletionMonitor
+        if native_context is None:
+            monitor = RoleCompletionMonitor(evaluator, sample["predicate"], sample)
+        else:
+            monitor = RoleCompletionMonitor(evaluator, sample["predicate"], sample,
+                                            source_context=native_context)
+    else:
+        monitor = CompletionMonitor(evaluator, sample["predicate"], sample)
 
     json_dir = output_dir / "json"
     video_dir = output_dir / "videos"
@@ -1145,7 +1316,12 @@ def run_sample(
                 recording_started = True
             while steps < args.sample_max_steps:
                 evaluator.external_subtask = sample["subtask"]
+                if trajectory_writer is not None:
+                    from subtask_trajectory import capture_observation
+                    preceding_observation = capture_observation(evaluator.obs)
                 terminated, truncated = evaluator.step()
+                if trajectory_writer is not None:
+                    trajectory_writer.record(preceding_observation, evaluator.robot_action, terminated, truncated)
                 steps += 1
                 success = monitor.refresh(steps)
                 if success:
@@ -1219,6 +1395,9 @@ def run_sample(
             "panel_fingerprint": panel_fingerprint,
             **metrics,
         }
+        if retest_seed is not None:
+            from subtask_paired_retest import SEED_PROTOCOL
+            result.update(policy_seed=retest_seed, seed_protocol=SEED_PROTOCOL)
         result = json.loads(json.dumps(result, default=float))
         atomic_write_json(json_dir / f"{stem}.json", result)
         return result
@@ -1263,7 +1442,20 @@ def run(
     results: list[dict[str, Any]] = []
     try:
         raw_path = raw_hdf5_path(args.raw_data_root, first_sample)
-        episode_cache = load_episode_cache(raw_path, samples)
+        # The override is used only to inspect and publish missing-source
+        # exclusions. Such a cache never reaches an evaluator or model rollout.
+        episode_cache = load_episode_cache(raw_path, samples, allow_unverified_grasp_state=True)
+        from legacy_history_recovery import enabled as history_enabled
+        history_recovery = (episode_cache["grasp_serialization_audit"]["legacy_missing_assisted_grasp_state"]
+                            and history_enabled())
+        if episode_cache["grasp_serialization_audit"]["legacy_missing_assisted_grasp_state"] and not history_recovery:
+            from subtask_source_exclusion import make_source_exclusion
+            for sample in samples:
+                result = make_source_exclusion(episode_cache, sample, panel["fingerprint"])
+                atomic_write_json(lease.attempt_dir/"json"/(_artifact_stem(sample)+".json"), result)
+                results.append(result)
+            queue.publish(lease, args.output_dir, rollout_specs=rollout_specs, provenance=provenance)
+            return results
         base.gm.HEADLESS = args.headless
         seed = base.seed_everything(base.DEFAULT_EVAL_SEED)
         evaluator_args = copy.copy(args)
@@ -1277,22 +1469,37 @@ def run(
             first_sample,
             args.sample_max_steps,
         ) as evaluator:
-            materialized = materialize_episode_start_states(
-                evaluator, episode_cache, samples
-            )
+            if history_recovery:
+                from legacy_history_recovery import materialize
+                materialized = materialize(evaluator, episode_cache, samples)
+            else:
+                materialized = materialize_episode_start_states(evaluator, episode_cache, samples)
+            from validate_b1k_native_snapshot_model import ActionAudit
             for sample in samples:
-                results.append(
-                    run_sample(
-                        base,
-                        evaluator,
-                        args,
-                        sample,
-                        episode_cache,
-                        materialized[sample["sample_id"]],
-                        lease.attempt_dir,
-                        panel["fingerprint"],
-                    )
+                audit = ActionAudit()
+                restoration_validator = None
+                if history_recovery:
+                    from legacy_history_recovery import restored_context
+                    restoration_validator = lambda actual: restored_context(
+                        actual, episode_cache, sample, materialized[sample['sample_id']])
+                result = run_sample(
+                    base, evaluator, args, sample, episode_cache,
+                    materialized[sample["sample_id"]], lease.attempt_dir,
+                    panel["fingerprint"], trajectory_writer=audit,
+                    restoration_validator=restoration_validator,
                 )
+                video = lease.attempt_dir / "videos" / (_artifact_stem(sample) + ".mp4")
+                result.update(model_action_audit=audit.rows,
+                              actual_model_control_steps=len(audit.rows),
+                              production_difficulty_baseline=True,
+                              video_sha256=file_sha256(video) if result["metric_eligible"] else None)
+                if history_recovery:
+                    from legacy_history_recovery import CONTRACT, METHOD
+                    result.update(state_recovery_protocol=CONTRACT, grasp_recovery_method=METHOD,
+                                  exact_original_grasp_anchor_bytes_verified=False,
+                                  original_sample_scope_preserved=True)
+                atomic_write_json(lease.attempt_dir / "json" / (_artifact_stem(sample) + ".json"), result)
+                results.append(result)
             queue.publish(
                 lease,
                 args.output_dir,

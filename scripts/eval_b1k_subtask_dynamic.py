@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the deterministic 20-episode training-subtask diagnostic on local GPUs."""
+"""Run frozen two-task or full100 exact-state subtask diagnostics on local GPUs."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ PRODUCTION_EPISODE_JOBS = 20
 MAX_WORKERS = 8
 
 
-def worker_specs(gpus: list[int], base_port: int) -> list[dynamic.WorkerSpec]:
+def worker_specs(gpus: list[int], base_port: int, tasks: tuple[str, ...] = dynamic.TASKS) -> list[dynamic.WorkerSpec]:
     if not gpus or len(gpus) > MAX_WORKERS or len(gpus) != len(set(gpus)):
         raise ValueError(f"--gpus must contain 1-{MAX_WORKERS} unique GPU indices")
     if any(isinstance(gpu, bool) or gpu < 0 for gpu in gpus):
@@ -48,7 +48,7 @@ def worker_specs(gpus: list[int], base_port: int) -> list[dynamic.WorkerSpec]:
             slot=slot,
             gpu=gpu,
             port=base_port + slot,
-            tasks=dynamic.TASKS if slot < split else tuple(reversed(dynamic.TASKS)),
+            tasks=tasks if slot < split else tuple(reversed(tasks)),
         )
         for slot, gpu in enumerate(gpus)
     ]
@@ -155,10 +155,10 @@ def _manifest_payload(
                 Path(args.omnigibson_data_path).expanduser().resolve()
             ),
             "PI05_MEM_FRACTION": "0.35",
-            "SUBTASK_PREDICTION": "0",
-            "PROVIDED_SUBTASK_AS_PROMPT": "1",
+            "SUBTASK_PREDICTION": "1" if getattr(args, "subtask_prediction", False) else "0",
+            "PROVIDED_SUBTASK_AS_PROMPT": "0" if getattr(args, "subtask_prediction", False) else "1",
             "EXTERNAL_SUBTASK_SELECTOR": "",
-            "MAX_TOKEN_LEN": "200",
+            "MAX_TOKEN_LEN": "512" if getattr(args, "subtask_prediction", False) else "200",
         }
     )
     jobs = _panel_jobs(panel)
@@ -170,6 +170,7 @@ def _manifest_payload(
         "schema_version": 2,
         "profile": PROFILE,
         "evaluation_kind": EVALUATION_KIND,
+        "state_protocol": "recorded_native_fields_v1",
         "run_id": args.run_id or run_root.name,
         "checkpoint": str(args.checkpoint.expanduser().resolve()),
         "repo_id": args.repo_id,
@@ -228,8 +229,9 @@ def validate_manifest(manifest: object, panel: dict | None = None) -> dict:
         "schema_version": 2,
         "profile": PROFILE,
         "evaluation_kind": EVALUATION_KIND,
+        "state_protocol": "recorded_native_fields_v1",
         "num_rollouts": 1,
-        "tasks": sorted(dynamic.TASKS),
+        "tasks": (panel["selection"]["tasks"] if panel is not None else manifest.get("tasks")),
     }
     mismatches = {
         key: (manifest.get(key), value)
@@ -238,7 +240,15 @@ def validate_manifest(manifest: object, panel: dict | None = None) -> dict:
     }
     if mismatches:
         raise ValueError(f"manifest is not the subtask episode profile: {mismatches}")
-    worker_specs(list(manifest.get("gpus", [])), manifest.get("base_port", 0))
+    from subtask_sample_panel import challenge_tasks
+    if manifest.get("tasks") != sorted(dynamic.TASKS) and manifest.get("tasks") != sorted(challenge_tasks()):
+        raise ValueError("Manifest must cover the two-task diagnostic or all 100 tasks")
+    if len(manifest["tasks"]) == 100:
+        settings = manifest.get("child_environment", {})
+        required = {"SUBTASK_PREDICTION": "1", "PROVIDED_SUBTASK_AS_PROMPT": "0", "MAX_TOKEN_LEN": "512"}
+        if any(settings.get(key) != value for key, value in required.items()):
+            raise ValueError("Full100 requires joint subtask conditioning with 512 tokens")
+    worker_specs(list(manifest.get("gpus", [])), manifest.get("base_port", 0), tuple(manifest["tasks"]))
     if (
         not _is_nonnegative_int(manifest.get("max_attempts"))
         or manifest["max_attempts"] == 0
@@ -380,7 +390,7 @@ def _base_preflight_manifest(manifest: dict) -> dict:
 
 
 def verify_preflight(manifest: dict, panel: dict, *, resume: bool) -> None:
-    specs = worker_specs(manifest["gpus"], manifest["base_port"])
+    specs = worker_specs(manifest["gpus"], manifest["base_port"], tuple(manifest["tasks"]))
     dynamic.verify_preflight(
         _base_preflight_manifest(manifest), resume=resume, specs=specs
     )
@@ -401,6 +411,9 @@ def child_environment(
     environment = {
         str(name): str(value) for name, value in manifest["child_environment"].items()
     }
+    cache_root = os.environ.get("SCO_EPHEMERAL_RUNTIME_ROOT")
+    if cache_root:
+        environment["SCO_EPHEMERAL_RUNTIME_ROOT"] = cache_root
     runtime = (
         Path(manifest["runtime_root"])
         / f"slot-{spec.slot}"
@@ -580,6 +593,9 @@ def finalize_results(manifest: dict, queue: EvaluationQueue) -> None:
         run_root / "_SUCCESS",
         {
             "completed_at": time.time(),
+            "run_id": manifest["run_id"],
+            "panel_fingerprint": manifest["panel_fingerprint"],
+            "summary_sha256": dynamic._fingerprint(json.loads((run_root / "summary.json").read_text())),
             "expected_episode_jobs": manifest["expected_episode_jobs"],
             "expected_segment_rollouts": manifest["expected_segment_rollouts"],
             "expected_annotated_segments": manifest["expected_annotated_segments"],
@@ -588,10 +604,17 @@ def finalize_results(manifest: dict, queue: EvaluationQueue) -> None:
     )
 
 
-def supervise(manifest: dict, queue: EvaluationQueue) -> None:
+def supervise(manifest: dict, queue: EvaluationQueue, *, tasks=None, completion_handler=None) -> None:
     run_root = Path(manifest["queue_db"]).parent
     runtime_root = Path(manifest["runtime_root"])
-    specs = worker_specs(manifest["gpus"], manifest["base_port"])
+    # SCO can assign disjoint whole tasks to independent node-local queues.
+    # The immutable manifest still covers the full panel; global finalization
+    # remains mandatory after all assignments publish their artifacts.
+    if tasks is not None:
+        queue_tasks = {job["task"] for job in queue.snapshot(readonly=True)["jobs"]}
+        if set(tasks) != queue_tasks or not queue_tasks.issubset(manifest["tasks"]):
+            raise ValueError("worker task assignment does not match its queue")
+    specs = worker_specs(manifest["gpus"], manifest["base_port"], tuple(tasks or manifest["tasks"]))
     workers: dict[int, dynamic.WorkerProcess] = {}
     generations = {
         spec.slot: dynamic._next_generation(run_root, runtime_root, spec.slot)
@@ -661,7 +684,7 @@ def supervise(manifest: dict, queue: EvaluationQueue) -> None:
                 run_root, worker, "stopped_after_completion", worker.process.returncode
             )
         workers.clear()
-        finalize_results(manifest, queue)
+        (completion_handler or finalize_results)(manifest, queue)
     finally:
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
@@ -683,19 +706,17 @@ def _run_start(args: argparse.Namespace) -> None:
     run_root = args.run_root.expanduser().resolve()
     if run_root.exists():
         raise ValueError(f"start requires a fresh run root: {run_root}")
+    if getattr(args, "panel", None) is None and any(getattr(args, name, None) is None for name in ("dataset_root", "segments", "train_episodes", "split_manifest")):
+        raise ValueError("Provide --panel or all four dataset/annotation inputs")
     if not args.write_video:
         raise ValueError("subtask episode evaluation requires videos")
-    panel = validate_frozen_production_panel(
-        build_panel(
-            args.dataset_root,
-            args.segments,
-            args.train_episodes,
-            args.split_manifest,
-            seed=1,
-            episodes_per_task=PRODUCTION_EPISODES_PER_TASK,
-            reserve_per_task=100,
-        )
-    )
+    if getattr(args, "panel", None) is not None:
+        panel = load_panel(args.panel)
+    else:
+        panel = validate_frozen_production_panel(build_panel(
+            args.dataset_root, args.segments, args.train_episodes, args.split_manifest,
+            seed=1, episodes_per_task=PRODUCTION_EPISODES_PER_TASK, reserve_per_task=100,
+        ))
     raw_report = preflight_panel(panel, args.raw_data_root)
     if not raw_report["valid"]:
         missing = "\n".join(
@@ -703,7 +724,7 @@ def _run_start(args: argparse.Namespace) -> None:
         )
         raise ValueError(f"raw HDF5 preflight failed:\n{missing}")
     manifest = create_manifest(args, panel, raw_report)
-    if manifest["expected_episode_jobs"] != PRODUCTION_EPISODE_JOBS:
+    if panel["selection"].get("task_scope") != "full100" and manifest["expected_episode_jobs"] != PRODUCTION_EPISODE_JOBS:
         raise ValueError(
             f"production subtask evaluation requires {PRODUCTION_EPISODE_JOBS} episode jobs"
         )
@@ -724,6 +745,8 @@ def _run_start(args: argparse.Namespace) -> None:
                 max_attempts=manifest["max_attempts"],
                 metadata=_queue_metadata(manifest),
             )
+            from subtask_source_exclusion import prepublish_source_exclusions
+            prepublish_source_exclusions(manifest, queue, panel)
             supervise(manifest, queue)
         except BaseException as error:
             atomic_write_json(
@@ -866,10 +889,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     start.add_argument("--run-id")
     start.add_argument("--checkpoint", type=Path, required=True)
     start.add_argument("--repo-id", required=True)
-    start.add_argument("--dataset-root", type=Path, required=True)
-    start.add_argument("--segments", type=Path, required=True)
-    start.add_argument("--train-episodes", type=Path, required=True)
-    start.add_argument("--split-manifest", type=Path, required=True)
+    start.add_argument("--dataset-root", type=Path)
+    start.add_argument("--segments", type=Path)
+    start.add_argument("--train-episodes", type=Path)
+    start.add_argument("--split-manifest", type=Path)
+    start.add_argument("--panel", type=Path)
+    start.add_argument("--subtask-prediction", action="store_true", help="Use the joint checkpoint with fixed subtask conditioning (512 tokens)")
     start.add_argument("--raw-data-root", type=Path, required=True)
     start.add_argument("--gpus", type=int, nargs="+", required=True)
     start.add_argument("--base-port", type=dynamic._positive_int, required=True)
