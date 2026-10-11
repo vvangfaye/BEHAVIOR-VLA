@@ -109,6 +109,12 @@ PRODUCTION_COUNTS = {
 }
 
 
+def challenge_tasks() -> set[str]:
+    path = Path(__file__).with_name("b1k_tasks.txt")
+    return {line.split()[0] for line in path.read_text().splitlines()
+            if line.strip() and not line.lstrip().startswith("#")}
+
+
 def file_sha256(path: str | Path) -> str:
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
@@ -145,6 +151,9 @@ def _contains(value: str, *needles: str) -> bool:
 
 def infer_predicate(task: str, row: dict[str, Any]) -> dict[str, Any] | None:
     """Map one role-aware annotation row to an observable completion predicate."""
+    if row.get("completion_contract") == "annotation_roles_v1":
+        from subtask_completion import infer_role_predicate
+        return infer_role_predicate(row)
     description = _normalized(row.get("skill_description"))
     text = _normalized(row.get("subtask"))
     object_text = " ".join(
@@ -294,7 +303,7 @@ def _sample_id(candidate: dict[str, Any]) -> str:
 
 
 def _select_unique(
-    candidates: list[dict[str, Any]], count: int
+    candidates: list[dict[str, Any]], count: int, *, unique_segments: bool = True
 ) -> list[dict[str, Any]]:
     selected = []
     episodes: set[int] = set()
@@ -307,7 +316,7 @@ def _select_unique(
         if (
             episode in episodes
             or instance in instances
-            or source_segment in source_segments
+            or (unique_segments and source_segment in source_segments)
         ):
             continue
         selected.append(candidate)
@@ -345,7 +354,7 @@ def _segment_record(
             f"Episode {episode} tasks are {task_values!r}, expected {[task]!r}"
         )
     subtask = row["subtask"]
-    return {
+    record = {
         "task": task,
         "task_index": task_index,
         "episode_index": episode,
@@ -373,6 +382,10 @@ def _segment_record(
         "provenance": row["provenance"],
     }
 
+    if "completion_contract" in row:
+        record["completion_contract"] = row["completion_contract"]
+    return record
+
 
 def _segment_order(value: dict[str, Any]) -> tuple[int, int, int, int, str]:
     return (
@@ -394,6 +407,7 @@ def build_panel(
     samples_per_task: int | None = None,
     episodes_per_task: int | None = None,
     reserve_per_task: int = 100,
+    task_scope: str = "two_tasks",
 ) -> dict[str, Any]:
     import pyarrow.parquet as pq
 
@@ -433,13 +447,27 @@ def build_panel(
     missing = required_columns - set(pq.read_schema(segments_path).names)
     if missing:
         raise ValueError(f"Segment table is missing columns: {sorted(missing)}")
-    segment_rows = pq.read_table(
-        segments_path, columns=sorted(required_columns)
-    ).to_pylist()
+    columns = required_columns | ({"completion_contract"} if "completion_contract" in pq.read_schema(segments_path).names else set())
+    segment_rows = pq.read_table(segments_path, columns=sorted(columns)).to_pylist()
+    if task_scope == "full100" and any(row.get("completion_contract") != "annotation_roles_v1" for row in segment_rows):
+        raise ValueError("Full100 requires role-aware completion contracts")
+
+    task_map = dict(TASK_INDEX_TO_NAME)
+    if task_scope == "full100":
+        task_map = {}
+        for item in metadata.values():
+            index, name = int(item["task_index"]), item["tasks"][0]
+            if index in task_map and task_map[index] != name:
+                raise ValueError("Inconsistent task index in dataset metadata")
+            task_map[index] = name
+        if set(task_map) != set(range(100)) or set(task_map.values()) != challenge_tasks():
+            raise ValueError("Full100 requires all 100 challenge tasks in dataset metadata")
+    elif task_scope != "two_tasks":
+        raise ValueError("task_scope must be two_tasks or full100")
 
     # This is the frozen v1 selection path. Keep its filters, ranking identity, and
     # uniqueness semantics unchanged so schema v2 selects the same episode set.
-    candidates_by_task = {task: [] for task in TASK_INDEX_TO_NAME.values()}
+    candidates_by_task = {task: [] for task in task_map.values()}
     annotated_rows_by_episode: dict[int, list[dict[str, Any]]] = {}
     seen_anchor_keys: set[tuple[int, int, int]] = set()
     for row in segment_rows:
@@ -466,7 +494,7 @@ def build_panel(
         if episode_metadata is None:
             raise ValueError(f"Segment references unknown episode {episode}")
         task_index = int(episode_metadata["task_index"])
-        task = TASK_INDEX_TO_NAME.get(task_index)
+        task = task_map.get(task_index)
         if task is None:
             continue
         candidate = _segment_record(row, episode_metadata, task)
@@ -483,7 +511,7 @@ def build_panel(
         ordered = sorted(
             candidates_by_task[task], key=lambda value: _candidate_rank(seed, value)
         )
-        episode_anchors.extend(_select_unique(ordered, episodes_per_task))
+        episode_anchors.extend(_select_unique(ordered, episodes_per_task, unique_segments=task_scope != "full100"))
     episode_anchors.sort(key=lambda value: (value["task"], value["selection_rank"]))
 
     samples: list[dict[str, Any]] = []
@@ -547,7 +575,7 @@ def build_panel(
         samples.extend(episode_samples)
         exclusions.extend(episode_exclusions)
 
-    tasks = sorted(TASK_INDEX_TO_NAME.values())
+    tasks = sorted(task_map.values())
     by_task = {}
     for task in tasks:
         task_episodes = [episode for episode in episodes if episode["task"] == task]
@@ -619,6 +647,9 @@ def build_panel(
         "exclusions": exclusions,
         "counts": counts,
     }
+    if task_scope == "full100":
+        panel["selection"].update(task_scope="full100", task_index_to_name={str(k): v for k, v in sorted(task_map.items())})
+        panel["selection"]["episode_anchors"].update(version="subtask_closed_loop_full100_v1", uniqueness=["episode_index", "task_instance_id"])
     panel["fingerprint"] = _canonical_hash(panel)
     return panel
 
@@ -766,6 +797,7 @@ def _raw_frame_evidence(
     return {
         "selected_frame": frame,
         "selected_state_size": serialized_size,
+        "selected_state_sha256": hashlib.sha256(selected_state.tobytes()).hexdigest(),
         "transition_count_before_frame": sum(
             transition_frame < frame for transition_frame in transition_frames
         ),
@@ -1039,6 +1071,9 @@ def _validate_panel_segment(
 def load_panel(path: str | Path) -> dict[str, Any]:
     path = Path(path).expanduser().resolve()
     panel = json.loads(path.read_text())
+    if isinstance(panel, dict) and panel.get('schema_version') == 3:
+        from additional_training_panel import validate
+        return validate(panel)
     if not isinstance(panel, dict) or panel.get("schema_version") != 2:
         raise ValueError(f"Unsupported panel schema in {path}")
     expected_fingerprint = panel.get("fingerprint")
@@ -1056,7 +1091,17 @@ def load_panel(path: str | Path) -> dict[str, Any]:
     if not isinstance(selection, dict):
         raise ValueError(f"Panel selection metadata is invalid: {path}")
     tasks = selection.get("tasks")
-    expected_tasks = sorted(TASK_INDEX_TO_NAME.values())
+    task_map = dict(TASK_INDEX_TO_NAME)
+    if selection.get("task_scope") == "full100":
+        raw_map = selection.get("task_index_to_name")
+        if not isinstance(raw_map, dict) or set(raw_map) != {str(i) for i in range(100)}:
+            raise ValueError("Full100 panel has an invalid task mapping")
+        task_map = {int(k): v for k, v in raw_map.items()}
+        if set(task_map.values()) != challenge_tasks():
+            raise ValueError("Full100 panel does not cover challenge tasks")
+    elif selection.get("task_scope") is not None:
+        raise ValueError("Unknown panel task scope")
+    expected_tasks = sorted(task_map.values())
     if tasks != expected_tasks:
         raise ValueError(f"Panel tasks are invalid: {path}")
     anchor_selection = selection.get("episode_anchors")
@@ -1072,10 +1117,10 @@ def load_panel(path: str | Path) -> dict[str, Any]:
     if not _panel_int(seed):
         raise ValueError(f"Panel anchor seed is invalid: {path}")
     if (
-        anchor_selection.get("version") != SELECTION_VERSION
+        anchor_selection.get("version") != ("subtask_closed_loop_full100_v1" if selection.get("task_scope") == "full100" else SELECTION_VERSION)
         or anchor_selection.get("minimum_segment_frames") != MIN_SEGMENT_FRAMES
         or anchor_selection.get("uniqueness")
-        != ["episode_index", "task_instance_id", "source_segment_index"]
+        != (["episode_index", "task_instance_id"] if selection.get("task_scope") == "full100" else ["episode_index", "task_instance_id", "source_segment_index"])
     ):
         raise ValueError(f"Panel anchor selection contract is invalid: {path}")
     if scheduled_selection != {
@@ -1116,6 +1161,10 @@ def load_panel(path: str | Path) -> dict[str, Any]:
         if not isinstance(inputs.get(name), str) or not inputs[name]:
             raise ValueError(f"Panel input path {name} is invalid: {path}")
 
+    if selection.get("task_scope") == "full100":
+        records = [*panel.get("episode_anchors", []), *panel.get("samples", []), *panel.get("exclusions", [])]
+        if any(item.get("completion_contract") != "annotation_roles_v1" for item in records):
+            raise ValueError("Full100 panel is missing role-bound completion contracts")
     expected_episode_count = len(tasks) * episodes_per_task
     anchors = panel.get("episode_anchors")
     episodes = panel.get("episodes")
@@ -1158,7 +1207,7 @@ def load_panel(path: str | Path) -> dict[str, Any]:
         sample_id = anchor.get("sample_id")
         if not isinstance(sample_id, str) or sample_id != _sample_id(anchor):
             raise ValueError(f"Panel episode anchor has an invalid sample ID: {path}")
-        if TASK_INDEX_TO_NAME.get(anchor["task_index"]) != anchor["task"]:
+        if task_map.get(anchor["task_index"]) != anchor["task"]:
             raise ValueError(f"Panel episode anchor has an invalid task index: {path}")
         if (
             anchor["start"] < 0
@@ -1180,7 +1229,7 @@ def load_panel(path: str | Path) -> dict[str, Any]:
         source_segment = anchor["source_segment_index"]
         if (
             instance in anchor_instances[task]
-            or source_segment in anchor_segments[task]
+            or (selection.get("task_scope") != "full100" and source_segment in anchor_segments[task])
         ):
             raise ValueError(f"Panel episode anchors violate v1 uniqueness: {path}")
         anchor_instances[task].add(instance)
@@ -1377,6 +1426,7 @@ def _build_parser() -> argparse.ArgumentParser:
     create.add_argument("--split-manifest", type=Path, required=True)
     create.add_argument("--output", type=Path, required=True)
     create.add_argument("--seed", type=int, default=1)
+    create.add_argument("--task-scope", choices=("two_tasks", "full100"), default="two_tasks")
     create.add_argument(
         "--episodes-per-task",
         "--samples-per-task",
@@ -1408,6 +1458,7 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
             episodes_per_task=args.episodes_per_task,
             reserve_per_task=args.reserve_per_task,
+            task_scope=args.task_scope,
         )
         _write_new_json(args.output, panel)
         print(

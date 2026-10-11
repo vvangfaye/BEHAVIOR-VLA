@@ -182,6 +182,9 @@ class FakeDataset(Dataset):
 
 def create_b1k_dataset(data_config: _config.DataConfig, action_horizon: int) -> Dataset:
     """Create a behavior dataset for training."""
+    if getattr(data_config, "subtask_mixture_path", None) is not None:
+        from openpi.training.subtask_mixture_data import create_dataset
+        return create_dataset(data_config, action_horizon)
     subtask_transform = None
     if data_config.subtask_prediction:
         if isinstance(data_config.repo_id, list):
@@ -263,7 +266,7 @@ def create_torch_dataset(
         raise ValueError("Repo ID is not set. Cannot create dataset.")
     if repo_id == "fake":
         return FakeDataset(model_config, num_samples=1024, framework=framework)
-    if data_config.dataset_root is not None:
+    if data_config.dataset_root is not None or data_config.subtask_mixture_path is not None:
         return create_b1k_dataset(data_config, action_horizon)
 
     dataset_meta = _lerobot_compat.LeRobotDatasetMetadata(repo_id)
@@ -487,6 +490,15 @@ def _create_map_data_loader(
     seed: int,
     framework: str,
 ) -> DataLoader[tuple[_model.Observation, _model.Actions]]:
+    mixture_plan = getattr(dataset, "mixture_plan", None)
+    if mixture_plan is not None:
+        if framework != "jax":
+            raise ValueError("Indexed mixture optimizer/data resume is currently supported by the JAX B1K trainer.")
+        if batch_size != mixture_plan.global_batch_size or seed != mixture_plan.seed:
+            raise ValueError("Training batch size and seed must match the frozen mixture plan.")
+        # The global index encodes a phase and a randomized source/frame draw.
+        # Shuffling those indices would mix future curriculum phases into the past.
+        shuffle = False
     dataset = transform_dataset(dataset, data_config, skip_norm_stats=skip_norm_stats)
 
     # Use TorchDataLoader for both frameworks
@@ -516,7 +528,8 @@ def _create_map_data_loader(
         framework=framework,
     )
 
-    return DataLoaderImpl(data_config, data_loader)
+    return DataLoaderImpl(data_config, data_loader, mixture_plan=mixture_plan,
+                          process_count=process_count, batch_size=batch_size, seed=seed)
 
 
 def create_rlds_data_loader(
@@ -788,9 +801,16 @@ class RLDSDataLoader:
 
 
 class DataLoaderImpl(DataLoader):
-    def __init__(self, data_config: _config.DataConfig, data_loader: TorchDataLoader | RLDSDataLoader):
+    def __init__(self, data_config: _config.DataConfig, data_loader: TorchDataLoader | RLDSDataLoader,
+                 *, mixture_plan=None, process_count=1, batch_size=None, seed=0):
         self._data_config = data_config
         self._data_loader = data_loader
+        self.mixture_plan = mixture_plan
+        self.mixture_execution = None
+        if mixture_plan is not None:
+            from openpi.training.subtask_mixture_data import execution_contract
+            self.mixture_execution = execution_contract(
+                batch_size, process_count, seed, data_config.norm_stats)
 
     def data_config(self) -> _config.DataConfig:
         return self._data_config

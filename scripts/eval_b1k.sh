@@ -26,6 +26,11 @@ PROMPT_MODE="${PROMPT_MODE:-whole_task}"
 EXTERNAL_SUBTASK_SET="${EXTERNAL_SUBTASK+x}"
 EXTERNAL_SUBTASK="${EXTERNAL_SUBTASK:-}"
 EXTERNAL_SUBTASK_SELECTOR="${EXTERNAL_SUBTASK_SELECTOR:-}"
+SELECTOR_DEBOUNCE_REFRESHES="${SELECTOR_DEBOUNCE_REFRESHES:-}"
+SUBTASK_INTERVAL="${SUBTASK_INTERVAL:-}"
+SUBTASK_VOTE_WINDOW="${SUBTASK_VOTE_WINDOW:-}"
+SUBTASK_VOTE_THRESHOLD="${SUBTASK_VOTE_THRESHOLD:-}"
+EXECUTE_HORIZON="${EXECUTE_HORIZON:-16}"
 SUBTASK_SAMPLE_PANEL="${PI05_SUBTASK_SAMPLE_PANEL:-}"
 SUBTASK_RAW_DATA_ROOT="${PI05_SUBTASK_RAW_DATA_ROOT:-}"
 SUBTASK_SAMPLE_MODE=0
@@ -65,8 +70,16 @@ EVAL_GPU="${EVAL_GPU:-1}"
 PI05_MEM_FRACTION="${PI05_MEM_FRACTION:-0.85}"
 SUBTASK_PREDICTION="${SUBTASK_PREDICTION:-0}"
 PROVIDED_SUBTASK_AS_PROMPT="${PROVIDED_SUBTASK_AS_PROMPT:-0}"
+[[ "$EXECUTE_HORIZON" =~ ^[1-9][0-9]*$ ]] || {
+    echo "EXECUTE_HORIZON must be a positive integer" >&2; exit 2; }
 if [[ "$SUBTASK_PREDICTION" != 0 && "$SUBTASK_PREDICTION" != 1 ]]; then
     echo "SUBTASK_PREDICTION must be 0 or 1" >&2; exit 2
+fi
+if [[ -n "$SUBTASK_INTERVAL" ]]; then
+    [[ "$SUBTASK_INTERVAL" =~ ^[1-9][0-9]*$ ]] || {
+        echo "SUBTASK_INTERVAL must be a positive integer" >&2; exit 2; }
+    [[ "$SUBTASK_PREDICTION" == 1 ]] || {
+        echo "SUBTASK_INTERVAL requires SUBTASK_PREDICTION=1" >&2; exit 2; }
 fi
 if [[ "$PROVIDED_SUBTASK_AS_PROMPT" != 0 && "$PROVIDED_SUBTASK_AS_PROMPT" != 1 ]]; then
     echo "PROVIDED_SUBTASK_AS_PROMPT must be 0 or 1" >&2; exit 2
@@ -110,14 +123,57 @@ if [[ -n "$EXTERNAL_SUBTASK_SELECTOR" ]]; then
     fi
     EXTERNAL_SUBTASK_ARGS=(--external-subtask-selector "$EXTERNAL_SUBTASK_SELECTOR")
 fi
+if [[ -n "$SELECTOR_DEBOUNCE_REFRESHES" ]]; then
+    if [[ ! "$SELECTOR_DEBOUNCE_REFRESHES" =~ ^[1-9][0-9]*$ ]]; then
+        echo "SELECTOR_DEBOUNCE_REFRESHES must be a positive integer" >&2; exit 2
+    fi
+    if [[ "$EXTERNAL_SUBTASK_SELECTOR" != state_machine_v1 ]]; then
+        echo "SELECTOR_DEBOUNCE_REFRESHES requires EXTERNAL_SUBTASK_SELECTOR=state_machine_v1" >&2; exit 2
+    fi
+    EXTERNAL_SUBTASK_ARGS+=(--selector-debounce-refreshes "$SELECTOR_DEBOUNCE_REFRESHES")
+fi
+if [[ -n "$SUBTASK_VOTE_WINDOW" || -n "$SUBTASK_VOTE_THRESHOLD" ]]; then
+    if [[ ! "$SUBTASK_VOTE_WINDOW" =~ ^[1-9][0-9]*$ ]] || (( SUBTASK_VOTE_WINDOW < 2 )); then
+        echo "SUBTASK_VOTE_WINDOW must be an integer of at least 2" >&2; exit 2
+    fi
+    if [[ ! "$SUBTASK_VOTE_THRESHOLD" =~ ^[1-9][0-9]*$ ]] \
+        || (( SUBTASK_VOTE_THRESHOLD < 2 || SUBTASK_VOTE_THRESHOLD > SUBTASK_VOTE_WINDOW )); then
+        echo "SUBTASK_VOTE_THRESHOLD must be between 2 and SUBTASK_VOTE_WINDOW" >&2; exit 2
+    fi
+    if (( SUBTASK_VOTE_THRESHOLD * 2 <= SUBTASK_VOTE_WINDOW )); then
+        echo "SUBTASK_VOTE_THRESHOLD must be a strict majority of SUBTASK_VOTE_WINDOW" >&2; exit 2
+    fi
+    if [[ "$SUBTASK_PREDICTION" != 1 || -z "$SUBTASK_INTERVAL" ]]; then
+        echo "Temporal subtask voting requires SUBTASK_PREDICTION=1 and an explicit SUBTASK_INTERVAL" >&2; exit 2
+    fi
+    if [[ -n "$EXTERNAL_SUBTASK_SET" || -n "$EXTERNAL_SUBTASK_SELECTOR" || -n "$GOALKEEPER_CONFIG_DIR" \
+        || "$SUBTASK_SAMPLE_MODE" == 1 ]]; then
+        echo "Temporal subtask voting cannot be combined with external subtask conditioning, sample prompts, or GoalKeeper" >&2; exit 2
+    fi
+    if [[ "$PROMPT_MODE" != whole_task ]]; then
+        echo "Temporal subtask voting requires PROMPT_MODE=whole_task" >&2; exit 2
+    fi
+    EXTERNAL_SUBTASK_ARGS+=(
+        --subtask-vote-action-horizon "$EXECUTE_HORIZON"
+        --subtask-vote-interval "$SUBTASK_INTERVAL"
+        --subtask-vote-window "$SUBTASK_VOTE_WINDOW"
+        --subtask-vote-threshold "$SUBTASK_VOTE_THRESHOLD"
+    )
+fi
 SUBTASK_SERVER_ARGS=()
 if [[ "$SUBTASK_PREDICTION" == 1 && -z "$GOALKEEPER_CONFIG_DIR" ]]; then
     : "${PI05_CKPT:?set PI05_CKPT to your joint subtask-trained checkpoint}"
     SUBTASK_SERVER_ARGS=(--subtask-prediction --max-token-len "${MAX_TOKEN_LEN:-512}"
         --max-subtask-len "${MAX_SUBTASK_LEN:-64}"
         --subtask-temperature "${SUBTASK_TEMPERATURE:-0.0}")
-    if [[ -n "${SUBTASK_INTERVAL:-}" ]]; then
+    if [[ -n "$SUBTASK_INTERVAL" ]]; then
         SUBTASK_SERVER_ARGS+=(--subtask-interval "$SUBTASK_INTERVAL")
+    fi
+    if [[ -n "$SUBTASK_VOTE_WINDOW" ]]; then
+        SUBTASK_SERVER_ARGS+=(
+            --subtask-vote-window "$SUBTASK_VOTE_WINDOW"
+            --subtask-vote-threshold "$SUBTASK_VOTE_THRESHOLD"
+        )
     fi
     if [[ -n "${SUBTASK_ACTION_CONDITIONING:-}" ]]; then
         SUBTASK_SERVER_ARGS+=(--subtask-action-conditioning "$SUBTASK_ACTION_CONDITIONING")
@@ -132,6 +188,17 @@ elif [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]]; then
     SUBTASK_SERVER_ARGS=(--provided-subtask-as-prompt --max-token-len 200)
 fi
 EVAL_RUNTIME_ROOT="${EVAL_RUNTIME_ROOT:-/dev/shm/wangfaye/omnigibson-runtime/$PORT}"
+if [[ -n "${SCO_EPHEMERAL_RUNTIME_ROOT:-}" ]]; then
+    case "$SCO_EPHEMERAL_RUNTIME_ROOT" in
+        */../*|*/..|*/./*|*/.) echo "SCO_EPHEMERAL_RUNTIME_ROOT must not contain traversal components" >&2; exit 2 ;;
+        /tmp/behavior-1k-runtime/*|/var/tmp/behavior-1k-runtime/*) ;;
+        *) echo "SCO_EPHEMERAL_RUNTIME_ROOT must use a private behavior-1k-runtime directory under /tmp or /var/tmp" >&2; exit 2 ;;
+    esac
+    # Keep generated Kit/Warp caches on this worker; queue, logs, JSON and videos
+    # continue to use the persistent paths specified by the immutable manifest.
+    # Reuse this port's caches across sequential episode generations.
+    EVAL_RUNTIME_ROOT="$SCO_EPHEMERAL_RUNTIME_ROOT/port-$PORT"
+fi
 QUEUE_MODE=0
 QUEUE_EVAL_ARGS=()
 if [[ -n "${PI05_EVAL_QUEUE_DB:-}" ]]; then
@@ -153,13 +220,24 @@ if [[ -n "${PI05_EVAL_QUEUE_DB:-}" ]]; then
     QUEUE_LOG_DIR="$QUEUE_LOG_DIR/$PI05_EVAL_QUEUE_WORKER/generation-$PI05_EVAL_QUEUE_GENERATION"
     mkdir -p "$QUEUE_LOG_DIR"
 fi
+if [[ -n "${PI05_FULL_EPISODE_COLLECTION_MANIFEST:-}" ]]; then
+    (( QUEUE_MODE && ! SUBTASK_SAMPLE_MODE )) || {
+        echo "Full episode recording requires the ordinary episode queue" >&2; exit 2; }
+    [[ -f "$PI05_FULL_EPISODE_COLLECTION_MANIFEST" ]] || {
+        echo "Full episode collection manifest not found" >&2; exit 2; }
+    QUEUE_EVAL_ARGS+=(--full-episode-collection-manifest "$PI05_FULL_EPISODE_COLLECTION_MANIFEST")
+fi
+if [[ -n "${PI05_PAIRED_RETEST_SEED:-}" ]]; then
+    [[ "$PI05_PAIRED_RETEST_SEED" =~ ^[0-9]+$ ]] && (( ${#PI05_PAIRED_RETEST_SEED} <= 10 && 10#$PI05_PAIRED_RETEST_SEED < 4294967296 )) || { echo "Paired retest seed must be uint32" >&2; exit 2; }
+    (( SUBTASK_SAMPLE_MODE && QUEUE_MODE )) && [[ -z "${PI05_SUBTASK_PROBE_PLAN:-}" && -z "${PI05_SUBTASK_COLLECTION_PLAN:-}" ]] || { echo "Paired retest seeding requires the full-panel queue" >&2; exit 2; }
+fi
 if (( SUBTASK_SAMPLE_MODE )); then
-    (( QUEUE_MODE )) || {
-        echo "PI05_SUBTASK_SAMPLE_PANEL requires PI05_EVAL_QUEUE_DB" >&2; exit 2; }
+    (( QUEUE_MODE )) || [[ -n "${PI05_SUBTASK_PROBE_PLAN:-}" || -n "${PI05_SUBTASK_COLLECTION_PLAN:-}" ]] || {
+        echo "PI05_SUBTASK_SAMPLE_PANEL requires PI05_EVAL_QUEUE_DB or a validation plan" >&2; exit 2; }
     [[ "$NUM_ROLLOUTS" == 1 ]] || {
         echo "PI05_SUBTASK_SAMPLE_PANEL requires NUM_ROLLOUTS=1" >&2; exit 2; }
-    [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 ]] || {
-        echo "PI05_SUBTASK_SAMPLE_PANEL requires PROVIDED_SUBTASK_AS_PROMPT=1" >&2; exit 2; }
+    [[ "$PROVIDED_SUBTASK_AS_PROMPT" == 1 || "$SUBTASK_PREDICTION" == 1 ]] || {
+        echo "PI05_SUBTASK_SAMPLE_PANEL requires joint prediction or provided-subtask-as-prompt" >&2; exit 2; }
     [[ "${SUBTASK_SAMPLE_MAX_STEPS:-2048}" =~ ^[1-9][0-9]*$ ]] || {
         echo "SUBTASK_SAMPLE_MAX_STEPS must be a positive integer" >&2; exit 2; }
 fi
@@ -271,6 +349,8 @@ PY
         python scripts/install_transformers_patch.py --check
     fi
     SERVER_TOKEN="$(python -c 'import secrets; print(secrets.token_hex(32))')"
+    COLLECTION_SERVER_ARGS=()
+    if [[ -n "${PI05_SUBTASK_COLLECTION_PLAN:-}" || -n "${PI05_PAIRED_RETEST_SEED:-}" ]]; then COLLECTION_SERVER_ARGS=(--collection-seeding); fi
     # The startup prompt is the fallback when the evaluator does not send
     # a dynamic oracle prompt; --repo-id must match the training assets.
     CUDA_VISIBLE_DEVICES="$SERVER_GPU" XLA_PYTHON_CLIENT_PREALLOCATE=true \
@@ -282,9 +362,9 @@ PY
         --policy.config pi05_b1k \
         --policy.dir "$PI05_CKPT" \
         --control_mode receding_horizon \
-        --action_horizon "${EXECUTE_HORIZON:-16}" \
+        --action_horizon "$EXECUTE_HORIZON" \
         --server-token "$SERVER_TOKEN" \
-        "${SUBTASK_SERVER_ARGS[@]}" \
+        "${SUBTASK_SERVER_ARGS[@]}" "${COLLECTION_SERVER_ARGS[@]}" \
         --port "$PORT" >> "$SERVER_LOG" 2>&1 &
     SERVER_PID=$!
     echo "policy server pid=$SERVER_PID task=$task log=$SERVER_LOG"
@@ -375,6 +455,17 @@ for task in "${TASKS[@]}"; do
             --sample-max-steps "${SUBTASK_SAMPLE_MAX_STEPS:-2048}"
         )
         EVAL_COMMAND=("$EVAL_ENV/bin/python" "$REPO_ROOT/scripts/eval_b1k_subtask_samples.py")
+        if [[ -n "${PI05_SUBTASK_PROBE_PLAN:-}" ]]; then
+            (( QUEUE_MODE == 0 )) || { echo "Validation cannot use a production queue" >&2; exit 2; }
+            EVAL_ARGS+=(--probe-plan "$PI05_SUBTASK_PROBE_PLAN")
+            EVAL_COMMAND=("$EVAL_ENV/bin/python" "$REPO_ROOT/scripts/eval_b1k_subtask_probe.py")
+        fi
+        if [[ -n "${PI05_SUBTASK_COLLECTION_PLAN:-}" ]]; then
+            (( QUEUE_MODE == 0 )) && [[ -z "${PI05_SUBTASK_PROBE_PLAN:-}" ]] || { echo "Collection cannot share a production queue or probe plan" >&2; exit 2; }
+            EVAL_ARGS+=(--collection-plan "$PI05_SUBTASK_COLLECTION_PLAN")
+            if [[ "${PI05_COLLECTION_RESUME_COMPLETED:-0}" == 1 ]]; then EVAL_ARGS+=(--resume-completed); fi
+            EVAL_COMMAND=("$EVAL_ENV/bin/python" "$REPO_ROOT/scripts/collect_b1k_subtasks.py")
+        fi
     elif (( QUEUE_MODE )); then
         EVAL_ARGS+=("${QUEUE_EVAL_ARGS[@]}")
         EVAL_COMMAND=("$EVAL_ENV/bin/python" "$REPO_ROOT/scripts/eval_b1k_queue.py")
@@ -401,11 +492,12 @@ for task in "${TASKS[@]}"; do
             XDG_CONFIG_HOME="$EVAL_RUNTIME_ROOT/config" \
             WARP_CACHE_PATH="$EVAL_RUNTIME_ROOT/warp" \
             HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}" \
+            PYTHONPATH="$REPO_ROOT/BEHAVIOR-1K/OmniGibson${PYTHONPATH:+:$PYTHONPATH}" \
             PYTHONNOUSERSITE=1 \
             OMNI_KIT_ACCEPT_EULA=YES \
             LD_LIBRARY_PATH="$EVAL_ENV/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-            VK_ICD_FILENAMES="$EVAL_ENV/share/vulkan/icd.d/nvidia_icd.json" \
-            __EGL_VENDOR_LIBRARY_FILENAMES="$EVAL_ENV/share/glvnd/egl_vendor.d/10_nvidia.json" \
+            VK_ICD_FILENAMES="${VK_ICD_FILENAMES:-$EVAL_ENV/share/vulkan/icd.d/nvidia_icd.json}" \
+            __EGL_VENDOR_LIBRARY_FILENAMES="${__EGL_VENDOR_LIBRARY_FILENAMES:-$EVAL_ENV/share/glvnd/egl_vendor.d/10_nvidia.json}" \
             "${EVAL_COMMAND[@]}" \
                 --task-name "$task" \
                 --host 127.0.0.1 --port "$PORT" \
