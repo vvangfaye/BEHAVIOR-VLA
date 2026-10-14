@@ -1,0 +1,106 @@
+{
+  "action_horizon": 16,
+  "candidate_seed_evidence": "explicit actual key0 application and server ACK",
+  "env_wrapper": "omnigibson.eval.wrappers.DefaultWrapper",
+  "environment_seed": 0,
+  "external_agent": false,
+  "fresh_server_and_evaluator_per_candidate": true,
+  "historical_seed_evidence": "pinned default JAX key0 + first episode in a verified fresh model/evaluator process; no fabricated ACK",
+  "max_subtask_len": 64,
+  "max_token_len": 512,
+  "mode": "public_test",
+  "model_action_horizon": 32,
+  "native_task_step_limits": true,
+  "pairs": [
+    [
+      "cook_bacon",
+      301
+    ],
+    [
+      "getting_organized_for_work",
+      301
+    ],
+    [
+      "hiding_Easter_eggs",
+      301
+    ],
+    [
+      "scrubbing_bathroom_floor",
+      301
+    ],
+    [
+      "putting_up_Christmas_decorations_inside",
+      301
+    ],
+    [
+      "tidying_bathroom",
+      301
+    ],
+    [
+      "wash_dog_toys",
+      301
+    ],
+    [
+      "stacking_wood",
+      301
+    ],
+    [
+      "installing_a_scanner",
+      301
+    ],
+    [
+      "spraying_fruit_trees",
+      301
+    ],
+    [
+      "sorting_bottles_cans_and_paper",
+      301
+    ],
+    [
+      "rearrange_your_room",
+      301
+    ],
+    [
+      "chopping_wood",
+      301
+    ],
+    [
+      "putting_dishes_away_after_cleaning",
+      301
+    ],
+    [
+      "clean_up_broken_glass",
+      301
+    ],
+    [
+      "halve_an_egg",
+      301
+    ],
+    [
+      "hanging_pictures",
+      301
+    ],
+    [
+      "vacuuming_floors",
+      301
+    ],
+    [
+      "moving_boxes_to_storage",
+      301
+    ],
+    [
+      "putting_shoes_on_rack",
+      301
+    ]
+  ],
+  "policy_seed": 0,
+  "prompt_mode": "whole_task",
+  "robot": "R1Pro",
+  "source_manifest_sha256": "247cfad8b5709170f1f514ba104403eed28b7a31ae9ab0458d50c8da65ff997f",
+  "subtask_action_conditioning": "task_and_subtask",
+  "subtask_interval": 1,
+  "subtask_prediction": true,
+  "subtask_temperature": 0.0,
+  "training_seen": true,
+  "write_video": true
+}

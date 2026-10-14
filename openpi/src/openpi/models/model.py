@@ -105,6 +105,8 @@ class Observation(Generic[ArrayT]):
     token_ar_mask: at.Int[ArrayT, "*b l"] | None = None
     # Token loss mask.
     token_loss_mask: at.Bool[ArrayT, "*b l"] | None = None
+    has_subtask_target: at.Bool[ArrayT, "*b"] | None = None
+    source_kind_id: at.Int[ArrayT, "*b"] | None = None
     # Independent low-level context for factorized joint training. Contains
     # state + current subtask, never the complete task or contextualized caches.
     action_tokenized_prompt: at.Int[ArrayT, "*b l"] | None = None
@@ -135,6 +137,8 @@ class Observation(Generic[ArrayT]):
             tokenized_prompt_mask=data.get("tokenized_prompt_mask"),
             token_ar_mask=data.get("token_ar_mask"),
             token_loss_mask=data.get("token_loss_mask"),
+            has_subtask_target=data.get("has_subtask_target"),
+            source_kind_id=data.get("source_kind_id"),
             action_tokenized_prompt=data.get("action_tokenized_prompt"),
             action_tokenized_prompt_mask=data.get("action_tokenized_prompt_mask"),
             memory_features=data.get("memory_features"),
@@ -231,6 +235,8 @@ def preprocess_observation(
         tokenized_prompt_mask=observation.tokenized_prompt_mask,
         token_ar_mask=observation.token_ar_mask,
         token_loss_mask=observation.token_loss_mask,
+        has_subtask_target=observation.has_subtask_target,
+        source_kind_id=observation.source_kind_id,
         action_tokenized_prompt=observation.action_tokenized_prompt,
         action_tokenized_prompt_mask=observation.action_tokenized_prompt_mask,
         memory_features=observation.memory_features,

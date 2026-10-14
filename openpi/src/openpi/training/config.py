@@ -122,6 +122,9 @@ class DataConfig:
     subtask_whole_task_prob: float = 0.0
     # Derived from the model config for the B1K loader. Keeps task and label separate.
     subtask_prediction: bool = False
+    # Frozen, indexed three-source training; physical roots may be relocated separately.
+    subtask_mixture_path: str | None = None
+    subtask_mixture_roots_path: str | None = None
     memory_cache_dir: str | None = None
     memory_contract: dict[str, Any] | None = None
 
@@ -405,6 +408,7 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
 @dataclasses.dataclass(frozen=True)
 class LeRobotB1KDataConfig(DataConfigFactory):
     robot_config_name: str = tyro.MISSING
+    video_backend: Literal["pyav", "torchcodec"] | None = None
     extra_delta_transform: bool = True
     action_sequence_keys: Sequence[str] = ("action",)
     dataset_root: str | None = None
@@ -412,6 +416,8 @@ class LeRobotB1KDataConfig(DataConfigFactory):
     frame_stride: int = 1
     subtask_prompts_path: str | None = None
     subtask_whole_task_prob: float = 0.0
+    subtask_mixture_path: str | None = None
+    subtask_mixture_roots_path: str | None = None
     memory_cache_dir: str | None = None
 
     def _build_delta_mappings(self, robot_config) -> list[tuple[list[int], list[int]]]:
@@ -469,6 +475,8 @@ class LeRobotB1KDataConfig(DataConfigFactory):
         )
         if subtask_prediction:
             repack_mapping["subtask"] = "subtask"
+            if self.subtask_mixture_path:
+                repack_mapping.update(has_subtask_target="has_subtask_target", source_kind_id="source_kind_id")
         if memory_contract is not None:
             repack_mapping.update({key: key for key in frame_memory.FIELDS})
 
@@ -500,11 +508,20 @@ class LeRobotB1KDataConfig(DataConfigFactory):
         if subtask_prediction and not base_config.prompt_from_task:
             raise ValueError("B1K subtask prediction requires prompt_from_task=True for the high-level instruction.")
         subtask_path = self.subtask_prompts_path
-        if subtask_prediction and subtask_path is None:
+        if self.subtask_mixture_roots_path and not self.subtask_mixture_path:
+            raise ValueError("subtask_mixture_roots_path requires subtask_mixture_path.")
+        if self.subtask_mixture_path and not subtask_prediction:
+            raise ValueError("Indexed subtask mixtures require joint subtask prediction.")
+        if subtask_prediction and subtask_path is None and not self.subtask_mixture_path:
             if dataset_root is None:
                 raise ValueError("Set dataset_root or subtask_prompts_path for subtask supervision.")
             subtask_path = str(pathlib.Path(dataset_root) / "meta" / "subtask_segments.parquet")
         episodes_index = self.episodes_index if self.episodes_index is not None else base_config.episodes_index
+        dataset_kwargs = dict(base_config.dataset_kwargs)
+        if self.video_backend is not None:
+            if self.video_backend not in ("pyav", "torchcodec"):
+                raise ValueError("B1K video_backend must be pyav or torchcodec.")
+            dataset_kwargs["video_backend"] = self.video_backend
         return dataclasses.replace(
             base_config,
             repack_transforms=repack_transform,
@@ -513,11 +530,14 @@ class LeRobotB1KDataConfig(DataConfigFactory):
             action_sequence_keys=(robot_config.action_key,),
             use_quantile_norm=False,
             dataset_root=dataset_root,
+            dataset_kwargs=dataset_kwargs,
             episodes_index=episodes_index,
             frame_stride=self.frame_stride,
             subtask_prompts_path=subtask_path,
             subtask_whole_task_prob=self.subtask_whole_task_prob,
             subtask_prediction=subtask_prediction,
+            subtask_mixture_path=self.subtask_mixture_path,
+            subtask_mixture_roots_path=self.subtask_mixture_roots_path,
             memory_cache_dir=self.memory_cache_dir,
             memory_contract=memory_contract,
         )
@@ -657,6 +677,7 @@ class TrainConfig:
     pytorch_gradient_checkpointing: bool = True
 
     lr_schedule: _optimizer.LRScheduleConfig = dataclasses.field(default_factory=_optimizer.CosineDecaySchedule)
+    learning_rate_contract_path: str | None = None
     optimizer: _optimizer.OptimizerConfig = dataclasses.field(default_factory=_optimizer.AdamW)
     ema_decay: float | None = 0.99
 

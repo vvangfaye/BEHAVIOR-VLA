@@ -119,7 +119,8 @@ def test_reject_empty_or_truncated_supervision(tokenizer):
         transforms.TokenizeSubtaskPrompt(tokenizer)({"prompt": "task", "state": np.zeros(4)})
 
 
-def test_b1k_input_adapter_preserves_separate_label(tokenizer):
+@pytest.mark.parametrize('supervised', [True, False])
+def test_b1k_input_adapter_preserves_separate_label(tokenizer, supervised):
     robot = ROBOT_REGISTRY["b1k/R1Pro"]
     state_dim = max(i for p in robot.proprio for i in p.indices) + 1
     raw = {
@@ -127,16 +128,20 @@ def test_b1k_input_adapter_preserves_separate_label(tokenizer):
         "prompt": "turn on radio",
         "subtask": "press radio",
         "actions": np.zeros((2, robot.action_dim)),
+        "has_subtask_target": np.bool_(supervised),
+        "source_kind_id": np.int32(2 if supervised else 3),
     }
     raw.update({f"observation/{key}": np.zeros((224, 224, 3), dtype=np.uint8) for key in robot.observations})
     data = B1KInputs(model_type=model_lib.ModelType.PI05, robot_config=robot)(raw)
     assert data["prompt"] == raw["prompt"]
     assert data["subtask"] == raw["subtask"]
+    assert bool(data['has_subtask_target']) == supervised
+    assert int(data['source_kind_id']) == (2 if supervised else 3)
     tokenizer._max_len = 128
     data = transforms.TokenizeSubtaskPrompt(tokenizer)(data)
     assert "prompt" not in data
     assert "subtask" not in data
-    assert data["token_loss_mask"].sum() > 1
+    assert (data["token_loss_mask"].sum() > 1) if supervised else not data['token_loss_mask'].any()
 
 
 def test_chunked_ce_matches_dense_ce_and_gradients(model_setup):
@@ -292,3 +297,53 @@ def test_pi0_continuous_state_prefix_mask_regression(model_setup):
 def test_invalid_subtask_configs_fail_early(kwargs):
     with pytest.raises(ValueError, match=r"requires pi05|subtask_loss_weight|Require"):
         pi0_config.Pi0Config(**{"pi05": True, "train_subtask_prediction": True, **kwargs})
+
+
+def test_explicit_action_only_preserves_context_and_zeroes_text_loss(tokenizer):
+    t=transforms.TokenizeSubtaskPrompt(tokenizer,max_subtask_len=8,subtask_action_conditioning='subtask_only')
+    row=dict(prompt='turn on radio',subtask='press radio',state=np.zeros(4))
+    labelled=t(row);weak=t(dict(row,has_subtask_target=False))
+    assert labelled['token_loss_mask'].any() and not weak['token_loss_mask'].any()
+    np.testing.assert_array_equal(labelled['tokenized_prompt'],weak['tokenized_prompt'])
+    np.testing.assert_array_equal(labelled['action_tokenized_prompt'],weak['action_tokenized_prompt'])
+    with pytest.raises(ValueError,match='scalar boolean'):t(dict(row,has_subtask_target='false'))
+    with pytest.raises(ValueError,match='disagree'):t(dict(row,has_subtask_target=True,source_kind_id=3))
+    with pytest.raises(ValueError,match='non-empty'):t(dict(row,subtask='',has_subtask_target=False))
+
+
+def test_action_only_ce_and_ce_gradient_are_zero_but_action_loss_remains(model_setup):
+    model,obs,actions,config=model_setup
+    weak=dataclasses.replace(obs,token_loss_mask=jnp.zeros_like(obs.token_loss_mask),has_subtask_target=jnp.zeros(2,dtype=bool))
+    hidden=jax.random.normal(jax.random.key(8),(2,config.max_token_len+3,64))
+    f=lambda h:model._compute_subtask_metrics(h,weak)[0].sum()
+    assert float(f(hidden))==0
+    np.testing.assert_array_equal(jax.grad(f)(hidden),jnp.zeros_like(hidden))
+    loss,metrics=model.compute_loss_with_metrics(jax.random.key(7),weak,actions)
+    assert np.isfinite(loss).all() and float(metrics['action_loss'])>0
+    assert float(metrics['subtask_loss'])==0
+    np.testing.assert_allclose(loss.mean(),metrics['action_loss'])
+    # Silent loss-mask removal from a labelled row remains a hard failure.
+    bad=dataclasses.replace(weak,has_subtask_target=jnp.ones(2,dtype=bool))
+    assert np.isnan(model._compute_subtask_metrics(hidden,bad)[0]).all()
+
+
+def test_mixed_batch_excludes_weak_rows_from_ce_gradient(model_setup):
+    model,obs,_,config=model_setup
+    mixed=dataclasses.replace(obs,has_subtask_target=jnp.array([True,False]),token_loss_mask=obs.token_loss_mask.at[1].set(False))
+    hidden=jax.random.normal(jax.random.key(8),(2,config.max_token_len+3,64))
+    losses=model._compute_subtask_metrics(hidden,mixed)[0]
+    assert np.isfinite(losses).all() and losses[0]>0 and losses[1]==0
+    gradient=jax.grad(lambda h:model._compute_subtask_metrics(h,mixed)[0].sum())(hidden)
+    assert np.linalg.norm(gradient[0])>0
+    np.testing.assert_array_equal(gradient[1],jnp.zeros_like(gradient[1]))
+
+
+def test_action_only_rows_do_not_dilute_supervised_ce(model_setup):
+    model,obs,actions,_=model_setup
+    duplicated=jax.tree.map(lambda x: x[jnp.array([0,0])],obs)
+    duplicated=dataclasses.replace(duplicated,has_subtask_target=jnp.ones(2,dtype=bool))
+    _,labelled_metrics=model.compute_loss_with_metrics(jax.random.key(7),duplicated,actions)
+    mixed=dataclasses.replace(duplicated,has_subtask_target=jnp.array([True,False]),
+                              token_loss_mask=duplicated.token_loss_mask.at[1].set(False))
+    _,mixed_metrics=model.compute_loss_with_metrics(jax.random.key(7),mixed,actions)
+    np.testing.assert_allclose(mixed_metrics['subtask_loss'],labelled_metrics['subtask_loss'],rtol=1e-5)

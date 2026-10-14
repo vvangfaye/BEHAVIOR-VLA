@@ -1,9 +1,11 @@
 import dataclasses
 import functools
+import hashlib
 import json
 import logging
 import os
 import platform
+import time
 from typing import Any
 
 import etils.epath as epath
@@ -21,6 +23,8 @@ import wandb
 import openpi.models.model as _model
 import openpi.shared.array_typing as at
 import openpi.shared.nnx_utils as nnx_utils
+from openpi.shared import learning_rate_contract
+from openpi.shared import training_progress
 import openpi.training.checkpoints as _checkpoints
 import openpi.training.config as _config
 import openpi.training.data_loader as _data_loader
@@ -29,6 +33,28 @@ import openpi.training.optimizer as _optimizer
 import openpi.training.sharding as sharding
 import openpi.training.utils as training_utils
 import openpi.training.weight_loaders as _weight_loaders
+
+
+def restore_checkpoint(manager, state, data_loader, config):
+    cache = os.environ.get("OPENPI_CHECKPOINT_LOCAL_READBACK")
+    restore_manager = manager
+    if cache:
+        from openpi.shared.checkpoint_readback import copy_committed_checkpoint
+        stage = str(manager.latest_step())
+        logging.info("Copying committed checkpoint %s into fresh local readback cache", stage)
+        local = copy_committed_checkpoint(manager.directory, manager.latest_step(), cache + "/step-" + stage,
+            os.environ["OPENPI_OSSUTIL_PATH"], os.environ["OPENPI_DOWNLOAD_ENDPOINT"],
+            os.environ["OPENPI_OSSUTIL_SHA256"])
+        restore_manager, _ = _checkpoints.initialize_checkpoint_dir(local, keep_period=None,
+            overwrite=False, resume=True, read_only=True)
+        logging.info("Local committed checkpoint ready; restoring full training state")
+    try:
+        result = _checkpoints.restore_state(restore_manager, state, data_loader)
+        jax.block_until_ready(result)
+        return result
+    finally:
+        if restore_manager is not manager:
+            restore_manager.close()
 
 
 def _extract_training_norm_stats(train_data_loader: _data_loader.DataLoader | None) -> dict | None:
@@ -44,6 +70,8 @@ def _prepare_validation_config(
     config: _config.TrainConfig, training_norm_stats: dict | None
 ) -> tuple[_config.TrainConfig, str, bool, _config.DataConfig]:
     """Build an explicit validation split while reusing training normalization stats."""
+    if getattr(config.data, "subtask_mixture_path", None):
+        raise ValueError("Multi-root mixtures require separate instance-held-out evaluation; legacy val_episodes_index is unsafe.")
     train_repo_id = getattr(config.data, "repo_id", None)
     if config.val_repo_id is None and config.val_episodes_index is None:
         raise ValueError("Enabled validation requires val_repo_id or val_episodes_index.")
@@ -380,11 +408,19 @@ def train_step(
         "grad_norm": optax.global_norm(grads),
         "param_norm": optax.global_norm(kernel_params),
     }
+    if config.learning_rate_contract_path is not None:
+        clock = learning_rate_contract.optimizer_schedule_step(state.opt_state)
+        info["learning_rate"] = config.lr_schedule.create()(clock)
+        info["optimizer_internal_step"] = clock
+        info["lr_clock_matches_step"] = (clock == state.step).astype(jnp.float32)
     return new_state, info
 
 
 def main(config: _config.TrainConfig):
     init_logging()
+    bounded_smoke = os.environ.get("OPENPI_SMOKE_TWO_STEPS") == "1"
+    if bounded_smoke and (config.num_train_steps != 2 or config.resume or config.batch_size != 192):
+        raise ValueError("Four-source smoke requires exactly two fresh updates with global batch 192")
     distributed_config = _distributed.initialize_from_env()
     is_primary = jax.process_index() == 0
     logging.info(
@@ -429,6 +465,37 @@ def main(config: _config.TrainConfig):
         shuffle=True,
         skip_norm_stats=False,
     )
+    mixture_plan = getattr(data_loader, "mixture_plan", None)
+    if bounded_smoke and (mixture_plan is None or not mixture_plan.four_source):
+        raise ValueError("Four-source smoke requires the frozen four-source mixture")
+    if mixture_plan is not None and mixture_plan.four_source and config.learning_rate_contract_path is None:
+        raise ValueError("Four-source fine-tuning requires a frozen learning-rate contract")
+    data_loader.learning_rate_contract = (
+        learning_rate_contract.check_schedule(config.lr_schedule, config.learning_rate_contract_path)
+        if config.learning_rate_contract_path is not None else None
+    )
+    run_contract_path = os.environ.get("OPENPI_FORMAL_RUN_CONTRACT")
+    data_loader.formal_run_contract = None if run_contract_path is None else json.loads(epath.Path(run_contract_path).read_text())
+    data_loader.training_rng_contract = None if run_contract_path is None else {
+        "seed": config.seed,
+        "base_key_data": np.asarray(jax.random.key_data(train_rng)).tolist(),
+        "per_step_key": "jax.random.fold_in(base_key, completed_optimizer_updates)",
+    }
+    data_loader.realized_source_counts = {} if mixture_plan is None else {k: 0 for k in ("replay", "recovered", "collected", "full_episode")}
+    if mixture_plan is not None:
+        if config.num_train_steps > mixture_plan.num_steps:
+            raise ValueError("Training steps exceed the frozen finite mixture schedule.")
+        if os.environ.get("OPENPI_TRAIN_EPOCHS") is not None:
+            raise ValueError("Indexed mixture training uses an update budget, not full-dataset epochs.")
+        digest = hashlib.sha256(json.dumps(
+            {"sampling": mixture_plan.fingerprint, "execution": data_loader.mixture_execution,
+             "learning_rate": data_loader.learning_rate_contract},
+            sort_keys=True).encode()).digest()
+        if jax.process_count() > 1:
+            observed = np.asarray(multihost_utils.process_allgather(
+                np.frombuffer(digest, dtype=np.uint8))).reshape(-1, len(digest))
+            if not np.all(observed == observed[0]):
+                raise ValueError("Training ranks disagree on the frozen mixture or execution contract.")
     val_data_loader = (
         create_validation_data_loader(config, data_loader, data_sharding) if config.val_log_interval else None
     )
@@ -450,14 +517,20 @@ def main(config: _config.TrainConfig):
     logging.info(f"Initialized train state:\n{training_utils.array_tree_to_info(train_state.params)}")
 
     if resuming:
-        train_state = _checkpoints.restore_state(checkpoint_manager, train_state, data_loader)
+        train_state = restore_checkpoint(checkpoint_manager, train_state, data_loader, config)
         jax.block_until_ready(train_state)
 
     start_step = int(train_state.step)
+    if data_loader.learning_rate_contract is not None:
+        learning_rate_contract.check_optimizer_clock(train_state.opt_state, start_step)
+    if mixture_plan is not None and start_step >= config.num_train_steps:
+        raise ValueError("Restored training already reached the requested update budget.")
     if resuming:
         data_loader.set_start_batch(start_step)
     data_iter = iter(data_loader)
+    wait_started = time.monotonic()
     batch = next(data_iter)
+    data_wait_seconds = time.monotonic() - wait_started
     logging.info(f"Initialized data loader:\n{training_utils.array_tree_to_info(batch)}")
 
     if is_primary and jax.process_count() == 1:
@@ -484,12 +557,51 @@ def main(config: _config.TrainConfig):
 
     infos = []
     for step in pbar:
+        update_started = time.monotonic()
+        if bounded_smoke:
+            obs, actions = batch
+            # Gather only the small supervision arrays, never remote images.
+            gather = functools.partial(multihost_utils.process_allgather, tiled=True) if jax.process_count() > 1 else jax.device_get
+            kinds = np.asarray(gather(obs.source_kind_id))
+            target = np.asarray(gather(obs.has_subtask_target))
+            mask = np.asarray(gather(obs.token_loss_mask))
+            if kinds.shape != (config.batch_size,):
+                raise RuntimeError("Smoke proof must cover exactly one global batch")
+            if not np.array_equal(target, kinds != 3) or np.any(mask[kinds == 3]):
+                raise RuntimeError("Real batch violated full-episode text loss masking")
+            if set(kinds.tolist()) != {0, 1, 2, 3} or not np.all(mask[kinds != 3].sum(axis=-1) > 0):
+                raise RuntimeError("Smoke batch must exercise all four sources with labeled text targets")
+            if is_primary:
+                proof = {"kind": "real_four_source_batch", "step": step,
+                    "source_counts": {str(k): int(np.sum(kinds == k)) for k in range(4)},
+                    "full_episode_text_target_tokens": int(mask[kinds == 3].sum()),
+                    "supervised_text_target_tokens": int(mask[kinds != 3].sum()),
+                    "actions_shape": list(actions.shape),
+                    "images": {k: list(v.shape) for k, v in obs.images.items()},
+                    "mixture_fingerprint": mixture_plan.fingerprint}
+                with open(os.environ["OPENPI_SMOKE_REPORT"], "a") as stream:
+                    stream.write(json.dumps(proof) + "\n")
         with sharding.set_mesh(mesh):
             train_state, info = ptrain_step(train_rng, train_state, batch)
         infos.append(info)
-        if step % config.log_interval == 0:
+        log_boundary = step % config.log_interval == 0 if mixture_plan is None else (step + 1) % config.log_interval == 0
+        if log_boundary or step == config.num_train_steps - 1 or (data_loader.learning_rate_contract is not None and step < 200):
             stacked_infos = common_utils.stack_forest(infos)
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
+            if mixture_plan is not None:
+                for kind in data_loader.realized_source_counts:
+                    count = int(np.asarray(jax.device_get(stacked_infos[f"source_count/{kind}"])).sum())
+                    data_loader.realized_source_counts[kind] += count
+                    reduced_info[f"source_draws_total/{kind}"] = data_loader.realized_source_counts[kind]
+            reduced_info.update(completed_optimizer_updates=step + 1,
+                                data_wait_seconds=data_wait_seconds,
+                                step_seconds=time.monotonic() - update_started,
+                                nonfinite_count=sum(not np.isfinite(np.asarray(v)).all() for v in reduced_info.values()))
+            if data_loader.learning_rate_contract is not None:
+                rate = float(reduced_info["learning_rate"])
+                if (not np.isfinite(rate) or rate > data_loader.learning_rate_contract['peak_limit']*(1+2e-6)
+                        or float(reduced_info["lr_clock_matches_step"]) != 1.0):
+                    raise RuntimeError("Applied learning rate or optimizer clock violated the frozen contract")
             if require_finite_metrics:
                 required = {"loss", "action_loss", "grad_norm", "param_norm"}
                 train_subtask_prediction = getattr(config.model, "train_subtask_prediction", False)
@@ -510,6 +622,15 @@ def main(config: _config.TrainConfig):
                     if not np.isclose(float(reduced_info["loss"]), float(reduced_info["action_loss"])):
                         raise RuntimeError("Action-only smoke loss does not match action_loss.")
             if is_primary:
+                if report := os.environ.get("OPENPI_FORMAL_METRICS"):
+                    with open(report, "a") as stream:
+                        stream.write(json.dumps({"kind": "training_update", "completed_updates": step + 1,
+                            "metrics": {k: float(v) for k, v in reduced_info.items()},
+                            "mixture_fingerprint": mixture_plan.fingerprint if mixture_plan is not None else None}) + "\n")
+                if bounded_smoke:
+                    with open(os.environ["OPENPI_SMOKE_REPORT"], "a") as stream:
+                        stream.write(json.dumps({"kind": "optimizer_update", "step": step,
+                            "metrics": {k: float(v) for k, v in reduced_info.items()}}) + "\n")
                 info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
                 pbar.write(f"Step {step}: {info_str}")
                 wandb.log(reduced_info, step=step)
@@ -527,20 +648,47 @@ def main(config: _config.TrainConfig):
             if is_primary:
                 wandb.log({"val_loss": val_loss}, step=step)
                 logging.info("Validation loss at step %d: %.4f", step, val_loss)
-        batch = next(data_iter)
+        if mixture_plan is None or step < config.num_train_steps - 1:
+            wait_started = time.monotonic()
+            batch = next(data_iter)
+            data_wait_seconds = time.monotonic() - wait_started
 
-        if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
-            _checkpoints.save_state(checkpoint_manager, train_state, data_loader, step)
+        save_step = training_progress.checkpoint_to_save(iteration=step, completed_updates=step + 1,
+            start_step=start_step, end_step=config.num_train_steps, interval=config.save_interval,
+            indexed=mixture_plan is not None)
+        if save_step is not None:
+            _checkpoints.save_state(checkpoint_manager, train_state, data_loader, save_step)
 
     logging.info("Waiting for checkpoint manager to finish")
     checkpoint_manager.wait_until_finished()
 
     if os.environ.get("OPENPI_VERIFY_FINAL_CHECKPOINT") == "1":
-        restored_state = _checkpoints.restore_state(checkpoint_manager, train_state, data_loader)
+        restored_state = restore_checkpoint(checkpoint_manager, train_state, data_loader, config)
         jax.block_until_ready(restored_state)
         restored_step = int(restored_state.step)
         if restored_step != config.num_train_steps:
             raise RuntimeError(f"Restored checkpoint step is {restored_step}, expected {config.num_train_steps}.")
+        exact_state_verified = False
+        if bounded_smoke or run_contract_path:
+            # Compare all dynamic state leaves, including parameters, EMA and
+            # optimizer moments, on devices without transferring entire weights.
+            logging.info("Comparing all restored parameter, EMA and optimizer leaves exactly")
+            checks = jax.tree.leaves(jax.tree.map(lambda a, b: jnp.all(a == b), train_state, restored_state))
+            if not all(bool(jax.device_get(value)) for value in checks):
+                raise RuntimeError("Restored smoke checkpoint differs from saved training state")
+            exact_state_verified = True
+        if bounded_smoke:
+            clock = int(learning_rate_contract.optimizer_schedule_step(restored_state.opt_state))
+            if clock != 2:
+                raise RuntimeError("Smoke checkpoint optimizer did not restore at update two")
+            if is_primary:
+                with open(os.environ["OPENPI_SMOKE_REPORT"], "a") as stream:
+                    stream.write(json.dumps({"kind": "checkpoint_restore", "completed_updates": restored_step,
+                        "optimizer_clock": clock, "all_state_leaves_exact": True,
+                        "next_global_sample": restored_step * config.batch_size,
+                        "next_reference": mixture_plan.reference(restored_step * config.batch_size),
+                        "next_learning_rate": float(config.lr_schedule.create()(clock)),
+                        "third_update_executed": False}) + "\n")
         multihost_utils.sync_global_devices("openpi_final_checkpoint_verified")
         if is_primary and (success_path := os.environ.get("OPENPI_SUCCESS_PATH")):
             path = epath.Path(success_path)
@@ -562,6 +710,8 @@ def main(config: _config.TrainConfig):
                         "mesh": dict(mesh.shape),
                         "processes": jax.process_count(),
                         "restored_step": restored_step,
+                        "all_state_leaves_exact": exact_state_verified,
+                        "optimizer_clock": int(learning_rate_contract.optimizer_schedule_step(restored_state.opt_state)) if data_loader.learning_rate_contract is not None else None,
                     },
                     sort_keys=True,
                 )
