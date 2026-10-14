@@ -1,5 +1,8 @@
 import numpy as np
 import pytest
+import json
+from types import SimpleNamespace
+from etils import epath
 
 from openpi.training import checkpoints
 
@@ -62,3 +65,15 @@ def test_multihost_resume_rejects_inconsistent_latest_step(tmp_path, monkeypatch
 
     with pytest.raises(RuntimeError, match="latest checkpoint"):
         checkpoints.initialize_checkpoint_dir(checkpoint_dir, keep_period=250, overwrite=False, resume=True)
+
+
+@pytest.mark.parametrize("filename,attribute", [("formal_run_contract.json", "formal_run_contract"),
+                                               ("training_rng_contract.json", "training_rng_contract")])
+def test_restore_rejects_changed_formal_provenance_before_state_load(tmp_path, filename, attribute):
+    directory = tmp_path / "2/assets"
+    directory.mkdir(parents=True)
+    (directory / filename).write_text(json.dumps({"identity": "old"}))
+    manager = SimpleNamespace(directory=epath.Path(tmp_path), latest_step=lambda: 2)
+    loader = SimpleNamespace(learning_rate_contract=None, **{attribute: {"identity": "changed"}})
+    with pytest.raises(ValueError, match="provenance or training RNG changed"):
+        checkpoints.restore_state(manager, None, loader)

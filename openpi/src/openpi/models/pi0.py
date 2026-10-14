@@ -294,12 +294,26 @@ class Pi0(_model.BaseModel):
         subtask_loss, token_accuracy, counts = self._compute_subtask_metrics(
             high_level_out if factorized else prefix_out, observation
         )
+        supervised = (jnp.ones_like(counts, dtype=jnp.bool_) if observation.has_subtask_target is None
+                      else observation.has_subtask_target)
+        # Average per-example token CE over supervised examples only. Adding
+        # action-only rows must not dilute the language objective.
+        language_scale = supervised.size / jnp.maximum(jnp.sum(supervised), 1)
+        weighted_language = subtask_loss * language_scale
         metrics.update(
-            subtask_loss=jnp.mean(subtask_loss),
+            subtask_loss=jnp.mean(weighted_language),
             subtask_token_accuracy=jnp.sum(token_accuracy * counts) / jnp.maximum(jnp.sum(counts), 1),
             subtask_tokens=jnp.mean(counts.astype(jnp.float32)),
         )
-        return action_loss + self.subtask_loss_weight * subtask_loss[:, None], metrics
+        if observation.source_kind_id is not None:
+            for i, kind in enumerate(("replay", "recovered", "collected", "full_episode")):
+                mask = observation.source_kind_id == i
+                n = jnp.maximum(jnp.sum(mask), 1)
+                metrics[f"source_count/{kind}"] = jnp.sum(mask)
+                metrics[f"source_fraction/{kind}"] = jnp.mean(mask.astype(jnp.float32))
+                metrics[f"action_loss/{kind}"] = jnp.sum(jnp.where(mask[:, None], action_loss, 0)) / (n * action_loss.shape[1])
+                metrics[f"subtask_loss/{kind}"] = jnp.sum(jnp.where(mask, subtask_loss, 0)) / n
+        return action_loss + self.subtask_loss_weight * weighted_language[:, None], metrics
 
     def _compute_subtask_metrics(self, prefix_out: at.Array, observation: _model.Observation):
         """Next-token CE, gathering only label positions and rematerializing small vocab projections.
@@ -348,7 +362,10 @@ class Pi0(_model.BaseModel):
         # (instead of a plausible zero CE) for callers bypassing that transform.
         valid = (counts > 0) & (counts <= self.max_subtask_len) & ~loss_mask[:, 0]
         valid &= jnp.all(~loss_mask | observation.tokenized_prompt_mask, axis=-1)
-        loss = jnp.where(valid, loss_sum / jnp.maximum(counts, 1), jnp.nan)
+        supervised = (jnp.ones_like(counts, dtype=jnp.bool_) if observation.has_subtask_target is None
+                      else observation.has_subtask_target)
+        valid = jnp.where(supervised, valid, counts == 0)
+        loss = jnp.where(valid, jnp.where(supervised, loss_sum / jnp.maximum(counts, 1), 0), jnp.nan)
         return loss, correct_sum / jnp.maximum(counts, 1), counts
 
     def _decode_subtask_token(self, token, positions, write_indices, valid_mask, kv_cache, active):

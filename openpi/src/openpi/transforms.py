@@ -351,13 +351,26 @@ class TokenizeSubtaskPrompt(DataTransformFn):
         tokens, mask, ar_mask, loss_mask = self.tokenizer.tokenize_subtask_training(
             *values, state, max_subtask_len=self.max_subtask_len
         )
+        supervised = np.asarray(data.get("has_subtask_target", True))
+        if supervised.shape != () or supervised.dtype != np.bool_:
+            raise ValueError("has_subtask_target must be a scalar boolean")
+        if "source_kind_id" in data:
+            source_id = np.asarray(data["source_kind_id"])
+            if (source_id.shape != () or source_id.dtype.kind not in "iu" or not 0 <= int(source_id) <= 3
+                    or supervised.item() != (int(source_id) != 3)):
+                raise ValueError("Source identity and text-supervision mask disagree")
+        # Keep the recorded context for actions even when it is not a CE target.
+        action_fields = self.action_fields(tokens[loss_mask], state)
+        if not supervised.item():
+            loss_mask = np.zeros_like(loss_mask, dtype=bool)
         return {
             **data,
+            "has_subtask_target": supervised,
             "tokenized_prompt": tokens,
             "tokenized_prompt_mask": mask,
             "token_ar_mask": ar_mask,
             "token_loss_mask": loss_mask,
-            **self.action_fields(tokens[loss_mask], state),
+            **action_fields,
         }
 
 

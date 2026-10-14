@@ -101,6 +101,9 @@ class B1KInputs(transforms.DataTransformFn):
             inputs["prompt"] = data["prompt"]
         if "subtask" in data:
             inputs["subtask"] = data["subtask"]
+        for key in ("has_subtask_target", "source_kind_id"):
+            if key in data:
+                inputs[key] = data[key]
         for key in MEMORY_FIELDS:
             if key in data:
                 inputs[key] = data[key]

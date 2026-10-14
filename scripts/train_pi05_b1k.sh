@@ -4,6 +4,11 @@ set -euo pipefail
 MODE="${1:-smoke}"
 CODE_ROOT="${CODE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 OPENPI_DIR="${OPENPI_DIR:-$CODE_ROOT/openpi}"
+if [[ "${CODEX_TRAINING_RUNTIME:-0}" == 1 ]]; then
+    : "${PI05_ENV:?set the existing policy environment for the isolated Codex pilot}"
+else
+    PI05_ENV="$OPENPI_DIR/.venv"
+fi
 DATASET_ROOT="${DATASET_ROOT:-/data/2026-challenge-demos}"
 NUM_GPUS="${NUM_GPUS:-1}"
 CUDA_DEVICES="${CUDA_DEVICES:-0}"
@@ -62,8 +67,8 @@ if [[ ! -f "$DATASET_ROOT/meta/info.json" ]]; then
     echo "Dataset not found or incomplete: $DATASET_ROOT/meta/info.json" >&2
     exit 1
 fi
-if [[ ! -x "$OPENPI_DIR/.venv/bin/python" ]]; then
-    echo "OpenPI environment not found: $OPENPI_DIR/.venv" >&2
+if [[ ! -x "$PI05_ENV/bin/python" || ! -f "$PI05_ENV/bin/activate" ]]; then
+    echo "OpenPI environment not found or incomplete: $PI05_ENV" >&2
     exit 1
 fi
 
@@ -157,8 +162,18 @@ fi
 
 cd "$OPENPI_DIR"
 set +u
-source .venv/bin/activate
+if [[ "${CODEX_TRAINING_RUNTIME:-0}" == 1 ]]; then
+    source "$PI05_ENV/bin/activate"
+else
+    source .venv/bin/activate
+fi
 set -u
+# Packed environment activation clears PYTHONPATH, while its editable-install
+# pointers can still target an older runtime snapshot. Apply this run's source
+# paths after activation so its preflight and training use the same code.
+if [[ "${CODEX_TRAINING_RUNTIME:-0}" == 1 ]]; then
+    export PYTHONPATH="$OPENPI_DIR/src:$OPENPI_DIR/packages/openpi-client/src"
+fi
 
 # openpi shards every batch across all devices jax can see, so the device set
 # must be restricted before the norm-stats step too, not just for training.
@@ -318,6 +333,27 @@ export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.9}"
 # when redirected to a log file and would hide loss for ~12k steps at a time.
 export PYTHONUNBUFFERED=1
 TRAIN_DATA_ARGS=()
+if [[ -n "${B1K_VIDEO_BACKEND:-}" ]]; then
+    case "$B1K_VIDEO_BACKEND" in
+        pyav|torchcodec) ;;
+        *) echo "B1K_VIDEO_BACKEND must be pyav or torchcodec." >&2; exit 2 ;;
+    esac
+    TRAIN_DATA_ARGS+=(--data.video-backend "$B1K_VIDEO_BACKEND")
+fi
+if [[ -n "${MODEL_ACTION_HORIZON:-}" ]]; then
+    [[ "$MODEL_ACTION_HORIZON" =~ ^[1-9][0-9]*$ ]] || {
+        echo "MODEL_ACTION_HORIZON must be a positive integer." >&2
+        exit 2
+    }
+    TRAIN_DATA_ARGS+=(--model.action-horizon "$MODEL_ACTION_HORIZON")
+fi
+if [[ -n "${TRAIN_SEED:-}" ]]; then
+    [[ "$TRAIN_SEED" =~ ^[0-9]+$ ]] || {
+        echo "TRAIN_SEED must be a nonnegative integer." >&2
+        exit 2
+    }
+    TRAIN_DATA_ARGS+=(--seed "$TRAIN_SEED")
+fi
 if [[ -n "${INIT_PARAMS:-}" ]]; then
     TRAIN_DATA_ARGS+=(--weight-loader.params-path "$INIT_PARAMS")
 fi
@@ -370,15 +406,16 @@ if [[ "$FRAMESAMP_MODUL" == 1 ]]; then
     )
 fi
 
-# CosineDecaySchedule defaults to decay_steps=30_000 regardless of
-# --num-train-steps, so a longer run silently spends everything past 30k at the
-# 2.5e-6 floor. Set LR_DECAY_STEPS to the real run length to stretch the cosine.
+# Keep the decay endpoint independent of the run budget, especially on resume.
 if [[ -n "${LR_DECAY_STEPS:-}" ]]; then
-    if [[ -n "$TRAIN_EPOCHS" && "$LR_DECAY_STEPS" != "$TRAIN_STEPS" ]]; then
-        echo "LR_DECAY_STEPS=$LR_DECAY_STEPS must equal exact-epoch TRAIN_STEPS=$TRAIN_STEPS" >&2
+    if [[ ! "$LR_DECAY_STEPS" =~ ^[0-9]+$ ]] || (( LR_DECAY_STEPS <= 0 )); then
+        echo "LR_DECAY_STEPS must be an explicit positive integer." >&2
         exit 2
     fi
     TRAIN_DATA_ARGS+=(--lr-schedule.decay-steps "$LR_DECAY_STEPS")
+fi
+if [[ -n "${LEARNING_RATE_CONTRACT_PATH:-}" ]]; then
+    TRAIN_DATA_ARGS+=(--learning-rate-contract-path "$LEARNING_RATE_CONTRACT_PATH")
 fi
 if [[ -n "${LR_WARMUP_STEPS:-}" ]]; then
     TRAIN_DATA_ARGS+=(--lr-schedule.warmup-steps "$LR_WARMUP_STEPS")
@@ -408,7 +445,7 @@ fi
 TRAIN_PYTHON=(python)
 if [[ -n "${DEBUGPY_PORT:-}" ]]; then
     python -c "import debugpy" >/dev/null 2>&1 || {
-        echo "DEBUGPY_PORT is set, but debugpy is not installed in $OPENPI_DIR/.venv" >&2
+        echo "DEBUGPY_PORT is set, but debugpy is not installed in $PI05_ENV" >&2
         exit 2
     }
     TRAIN_PYTHON+=( -m debugpy --listen "127.0.0.1:$DEBUGPY_PORT" --wait-for-client )
