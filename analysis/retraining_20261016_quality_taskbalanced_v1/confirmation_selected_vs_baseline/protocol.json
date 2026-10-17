@@ -1,0 +1,123 @@
+{
+  "kind": "reserved_confirmation_pair_v1",
+  "pairs": [
+    [
+      "assembling_gift_baskets",
+      83
+    ],
+    [
+      "bringing_water",
+      1
+    ],
+    [
+      "carrying_in_groceries",
+      263
+    ],
+    [
+      "carrying_out_garden_furniture",
+      252
+    ],
+    [
+      "clean_up_your_desk",
+      150
+    ],
+    [
+      "collecting_aluminum_cans",
+      157
+    ],
+    [
+      "composting_waste",
+      102
+    ],
+    [
+      "cook_broccolini",
+      180
+    ],
+    [
+      "installing_a_fax_machine",
+      63
+    ],
+    [
+      "make_rose_centerpieces",
+      255
+    ],
+    [
+      "organizing_school_stuff",
+      103
+    ],
+    [
+      "polishing_shoes",
+      68
+    ],
+    [
+      "putting_dirty_dishes_in_sink",
+      291
+    ],
+    [
+      "re_shelving_library_books",
+      85
+    ],
+    [
+      "setup_a_bar_for_a_cocktail_party",
+      123
+    ],
+    [
+      "store_honey",
+      140
+    ],
+    [
+      "store_produce",
+      189
+    ],
+    [
+      "sweeping_garage",
+      293
+    ],
+    [
+      "tidying_living_room",
+      65
+    ],
+    [
+      "unloading_the_car",
+      280
+    ]
+  ],
+  "mode": "train",
+  "seeds": {
+    "policy": 0,
+    "environment": 0
+  },
+  "native_task_budgets": {
+    "assembling_gift_baskets": 39090,
+    "bringing_water": 14157,
+    "carrying_in_groceries": 21412,
+    "carrying_out_garden_furniture": 16588,
+    "clean_up_your_desk": 32126,
+    "collecting_aluminum_cans": 15304,
+    "composting_waste": 5457,
+    "cook_broccolini": 6926,
+    "installing_a_fax_machine": 6115,
+    "make_rose_centerpieces": 6798,
+    "organizing_school_stuff": 21887,
+    "polishing_shoes": 16106,
+    "putting_dirty_dishes_in_sink": 18222,
+    "re_shelving_library_books": 14292,
+    "setup_a_bar_for_a_cocktail_party": 20128,
+    "store_honey": 10150,
+    "store_produce": 14283,
+    "sweeping_garage": 6709,
+    "tidying_living_room": 18848,
+    "unloading_the_car": 16985
+  },
+  "truncation_step_offset": 1,
+  "policy_config": "pi05_b1k",
+  "action_horizon": 16,
+  "subtask_action_conditioning": "task_and_subtask",
+  "subtask_temperature": 0.0,
+  "max_token_len": 512,
+  "max_subtask_len": 64,
+  "prompt_mode": "whole_task",
+  "baseline_pretraining_exclusion_proven": false,
+  "asset_proof_sha256": "32d3ef4ea551eda2e28f874a57b81b84ab40e05f27035e406e916ff7f3194afa",
+  "selection_panel_sha256": "09bade6f48ff76d8e8af761233593a652f9c501f0f81bf56e5ab0d02690156e6"
+}
