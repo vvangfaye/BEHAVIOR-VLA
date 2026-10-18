@@ -8,6 +8,24 @@
 [Subtask 训练与推理指南](docs/subtask_training.md)。已有 Torch 实现说明保留在
 [PyTorch 指南](docs/pytorch_training.md)，不作为本文的运行主线。
 
+## SILab-DreamX 最终提交：checkpoint 1688977
+
+比赛提交使用 **1688977** 的固定镜像。该版本使用 `task_and_subtask` 动作条件，
+与下文面向后续训练的 `subtask_only` 默认配置有所区别。
+
+| 验证范围 | 结果 |
+| --- | --- |
+| 提交自测：100 个任务 × 10 个公开实例，共 1000 回合 | 成功 77/1000，SR **7.70%**，平均 Q **0.2325316933** |
+| 2026-10-17 本机复现：`turning_on_radio`，实例 301 | 成功，Q **1.0**，2253 步；完整视频 **75.1 秒** |
+
+[提交与复现说明](docs/submission_1688977.md) ·
+[公开镜像](https://hub.docker.com/r/faye0138/behavior-pi05-1688977) ·
+[本机回合视频](docs/assets/1688977/turning_on_radio_301_0.mp4) ·
+[原始回合指标](docs/assets/1688977/turning_on_radio_301_0.json)
+
+上述成绩为自测和单回合复现记录，官方审核及成绩以主办方公布为准。
+本机复现使用 48GB RTX 6000 Ada，不代表物理 24GB 显卡实测；单回合结果不替代 1000 回合指标。
+
 ## 1. 先区分训练模式
 
 | 模式 | 模型输入与监督 | 动作块边界处理 | 训练开关 |
@@ -42,8 +60,9 @@ trainer 时，新 joint 模式需要显式传入 `--model.subtask-action-conditi
   可配置 `CONDA`、`ENV_ROOT`、`PI05_ENV`；镜像源与路径按运行机器调整。
 - 闭环仿真：由 [setup_eval_env.sh](scripts/setup_eval_env.sh) 和
   [setup_eval_assets.sh](scripts/setup_eval_assets.sh) 准备独立环境及资产。
-  外部 `BEHAVIOR-1K/` 源码和资产不随本仓库提交；selector 评测要求环境中的 evaluator
-  支持 `--external-subtask-selector`。
+  `BEHAVIOR-1K/` 运行时源码已纳入 Git，固定为 OmniGibson 3.9.3（官方 `v3.9.3-post1`），
+  保留本项目的 subtask 和 selector 评测适配；资产仍需单独准备。
+  来源、版本和兼容层说明见 [VENDORING.md](BEHAVIOR-1K/VENDORING.md)。
 - 数据：BEHAVIOR 2026 LeRobot 数据，包含 `meta/info.json`、动作数据和所选 episode 的 RGB 视频。
 - 权重：π0.5 JAX 基座的 `params/` 目录，可用
   [download_pi05_base.sh](scripts/download/download_pi05_base.sh) 下载；该脚本的代理和缓存路径需要按机器配置。
@@ -253,7 +272,7 @@ openpi/       JAX 模型、训练器、策略服务及共享数据依赖
 scripts/      BEHAVIOR 数据处理和训练评测入口
 nebula/       星云提交、worker 和评测汇总
 docs/         训练与推理细节
-BEHAVIOR-1K/  外部仿真器源码与资产（不提交到本仓库）
+BEHAVIOR-1K/  已纳入 Git 的 3.9.3 仿真器运行时源码（资产另行准备）
 ```
 
 - [bootstrap.sh](scripts/bootstrap.sh)：按 `tools/envs/dataset/models` 阶段准备训练机器。
