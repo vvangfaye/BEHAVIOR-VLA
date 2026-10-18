@@ -1,0 +1,27 @@
+{
+  "repository": "behavior-1k/zipped-datasets",
+  "revision": "9f0d57d465726976ed98138d3f8b8ca3e2186775",
+  "items": [
+    {
+      "filename": "omnigibson-robot-assets-3.8.2.zip",
+      "bytes": 641004353,
+      "sha256": "3d813b2181e0581cf2300a40892de70f8475fe59346ceeea4fb9bf7ff21ce126",
+      "url": "https://huggingface.co/datasets/behavior-1k/zipped-datasets/resolve/9f0d57d465726976ed98138d3f8b8ca3e2186775/omnigibson-robot-assets-3.8.2.zip",
+      "destination": "omnigibson-robot-assets"
+    },
+    {
+      "filename": "2026-challenge-task-instances.zip",
+      "bytes": 108543852,
+      "sha256": "d4ac3d72dd585178e85d542f28d1b48233b886c80e196e2f9d3aa5993ba21f81",
+      "url": "https://huggingface.co/datasets/behavior-1k/zipped-datasets/resolve/9f0d57d465726976ed98138d3f8b8ca3e2186775/2026-challenge-task-instances.zip",
+      "destination": "2026-challenge-task-instances"
+    },
+    {
+      "filename": "behavior-1k-assets-3.9.0.zip",
+      "bytes": 31457673073,
+      "sha256": "09e9fce600f841dc611aa96c0b1b9f9074f56f0e67898b37b39bd00c38a0095e",
+      "url": "https://huggingface.co/datasets/behavior-1k/zipped-datasets/resolve/9f0d57d465726976ed98138d3f8b8ca3e2186775/behavior-1k-assets-3.9.0.zip",
+      "destination": "behavior-1k-assets"
+    }
+  ]
+}

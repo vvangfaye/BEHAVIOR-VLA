@@ -1,0 +1,76 @@
+{
+  "task": "turning_on_radio",
+  "instance_id": 301,
+  "rollout_id": 0,
+  "steps": 2253,
+  "success": true,
+  "terminated": true,
+  "truncated": false,
+  "conditioning": {
+    "mode": "whole_task",
+    "oracle": false,
+    "source": "policy_server_whole_task_prompt",
+    "privileged": false,
+    "comparable_to_whole_task": true
+  },
+  "prompt_events": [],
+  "subtask_events": [
+    {
+      "step": 0,
+      "subtask": "move to radio",
+      "source": "generated"
+    },
+    {
+      "step": 496,
+      "subtask": "pick up from radio to coffee table koagbh",
+      "source": "generated"
+    },
+    {
+      "step": 2064,
+      "subtask": "press radio",
+      "source": "generated"
+    }
+  ],
+  "subtask_vote_events": [],
+  "subtask_vote_summary": null,
+  "selector_events": [],
+  "selector_summary": null,
+  "final_goal_state": {
+    "success": true,
+    "top_level": {
+      "success": true,
+      "satisfied": [
+        0
+      ],
+      "unsatisfied": []
+    },
+    "grounded": [
+      {
+        "option_index": 0,
+        "success": true,
+        "satisfied": [
+          0
+        ],
+        "unsatisfied": []
+      }
+    ]
+  },
+  "agent_distance": {
+    "base": 1.4305142554590304,
+    "left": 4.373962982253943,
+    "right": 5.097675439083105
+  },
+  "normalized_agent_distance": {
+    "base": 3.981435332269653,
+    "left": 0.7448394083850189,
+    "right": 0.7988935444529794
+  },
+  "q_score": {
+    "final": 1.0
+  },
+  "time": {
+    "simulator_steps": 2253,
+    "simulator_time": 75.1,
+    "normalized_time": 0.9541233910341766
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "team": "SILab-DreamX",
+  "checkpoint_step": 1688977,
+  "image": {
+    "reference": "docker.io/faye0138/behavior-pi05-1688977:1688977-video-20261014",
+    "manifest_digest": "sha256:469ddc6a55ee7e2f1a9486c3d366b1de7c44469750562bc628b099c4f88c2dea",
+    "config_digest": "sha256:ae53492e21d915a832cbd68d129c9ca9013e029a18838f1f01651bad3db38a9e"
+  },
+  "submitted_self_evaluation": {
+    "run_id": "b1k-video1688977-20261013",
+    "tasks": 100,
+    "instance_ids": [
+      301,
+      302,
+      303,
+      304,
+      305,
+      306,
+      307,
+      308,
+      309,
+      310
+    ],
+    "episodes": 1000,
+    "successes": 77,
+    "success_rate": 0.077,
+    "mean_q": 0.23253169330669357,
+    "official_result": false,
+    "submission_zip_sha256": "1f3e599e1b4c8683b2758a1e46a55253841eec652fb56b0736461cf1e0451b43"
+  },
+  "local_rehearsal": {
+    "date": "2026-10-17",
+    "task": "turning_on_radio",
+    "instance_id": 301,
+    "rollout_id": 0,
+    "steps": 2253,
+    "success": true,
+    "q_score": 1.0,
+    "truncated": false,
+    "conditioning": {
+      "mode": "whole_task",
+      "oracle": false,
+      "source": "policy_server_whole_task_prompt",
+      "privileged": false,
+      "comparable_to_whole_task": true
+    },
+    "gpu": "NVIDIA RTX 6000 Ada Generation 48GB",
+    "physical_24GB_tested": false,
+    "video": {
+      "path": "turning_on_radio_301_0.mp4",
+      "codec": "h264",
+      "width": 672,
+      "height": 448,
+      "fps": "30",
+      "duration_seconds": 75.1,
+      "decoded_frames": 2253,
+      "bytes": 3933551,
+      "sha256": "b2ab720300937e0d9b369791f7aaea408045132fe2789771a17bb1092241b2d6",
+      "full_decode_passed": true
+    }
+  },
+  "files": {
+    "official_datasets.json": {
+      "bytes": 1270,
+      "sha256": "318d1c3362bc25893df0bb80d1b816ce2cdefe98b2ae57a2797cfd93393ec028"
+    },
+    "turning_on_radio_301_0.jpg": {
+      "bytes": 29026,
+      "sha256": "538c75ec7e04de2f6be80be99728cc12d82812d8b5eb159f63931caa39ac6921"
+    },
+    "turning_on_radio_301_0.json": {
+      "bytes": 1540,
+      "sha256": "114bde31e0a9b100702a63140e4e35ded62d1214dc4386dede428280a7089a87"
+    },
+    "turning_on_radio_301_0.mp4": {
+      "bytes": 3933551,
+      "sha256": "b2ab720300937e0d9b369791f7aaea408045132fe2789771a17bb1092241b2d6"
+    }
+  }
+}
