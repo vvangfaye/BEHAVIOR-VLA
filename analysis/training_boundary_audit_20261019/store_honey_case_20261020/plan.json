@@ -1,0 +1,46 @@
+{
+  "authorization": "Standing project authorization: \u4ee5\u540e\u90fd\u6279\u51c6",
+  "job_name": "b1k-storehoney-audit-1020",
+  "template": "b1k-confirm-video-review-1017",
+  "template_uid": "3ce7c2e990de4d548f1111f547b1bd26",
+  "files": [
+    {
+      "path": "/mnt/afs/260010165/behavior_1k/confirmation_selected_vs_baseline_20261017/episodes/baseline-15/results/json/store_honey_140_0.json",
+      "bytes": 3146,
+      "sha256": "d753a1199d3cc6dd96d6e373ec50b9a02b7265f578e9a344cc4e8fd6919ca17c",
+      "relative_path": "baseline/store_honey_140_0.json"
+    },
+    {
+      "path": "/mnt/afs/260010165/behavior_1k/confirmation_selected_vs_baseline_20261017/episodes/baseline-15/results/videos/store_honey_140_0.mp4",
+      "bytes": 8780329,
+      "sha256": "28dda0dec928027f0bc30b8a9c79c9ca345343744481fb8fb332d5a4e6fcd8bb",
+      "relative_path": "baseline/store_honey_140_0.mp4"
+    },
+    {
+      "path": "/mnt/afs/260010165/behavior_1k/confirmation_selected_vs_baseline_20261017/episodes/candidate-15/results/json/store_honey_140_0.json",
+      "bytes": 9006,
+      "sha256": "5d638d21b21ddda064b2c810adfa83c60e2cd555be324ddaa3218fdb106780b6",
+      "relative_path": "candidate/store_honey_140_0.json"
+    },
+    {
+      "path": "/mnt/afs/260010165/behavior_1k/confirmation_selected_vs_baseline_20261017/episodes/candidate-15/results/videos/store_honey_140_0.mp4",
+      "bytes": 22012828,
+      "sha256": "e63a3d0a07a006862465a7f9aea84beb3bb942b4464503588de1a771e4b3f0ae",
+      "relative_path": "candidate/store_honey_140_0.mp4"
+    }
+  ],
+  "source": "Existing accepted independent confirmation artifacts; selected because this is the sole observed success loss.",
+  "resource": {
+    "cpu": 8,
+    "memory_gib": 32,
+    "gpu": 0,
+    "workers": 1,
+    "quota": "spot",
+    "maximum_seconds": 600
+  },
+  "training": false,
+  "simulation": false,
+  "destination_bucket": "260010165",
+  "destination_prefix": "behavior1k/store-honey-audit-20261020/",
+  "interpretation": "One post hoc mechanism case; not an estimate of population regression or a repeatability test."
+}

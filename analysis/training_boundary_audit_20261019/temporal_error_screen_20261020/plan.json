@@ -1,0 +1,17 @@
+{
+  "question": "Does improved action MSE coexist with increased chunk-mean error in the existing paired CPU outputs?",
+  "status_at_write": "planned_before_computing_temporal_metrics",
+  "baseline": "../cpu_raw_feasibility_20261020/baseline36_raw.json",
+  "candidate": "../calibration_cpu_followup_20261020/expert1000_36_raw.json",
+  "primary_subset": "Only samples with all first 16 action positions valid; no padding or one-frame terminal windows.",
+  "decomposition": "For each sample and coordinate, MSE = squared mean error across 16 steps + mean squared deviation from that mean.",
+  "aggregation": "Mean samples within each task, then mean tasks. Keep physical coordinates separate.",
+  "secondary": "Nonoverlapping block-mean error power at block lengths 1,2,4,8,16.",
+  "limits": [
+    "No fresh model calls, no training, no simulator, no new data transfer.",
+    "Single common-noise draw per observation; estimates include sampling noise.",
+    "Within-chunk error structure only, not error autocorrelation across deployed replanning cycles.",
+    "Chunk-mean joint-position error is not physical trajectory drift.",
+    "At most three selected tasks and nine episodes; coordinates are not independent trials."
+  ]
+}

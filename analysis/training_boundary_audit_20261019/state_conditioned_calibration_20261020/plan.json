@@ -1,0 +1,37 @@
+{
+  "scope": "Exploratory offline extension of the completed GPU action-change screen. No neural inference or simulator use.",
+  "hypothesis": "Adding the current absolute joint position to the previously tested baseline-minus-hold affine correction may explain task-general fine-tuning changes.",
+  "models": [
+    "zero correction",
+    "constant correction",
+    "prior affine: delta=k*(baseline-hold)+b",
+    "position-conditioned affine: delta=k*(baseline-hold)+h*hold+b"
+  ],
+  "fit": "Unregularized weighted least squares per 21 non-gripper coordinates; no hyperparameter selection. Training-only centering and RMS scaling.",
+  "weights": "Equal tasks, then equal samples within task, then equal valid prefix positions within sample.",
+  "evaluation": "Leave one of three complete tasks out. Same first min(16,H) valid positions as prior audit, including short boundary samples.",
+  "summaries": "Per coordinate dimensionless explained fraction relative to zero correction. Macro mean per group; also wins over both zero and prior affine.",
+  "limits": [
+    "36 selected training-seen anchors in 9 episodes; exploratory rather than confirmatory.",
+    "Highly correlated samples and possible ill-conditioned extrapolation; report ranks and coefficients.",
+    "No closed-loop or physical-benefit interpretation from regression fit."
+  ],
+  "sources": {
+    "baseline1688977": {
+      "path": "analysis/training_boundary_audit_20261019/calibration_screen_20261020/retrieved/baseline1688977.json",
+      "sha256": "55f28aca5983fca28727602c67796fe829b535e20d2b68f2b3926c71c3abcfd4"
+    },
+    "mixed1000": {
+      "path": "analysis/training_boundary_audit_20261019/calibration_screen_20261020/retrieved/mixed1000.json",
+      "sha256": "346ce160ab97973354a3d3d37e64eeb247ead8b02c51053c83de2e1e089e7548"
+    },
+    "mixed5000": {
+      "path": "analysis/training_boundary_audit_20261019/calibration_screen_20261020/retrieved/mixed5000.json",
+      "sha256": "a742bd29442d50c9f3d3c9a338211ef6017a248cae71eceb27aabefe61303ae1"
+    },
+    "expert1000": {
+      "path": "analysis/training_boundary_audit_20261019/calibration_screen_20261020/retrieved/expert1000.json",
+      "sha256": "3d9b661566165e2e3e9e1163184d784ffa30e56917509281044b394a0e11d5bd"
+    }
+  }
+}

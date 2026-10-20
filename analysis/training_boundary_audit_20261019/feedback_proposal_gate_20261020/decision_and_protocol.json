@@ -1,0 +1,103 @@
+{
+  "date": "2026-10-20",
+  "status": "design_only_not_submitted",
+  "user_constraint": "Settle the proposal first; do not expand training jobs to search for an idea.",
+  "objective": "Find a feasible, substantively novel VLA training direction using existing demonstrations, motivated by unstable closed-loop finetuning gains.",
+  "decision": "Retain feedback change as a falsifiable mechanism question. Do not endorse selective Jacobian preservation as an established novel algorithm.",
+  "new_evidence": {
+    "file": "check_identifiability.json",
+    "level": "Analytic diagnostic only, not VLA empirical evidence.",
+    "findings": [
+      "Under exact fitting on a smooth demonstration manifold, full versus normal-direction derivative penalties differ by a constant over the feasible set.",
+      "An identical policy-derivative change can improve or worsen contraction depending on the environment dynamics."
+    ]
+  },
+  "mechanism_hypothesis": "Some finetuning updates improve demonstrated actions but degrade responses to physically feasible nearby disturbances. This response change may help predict independent closed-loop gains.",
+  "current_evidence_limit": "Neither aggregate damaging finetuning effects nor feedback damage has been established in the existing small panels.",
+  "stage_one": {
+    "purpose": "Test the mechanism before choosing or training a new method.",
+    "policies": ["1688977 parent", "exact expert1000 checkpoint"],
+    "state_bank": {
+      "target": "6 tasks, 5 distinct instances per task, one eligible snapshot per instance",
+      "provenance": "Fresh simulator snapshots, balanced between parent and finetuned rollouts. Existing observation caches are not complete simulator snapshots.",
+      "selection": "Use task and phase eligibility rules fixed before comparing outcomes; retain provenance and excluded-state counts.",
+      "selection_limit": "This bank estimates effects at its chosen phases and sources, not the entire deployment state distribution.",
+      "initial_scope": "Free approach states with an unheld movable task object. Post-contact and held-object states require a separate restoration validation and extension."
+    },
+    "interventions": {
+      "conditions_per_snapshot": 7,
+      "definition": "Nominal plus positive/negative disturbances along three task-valid physical coordinates. Fix magnitudes before examining policy outcomes and record physical units.",
+      "restrictions": [
+        "Re-render observations from physical states; do not treat image edits as physical interventions.",
+        "Reject penetrating, unreachable, invalid-goal or broken-constraint states by policy-independent rules.",
+        "Use the same settle and controller initialization procedure in nominal and disturbed branches."
+      ]
+    },
+    "common_noise_draws": 2,
+    "maximum_policy_rollouts": 840,
+    "maximum_control_steps_per_rollout": 128,
+    "maximum_control_steps_total": 107520,
+    "interpretation_of_bound": "Design ceiling for the initial comparison, excluding snapshot construction and restoration checks; no job is authorized by this file alone or submitted here.",
+    "feedback_measurement": {
+      "outcomes": [
+        "Predeclared task-specific physical milestone reached within the horizon.",
+        "Existing task score change, reported even when insensitive over this horizon.",
+        "Object drop, undesired contact or loss of a previously achieved milestone where applicable."
+      ],
+      "paired_effect": "For each policy, report disturbed minus nominal outcome; compare this disturbance effect between policies, alongside all absolute outcomes.",
+      "not_sufficient": [
+        "Policy Jacobian magnitude or distance alone.",
+        "Raw visual sensitivity.",
+        "A large closed-loop advantage over open-loop action replay alone.",
+        "Returning to an expert trajectory when alternate successful paths exist."
+      ]
+    },
+    "controls": [
+      "Validate restore-and-repeat parity before policy comparisons, including controller, task, grasp, policy/history/cache and RNG state.",
+      "Preserve native deployment timing, action transforms and chunk execution length.",
+      "Use native subtask generation as the deployment condition. Fixed subtask labels may be a separate motor diagnostic, not the reported autonomous result.",
+      "Measure parent and finetuned action fitting on independent existing expert observations; do not infer broad fit improvement from three training-seen examples.",
+      "Where exact replay parity holds, replay nominal executed actions from the disturbed state to help distinguish passive trajectory tolerance from active response. Report replay and reactive outcomes separately.",
+      "Do not select states because one policy subsequently fails."
+    ],
+    "analysis": {
+      "unit": "Instance nested within task, not frames or perturbation branches.",
+      "report": "Paired effects and uncertainty, task-level results, nominal outcomes, branch failures and sensitivity to physical perturbation magnitude.",
+      "claim_limit": "A policy-by-disturbance interaction identifies different sensitivity to the assigned disturbances. It does not by itself establish mediation of the historical whole-task finetuning gap.",
+      "prediction_limit": "Two checkpoints and six tasks cannot establish a general predictor of finetuning gains. A separate multi-checkpoint and multi-training-seed confirmation is required."
+    }
+  },
+  "stage_two_conditional": {
+    "entry": "Replicated physical response changes that are not explained by nominal fit, state provenance, restoration errors or language-stage changes.",
+    "candidate": "Preserve validated useful pretrained responses while adapting demonstrated task behavior.",
+    "mandatory_controls": [
+      "Ordinary SFT",
+      "RETAIN with a tuned interpolation coefficient",
+      "SFT with output distillation",
+      "SFT with tuned all-direction derivative/response matching",
+      "A same-rank random-direction preservation control",
+      "The proposed physically justified selective preservation rule"
+    ],
+    "fairness": [
+      "Same demonstrations, initialization family, optimizer budget and hyperparameter selection budget.",
+      "Compare task-fit versus closed-loop performance tradeoff curves, not one selected regularization coefficient.",
+      "Hold out evaluation instances and perturbation choices from rule construction and tuning.",
+      "Use multiple independent training seeds and an independent VLA implementation before broad claims."
+    ],
+    "unresolved_method_requirement": "A reliable selection rule must be justified; demonstration covariance alone is not causal identifiability, and useful-parent-response labels cannot be assumed from derivatives."
+  },
+  "abandonment_conditions": [
+    "Independent measurements do not reproduce fitting improvement together with degraded physical feedback in a meaningful subset of finetuning updates.",
+    "Feedback measurements add no predictive information about held-out closed-loop gains beyond nominal fit and simple adaptation baselines.",
+    "Full response matching or RETAIN achieves the same performance tradeoff; in this case do not claim a new selective training paradigm.",
+    "The selection rule needs human correction data at a scale incompatible with the user's constraint."
+  ],
+  "resources": {
+    "new_jobs_submitted_this_turn": 0,
+    "new_uploads_this_turn": 0,
+    "new_human_demonstrations": 0,
+    "existing_queued_jobs": "Unchanged.",
+    "h200_plan": "Reserve broad multi-seed and cross-model training for after the mechanism and method novelty gates; accelerator availability does not establish the hypothesis."
+  },
+  "goal_complete": false
+}

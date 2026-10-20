@@ -1,0 +1,39 @@
+{
+  "kind": "fresh_native_snapshot_restore_preflight",
+  "job_name": "b1k-restore-probe-1020-p01",
+  "code": "/mnt/afs/260010165/behavior_1k/code_snapshots/b1k-video1688977-20261013",
+  "runtime": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306",
+  "unused_checkpoint_path": "/mnt/afs/260010165/behavior_1k/checkpoints/pi05_b1k_full100_joint_1688977_aoss_20261010",
+  "supplemental_library": {
+    "ready_manifest_sha256": "66e5e790156270c67a266b49b115228f8159f032b2f336b61f4a32b511a0a8ec",
+    "root": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/library_snapshots/behavior-libxml-repair3-20261008-011710"
+  },
+  "task": "store_honey",
+  "instance": 140,
+  "seed": 20261020,
+  "robot_config": "/mnt/afs/260010165/behavior_1k/code_snapshots/b1k-video1688977-20261013/BEHAVIOR-1K/OmniGibson/omnigibson/eval/r1pro.yaml",
+  "action_steps": 32,
+  "repeats": 3,
+  "restore_tolerance": 1e-05,
+  "trajectory_tolerance": 0.0001,
+  "source_sha256": {
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/eval.py": "91ad12f0ba569f51f3f703eeef7bdd4ffd245752b77d2a6061297ca72ff5f3a6",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/evaluator.py": "4227473e56907070ea02c84dcb5d8825f3069ad87b00acab9814884c7556cff7",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/single_env.py": "e1d55a61b38249b9ec4dd68930241d7be1fdad4771aaa689cd9532a8e4e2ac59",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/r1pro.yaml": "a98fa8a81472adfecfb642778d4d7a01e20131be7f70824e0ae095d665cdbb93"
+  },
+  "worker_timeout_seconds": 2400,
+  "max_job_seconds": 2700,
+  "gpu_count": 1,
+  "quota": "spot",
+  "training": false,
+  "model_calls": 0,
+  "historical_fidelity_claimed": false,
+  "scope": "Fresh initialization and short scripted actions only; no grasp-contact restoration claim from an empty gripper state.",
+  "bundle_sha256": {
+    "worker.py": "296391763e9f3ddc9708e8936c8e437170f5b527c496afb5de4baca53da7cd50",
+    "helpers.py": "42d8e63e4717c57cd303570d251700401a09d47175fe1fe6e16e66dbc2e7c103",
+    "runtime_environment.py": "2d04d1c4f37386deb11ba5a52d03e6e4fcd277dd8eea6ecbf924de9d6274f6b8",
+    "driver.py": "494727d633e97894caa1010016d1087b62e266dc9bb06a63a1ceea92484e72b9"
+  }
+}
