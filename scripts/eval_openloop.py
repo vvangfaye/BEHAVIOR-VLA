@@ -70,6 +70,7 @@ class EvalSample:
     dataset_index: int
     subtask: str | None = None
     segment_end: int | None = None
+    probe_metadata: dict[str, Any] | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -242,12 +243,29 @@ def replay_samples(
     path: pathlib.Path,
     episodes_meta: Sequence[EpisodeMeta],
     segments: Any,
+    *,
+    names: dict[int, str] | None = None,
+    repo_id: str | None = None,
+    horizon: int | None = None,
+    action_noise_seed: int | None = None,
 ) -> list[EvalSample]:
     """Reuse exact frames and valid horizons while resolving labels from the current segment table."""
     payload = json.loads(path.read_text())
     rows = payload.get("sample_keys") if isinstance(payload, dict) else payload
     if not isinstance(rows, list) or not rows:
         raise ValueError(f"Sample key file has no non-empty sample_keys list: {path}")
+
+    is_boundary_probe = isinstance(payload, dict) and payload.get("kind") == "matched_training_boundary_probe"
+    if is_boundary_probe:
+        if payload.get("schema_version") != 1:
+            raise ValueError("Unsupported boundary probe schema")
+        if repo_id is not None and payload.get("repo_id") != repo_id:
+            raise ValueError("Boundary probe repo_id differs from the evaluation repo_id")
+        if horizon is not None and payload.get("model_horizon_H") != horizon:
+            raise ValueError("Boundary probe model horizon differs from --horizon")
+        required_seed = payload.get("pairing_contract", {}).get("action_noise_seed")
+        if type(required_seed) is not int or required_seed < 0 or action_noise_seed != required_seed:
+            raise ValueError("Boundary probe requires its explicit --action-noise-seed for paired inference")
 
     by_episode = {episode.episode_index: episode for episode in episodes_meta}
     samples = []
@@ -276,12 +294,20 @@ def replay_samples(
             raise ValueError(f"Sample key has no valid action steps for episode/frame={key}")
 
         subtask, current_segment_end = segments.lookup(episode_index, frame_index, require_annotated=True)
+        if row.get("subtask") is not None and row["subtask"] != subtask:
+            raise ValueError(f"Replayed subtask differs from current annotation for episode/frame={key}")
         reference_segment_end = frame_index + valid_action_steps
         if current_segment_end < reference_segment_end:
             raise ValueError(
                 f"Current segment ends before the replayed valid horizon for episode/frame={key}: "
                 f"{current_segment_end} < {reference_segment_end}"
             )
+        probe_metadata = None
+        if is_boundary_probe:
+            probe_metadata = _validated_probe_metadata(row, payload, frame_index, valid_action_steps,
+                                                       current_segment_end)
+            if names is not None and probe_metadata["task_name"] != names.get(episode.task_index):
+                raise ValueError(f"Boundary probe task name differs from current metadata for episode/frame={key}")
         samples.append(
             EvalSample(
                 task_index=episode.task_index,
@@ -291,9 +317,62 @@ def replay_samples(
                 dataset_index=episode.relative_from_index + frame_index,
                 subtask=subtask,
                 segment_end=reference_segment_end,
+                probe_metadata=probe_metadata,
             )
         )
     return samples
+
+
+def _validated_probe_metadata(row, manifest, frame, valid_steps, current_segment_end):
+    """Retain only known probe fields after checking their type and geometry.
+
+    Root/instance IDs remain claims of the frozen source index. The current
+    dataset row, label, task name and segment bounds are checked independently.
+    """
+    string_fields = ("root_id", "source_kind", "repo_id", "task_name", "boundary_id", "sample_id",
+                     "bucket", "next_subtask")
+    integer_fields = ("task_instance_id", "segment_start", "segment_end", "next_segment_end",
+                      "distance_to_boundary_frames")
+    boolean_fields = ("full_H_legal_before", "executed_K_within_original_label",
+                      "recorded_full_H_future_available_by_index", "training_seen_source")
+    result = {}
+    for field in string_fields:
+        value = row.get(field)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"Boundary probe field {field!r} must be a nonempty string")
+        result[field] = value
+    for field in integer_fields:
+        value = row.get(field)
+        if type(value) is not int or value < 0:
+            raise ValueError(f"Boundary probe field {field!r} must be a nonnegative integer")
+        result[field] = value
+    for field in boolean_fields:
+        value = row.get(field)
+        if type(value) is not bool:
+            raise ValueError(f"Boundary probe field {field!r} must be boolean")
+        result[field] = value
+    for field in ("root_id", "repo_id", "source_kind"):
+        if result[field] != manifest.get(field):
+            raise ValueError(f"Boundary probe sample {field} differs from its manifest")
+    distance = result["distance_to_boundary_frames"]
+    model_horizon, executed = manifest.get("model_horizon_H"), manifest.get("executed_prefix_K")
+    if type(model_horizon) is not int or type(executed) is not int or not 1 < executed < model_horizon:
+        raise ValueError("Boundary probe has invalid model/execute horizons")
+    expected_distances = {"far_2H": 2 * model_horizon, "edge_H": model_horizon,
+                          "inside_K": executed, "last_1": 1}
+    if result["bucket"] not in expected_distances or expected_distances[result["bucket"]] != distance:
+        raise ValueError("Boundary probe bucket disagrees with its distance")
+    if not result["segment_start"] <= frame < result["segment_end"] == current_segment_end:
+        raise ValueError("Boundary probe source interval differs from the current annotation")
+    if distance != current_segment_end - frame or valid_steps != min(model_horizon, distance):
+        raise ValueError("Boundary probe valid horizon/distance disagrees with its interval")
+    if frame + model_horizon > result["next_segment_end"]:
+        raise ValueError("Boundary probe lacks its declared full future")
+    if result["full_H_legal_before"] != (distance >= model_horizon):
+        raise ValueError("Boundary probe full-H flag disagrees with geometry")
+    if result["executed_K_within_original_label"] != (distance >= executed):
+        raise ValueError("Boundary probe prefix-K flag disagrees with geometry")
+    return result
 
 
 def valid_action_mask(
@@ -355,6 +434,57 @@ def aggregate_errors(
     return result
 
 
+def complete_prefix_records(records: Sequence[ErrorRecord], steps: int) -> list[ErrorRecord]:
+    """Use an equal-length prefix, dropping samples without all requested targets."""
+    if steps < 1:
+        raise ValueError("Prefix length must be positive")
+    return [
+        ErrorRecord(record.sample, {name: values[:steps] for name, values in record.errors.items()},
+                    record.valid[:steps])
+        for record in records
+        if len(record.valid) >= steps and bool(np.all(record.valid[:steps]))
+        and all(len(values) >= steps for values in record.errors.values())
+    ]
+
+
+def comparable_error_metrics(records: Sequence[ErrorRecord]) -> dict[str, Any]:
+    """Keep fixed-position and full 16-step estimates separate from masked means."""
+    prefix = complete_prefix_records(records, 16)
+    return {
+        "first_action": {
+            "metrics": aggregate_errors(records, position=0),
+            "per_action_group": {
+                name: aggregate_errors(records, position=0, action_slice=slice(start, end))
+                for name, (start, end) in ACTION_GROUPS.items()
+            },
+        },
+        "complete_prefix_16": {
+            "samples": len(prefix),
+            "metrics": aggregate_errors(prefix),
+            "per_action_group": {
+                name: aggregate_errors(prefix, action_slice=slice(start, end))
+                for name, (start, end) in ACTION_GROUPS.items()
+            },
+        },
+    }
+
+
+def sample_error_diagnostics(record: ErrorRecord) -> dict[str, Any]:
+    return {
+        "metrics": aggregate_errors([record]),
+        "per_action_group": {
+            name: aggregate_errors([record], action_slice=slice(start, end))
+            for name, (start, end) in ACTION_GROUPS.items()
+        },
+        **comparable_error_metrics([record]),
+        "per_chunk_position": [
+            {"position": position, "valid": bool(valid),
+             "metrics": aggregate_errors([record], position=position)}
+            for position, valid in enumerate(record.valid)
+        ],
+    }
+
+
 def sha256_path(path: str | pathlib.Path) -> tuple[str, str]:
     """Hash a file, or a directory as sorted relative paths plus file contents."""
     source = pathlib.Path(path).expanduser()
@@ -399,7 +529,56 @@ def _scalar_int(sample: dict, key: str) -> int:
     return int(value.item())
 
 
-def build_pi05(args, episode_ids: list[int] | None):
+def paired_action_noise(seed: int, episode: int, frame: int, horizon: int, action_dim: int) -> np.ndarray:
+    """Explicit float32 policy noise independent of checkpoint and sample order.
+
+    The selected episode/frame IDs refer to one dataset root. Compare the same
+    root and shape across runs, and verify the saved per-sample byte hashes.
+    """
+    values = (seed, episode, frame, horizon, action_dim)
+    if any(type(value) is not int for value in values) or min(values[:3]) < 0 or min(values[3:]) < 1:
+        raise ValueError("Noise requires nonnegative integer seed/IDs and positive integer shape")
+    identity = f"b1k-openloop-noise-v1:{seed}:{episode}:{frame}:{horizon}:{action_dim}".encode()
+    entropy = int.from_bytes(hashlib.sha256(identity).digest(), "big")
+    rng = np.random.Generator(np.random.PCG64(entropy))
+    return rng.standard_normal((horizon, action_dim), dtype=np.float32)
+
+
+def input_content_sha256(value: Any) -> str:
+    """Hash raw policy inputs with structure, shape and dtype included."""
+    digest = hashlib.sha256()
+
+    def visit(item):
+        if isinstance(item, dict):
+            digest.update(b"dict\0")
+            for key in sorted(item):
+                if not isinstance(key, str):
+                    raise ValueError("Policy input dictionaries require string keys for hashing")
+                visit(key)
+                visit(item[key])
+        elif isinstance(item, (list, tuple)):
+            digest.update(f"sequence:{len(item)}\0".encode())
+            for child in item:
+                visit(child)
+        elif isinstance(item, str):
+            raw = item.encode("utf-8")
+            digest.update(f"str:{len(raw)}\0".encode())
+            digest.update(raw)
+        elif item is None:
+            digest.update(b"none\0")
+        else:
+            array = np.asarray(item)
+            if array.dtype.hasobject:
+                raise ValueError("Object arrays cannot provide a stable policy input hash")
+            digest.update(f"array:{array.dtype.str}:{array.shape}\0".encode())
+            digest.update(np.ascontiguousarray(array).tobytes())
+
+    visit(value)
+    return digest.hexdigest()
+
+
+def build_pi05(args, episode_ids: list[int] | None,
+               *, sample_provider: Callable[[EvalSample], dict] | None = None):
     import openpi.policies.policy_config as _policy_config  # noqa: PLC0415
     import openpi.training.config as _config  # noqa: PLC0415
     import openpi.training.data_loader as _dl  # noqa: PLC0415
@@ -412,8 +591,10 @@ def build_pi05(args, episode_ids: list[int] | None):
     model = dataclasses.replace(
         cfg.model,
         train_subtask_prediction=args.subtask_conditioning == "provided",
+        max_token_len=args.max_token_len,
     )
-    memory = frame_memory.load(maybe_download(str(args.pi05_ckpt)) / "assets")
+    checkpoint_dir = maybe_download(str(args.pi05_ckpt))
+    memory = frame_memory.load(checkpoint_dir / "assets")
     cache_dir = getattr(args, "memory_cache_dir", None)
     if memory is not None:
         if cache_dir is None:
@@ -432,9 +613,20 @@ def build_pi05(args, episode_ids: list[int] | None):
         raise ValueError(f"--horizon cannot exceed the model action horizon ({model.action_horizon})")
 
     base = dataclasses.replace(cfg.data.base_config, dataset_root=args.dataset, episodes_index=episode_ids)
+    # A dataset identifier need not be the name used when the checkpoint's
+    # normalization assets were saved. Always resolve statistics inside this
+    # checkpoint, before loading its model or opening the dataset.
+    asset_kwargs = {"assets_dir": str(checkpoint_dir / "assets")}
+    norm_asset_id = getattr(args, "norm_asset_id", None)
+    if norm_asset_id is not None:
+        asset_path = pathlib.PurePosixPath(norm_asset_id)
+        if not norm_asset_id.strip() or asset_path.is_absolute() or ".." in asset_path.parts:
+            raise ValueError("--norm-asset-id must be a nonempty relative checkpoint asset ID")
+        asset_kwargs["asset_id"] = norm_asset_id
     data_factory = dataclasses.replace(
         cfg.data,
         repo_id=args.repo_id,
+        assets=dataclasses.replace(cfg.data.assets, **asset_kwargs),
         base_config=base,
         episodes_index=episode_ids,
         frame_stride=1,
@@ -444,13 +636,21 @@ def build_pi05(args, episode_ids: list[int] | None):
     )
     cfg = dataclasses.replace(cfg, data=data_factory, model=model)
     data_config = cfg.data.create(cfg.assets_dirs, cfg.model)
+    if data_config.norm_stats is None:
+        raise ValueError(
+            f"No normalization statistics for asset {data_config.asset_id!r} under {checkpoint_dir / 'assets'}. "
+            "Set --norm-asset-id to the normalization asset saved in this checkpoint; --repo-id identifies the dataset."
+        )
+    args._resolved_norm_asset_id = data_config.asset_id
+    args._use_quantile_norm = data_config.use_quantile_norm
+    args._norm_stats_path = checkpoint_dir / "assets" / data_config.asset_id / "norm_stats.json"
 
-    dataset = _dl.create_b1k_dataset(data_config, cfg.model.action_horizon)
+    dataset = _dl.create_b1k_dataset(data_config, cfg.model.action_horizon) if sample_provider is None else None
     repack = _tf.compose(data_config.repack_transforms.inputs)
-    policy = _policy_config.create_trained_policy(cfg, args.pi05_ckpt)
+    policy = _policy_config.create_trained_policy(cfg, args.pi05_ckpt, norm_stats=data_config.norm_stats)
 
     def get_sample(key: EvalSample):
-        sample = dataset[key.dataset_index]
+        sample = dataset[key.dataset_index] if sample_provider is None else sample_provider(key)
         observed = (
             _scalar_int(sample, "episode_index"),
             _scalar_int(sample, "frame_index"),
@@ -476,7 +676,7 @@ def build_pi05(args, episode_ids: list[int] | None):
         )
         if not valid.any():
             raise RuntimeError(f"Selected anchor has no valid action targets: {key}")
-        return {
+        item = {
             "policy_input": {
                 name: np.asarray(value) if hasattr(value, "shape") else value for name, value in packed.items()
             },
@@ -484,9 +684,19 @@ def build_pi05(args, episode_ids: list[int] | None):
             "valid": valid,
             "hold_action": hold_from_state(np.asarray(sample["observation.state"], dtype=np.float64)),
         }
+        item["policy_input_sha256"] = input_content_sha256(item["policy_input"])
+        item["ground_truth_sha256"] = input_content_sha256(item["gt_action"])
+        noise_seed = getattr(args, "action_noise_seed", None)
+        if noise_seed is not None:
+            noise = paired_action_noise(noise_seed, key.episode_index, key.frame_index,
+                                        model.action_horizon, model.action_dim)
+            item["action_noise"] = noise
+            item["action_noise_sha256"] = hashlib.sha256(noise.astype("<f4", copy=False).tobytes()).hexdigest()
+        return item
 
     def predict(item):
-        result = policy.infer(item["policy_input"])
+        kwargs = {"noise": item["action_noise"]} if "action_noise" in item else {}
+        result = policy.infer(item["policy_input"], **kwargs)
         if args.subtask_conditioning == "provided":
             if result.get("subtask_source") != "provided":
                 raise AssertionError(
@@ -501,7 +711,7 @@ def build_pi05(args, episode_ids: list[int] | None):
 
 
 def _sample_record(sample: EvalSample, names: dict[int, str], valid_steps: int) -> dict[str, Any]:
-    return {
+    result = {
         "task_index": sample.task_index,
         "task": names[sample.task_index],
         "subtask": sample.subtask,
@@ -512,6 +722,9 @@ def _sample_record(sample: EvalSample, names: dict[int, str], valid_steps: int) 
         "segment_end": sample.segment_end,
         "valid_action_steps": valid_steps,
     }
+    if sample.probe_metadata is not None:
+        result["probe_metadata"] = sample.probe_metadata
+    return result
 
 
 def _group_records(records: Sequence[ErrorRecord], key: Callable[[ErrorRecord], Any]) -> dict[Any, list[ErrorRecord]]:
@@ -521,20 +734,27 @@ def _group_records(records: Sequence[ErrorRecord], key: Callable[[ErrorRecord], 
     return grouped
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None, *, build_policy: Callable | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="pi05", choices=["pi05"])
     parser.add_argument("--samples-per-task", type=int, default=2)
     parser.add_argument("--samples-per-subtask", type=int, default=2)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--max-token-len",
+        type=int,
+        help="language token budget (default: 512 for provided joint subtasks, 200 for whole task)",
+    )
     parser.add_argument("--out", type=pathlib.Path, required=True)
     parser.add_argument("--memory-cache-dir", type=pathlib.Path,
                         help="matching frozen vision cache; required for FrameSamp checkpoints")
     parser.add_argument(
         "--repo-id",
         default="behavior-1k/2026-challenge-demos",
-        help="checkpoint asset ID used to load normalization statistics",
+        help="dataset identity; also the default normalization asset ID unless --norm-asset-id is set",
     )
+    parser.add_argument("--norm-asset-id",
+                        help="normalization asset directory under this checkpoint's assets/; independent of dataset repo ID")
     parser.add_argument(
         "--pi05-ckpt",
         default=(
@@ -556,7 +776,13 @@ def main() -> None:
     parser.add_argument(
         "--episodes-file",
         type=pathlib.Path,
-        help="whitespace-delimited held-out ORIGINAL episode_index values",
+        help="whitespace-delimited ORIGINAL episode_index values; does not establish a held-out split",
+    )
+    parser.add_argument(
+        "--split-label",
+        choices=("in_sample", "held_out", "unspecified"),
+        default="unspecified",
+        help="user-declared split status; training-episode overlap is not checked by this script",
     )
     parser.add_argument(
         "--sample-keys-file",
@@ -570,15 +796,30 @@ def main() -> None:
         help="stop after N selected samples (smoke test)",
     )
     parser.add_argument("--horizon", type=int, default=EVAL_HORIZON, help="action-chunk steps to score")
+    parser.add_argument("--action-noise-seed", type=int,
+                        help="explicit episode/frame-keyed policy noise for paired checkpoint comparisons; "
+                             "independent of --seed, which selects frames")
+    parser.add_argument(
+        "--save-raw-actions", action="store_true",
+        help="save finite physical action arrays after evaluation horizon truncation (no images)",
+    )
     parser.add_argument("--dataset", default=DATASET)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.horizon < 1:
         parser.error("--horizon must be positive")
+    if args.action_noise_seed is not None and args.action_noise_seed < 0:
+        parser.error("--action-noise-seed must be nonnegative")
     if args.limit < 0:
         parser.error("--limit cannot be negative")
     if args.samples_per_task < 1 or args.samples_per_subtask < 1:
         parser.error("sample counts must be positive")
+    if args.max_token_len is None:
+        args.max_token_len = 512 if args.subtask_conditioning == "provided" else 200
+    if args.max_token_len < 1:
+        parser.error("--max-token-len must be positive")
+    if args.split_label == "held_out" and args.episodes_file is None:
+        parser.error("--split-label held_out requires --episodes-file")
     if args.subtask_conditioning != "none" and args.subtask_prompts is None:
         parser.error("--subtask-prompts is required for provided conditioning")
     if args.subtask_conditioning == "none" and args.subtask_prompts is not None:
@@ -605,7 +846,9 @@ def main() -> None:
                 episodes_index=[episode.episode_index for episode in metadata],
             )
         if args.sample_keys_file is not None:
-            samples = replay_samples(args.sample_keys_file, metadata, segments)
+            samples = replay_samples(args.sample_keys_file, metadata, segments, names=names,
+                                     repo_id=args.repo_id, horizon=args.horizon,
+                                     action_noise_seed=args.action_noise_seed)
         else:
             per_group = args.samples_per_task if segments is None else args.samples_per_subtask
             samples = select_samples(metadata, per_group, args.seed, segments)
@@ -624,7 +867,8 @@ def main() -> None:
     )
 
     try:
-        predict, get_sample = build_pi05(args, requested_episode_ids)
+        policy_builder = build_pi05 if build_policy is None else build_policy
+        predict, get_sample = policy_builder(args, requested_episode_ids)
     except ValueError as error:
         parser.error(str(error))
 
@@ -646,14 +890,38 @@ def main() -> None:
                 f"Action shape mismatch for episode={sample.episode_index}, frame={sample.frame_index}: "
                 f"ground truth {ground_truth.shape}, prediction {prediction.shape}"
             )
+        if not np.isfinite(prediction).all() or not np.isfinite(ground_truth).all():
+            raise RuntimeError(f"Nonfinite prediction or target for {sample}")
         hold = np.tile(item["hold_action"], (horizon, 1))
         errors = {
             "model": prediction - ground_truth,
             "baseline_hold": hold - ground_truth,
             "baseline_zero": -ground_truth,
         }
-        records.append(ErrorRecord(sample=sample, errors=errors, valid=valid))
-        evaluated_samples.append(_sample_record(sample, names, int(valid.sum())))
+        record = ErrorRecord(sample=sample, errors=errors, valid=valid)
+        records.append(record)
+        sample_record = _sample_record(sample, names, int(valid.sum()))
+        sample_record["error_diagnostics"] = sample_error_diagnostics(record)
+        for digest_field in ("action_noise_sha256", "policy_input_sha256", "ground_truth_sha256"):
+            if digest_field in item:
+                sample_record[digest_field] = item[digest_field]
+        if args.save_raw_actions:
+            raw_arrays = {
+                "prediction": np.asarray(prediction),
+                "ground_truth": np.asarray(ground_truth),
+                "valid_mask": np.asarray(valid, dtype=np.bool_),
+                "hold_action": np.asarray(hold),
+            }
+            if any(not np.isfinite(value).all() for value in raw_arrays.values()):
+                raise RuntimeError(f"Nonfinite raw action export for {sample}")
+            sample_record["raw_actions"] = {
+                "schema_version": 1,
+                **{name: value.tolist() for name, value in raw_arrays.items()},
+                # JSON does not retain dtype; readers need it to reproduce the content hash.
+                "dtypes": {name: value.dtype.str for name, value in raw_arrays.items()},
+                "sha256": input_content_sha256(raw_arrays),
+            }
+        evaluated_samples.append(sample_record)
         if (index + 1) % 20 == 0:
             print(
                 f"  {index + 1}/{len(samples)}  {time.time() - started:.0f}s",
@@ -713,15 +981,39 @@ def main() -> None:
             }
         )
 
-    held_out = args.episodes_file is not None
+    by_bucket = _group_records(records, lambda record: (record.sample.probe_metadata or {}).get("bucket"))
+    per_probe_bucket = [
+        {"bucket": bucket, "samples": len(bucket_records),
+         "masked_metrics": aggregate_errors(bucket_records),
+         **comparable_error_metrics(bucket_records)}
+        for bucket, bucket_records in sorted(by_bucket.items(), key=lambda item: item[0] or "")
+        if bucket is not None
+    ]
+
+    split_notes = {
+        "in_sample": "In-sample demonstration action error",
+        "held_out": "User-declared held-out demonstration action error",
+        "unspecified": "Demonstration action error with unspecified train/evaluation split",
+    }
     result = {
         "model": args.model,
         "repo_id": args.repo_id,
+        "normalization": {
+            "asset_id": getattr(args, "_resolved_norm_asset_id", args.norm_asset_id or args.repo_id),
+            "use_quantile_norm": getattr(args, "_use_quantile_norm", None),
+        },
         "dataset": str(pathlib.Path(args.dataset).expanduser().resolve()),
         "conditioning_mode": args.subtask_conditioning,
+        "max_token_len": args.max_token_len,
         "horizon": args.horizon,
         "samples": len(records),
         "seed": args.seed,
+        "action_noise": {
+            "seed": args.action_noise_seed,
+            "algorithm": "b1k-openloop-noise-v1/sha256/PCG64/float32" if args.action_noise_seed is not None else None,
+            "numpy_version": np.__version__,
+            "scope": "same dataset root, episode/frame and model action shape; not all runtime randomness",
+        },
         "sampling": {
             "samples_per_task": args.samples_per_task if segments is None and args.sample_keys_file is None else None,
             "samples_per_subtask": (
@@ -731,24 +1023,35 @@ def main() -> None:
             "tasks": len(by_task),
             "canonical_task_subtasks": len(per_subtask),
             "allowed_episodes": len(metadata),
-            "held_out_episode_filter": held_out,
+            "episode_filter": args.episodes_file is not None,
+            "held_out_episode_filter": args.split_label == "held_out",
+            "split_label": args.split_label,
+            "training_overlap_checked": False,
         },
         "artifacts": {
             "checkpoint": artifact_record(args.pi05_ckpt),
             "segments_file": artifact_record(args.subtask_prompts),
             "episodes_file": artifact_record(args.episodes_file),
             "sample_keys_file": artifact_record(args.sample_keys_file),
+            "norm_stats": artifact_record(getattr(args, "_norm_stats_path", None)),
             "memory_cache_manifest": artifact_record(args.memory_cache_dir / "manifest.json") if args.memory_cache_dir else None,
         },
         "episode_ids": sorted(requested_episode_ids) if requested_episode_ids is not None else None,
         "note": (
-            "Held-out demonstration action error, not closed-loop success or BEHAVIOR q_score."
-            if held_out
-            else "Demonstration action error on all episodes (legacy mode; not held out), not closed-loop success or "
-            "BEHAVIOR q_score."
+            f"{split_notes[args.split_label]}; training-episode overlap is not checked by this script. "
+            "Not closed-loop success or BEHAVIOR q_score."
         ),
+        "error_metric_notes": {
+            "masked_metrics": "Means over available current-subtask targets; unequal valid lengths are not directly comparable across buckets.",
+            "first_action": "Position zero only; common target position for all four boundary-distance buckets.",
+            "complete_prefix_16": "Only samples with all first 16 current-subtask targets valid; last_1 probes are excluded.",
+            "probe_metadata": "Whitelisted frozen-index claims; row indices, label, source segment bounds and task name checked against current data.",
+            "policy_input_sha256": "Hash of raw repacked input including images, state and prompts; does not by itself verify checkpoint-dependent preprocessing.",
+        },
         "sample_keys": evaluated_samples,
         "overall": aggregate_errors(records),
+        "comparable_errors": comparable_error_metrics(records),
+        "per_probe_bucket": per_probe_bucket,
         "per_task": per_task,
         "per_subtask": per_subtask,
         "per_action_group": per_action_group,
