@@ -1,0 +1,51 @@
+{
+  "job_name": "b1k-rlinf-1023-retry01",
+  "upstream_commit": "91a302ec50ddacd1fdabc5859b85e3661d768236",
+  "output": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/retry01/results",
+  "converted": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261020/smoke01/checkpoint",
+  "code": "/mnt/afs/260010165/behavior_1k/code_snapshots/b1k-video1688977-20261013",
+  "runtime": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306",
+  "original": "/mnt/afs/260010165/behavior_1k/checkpoints/pi05_b1k_full100_joint_1688977_aoss_20261010",
+  "tokenizer": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/openpi-cache/big_vision/paligemma_tokenizer.model",
+  "supplemental_library": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/library_snapshots/behavior-libxml-repair3-20261008-011710",
+  "supplemental_library_sha256": "66e5e790156270c67a266b49b115228f8159f032b2f336b61f4a32b511a0a8ec",
+  "original_source_sha256": {
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/eval.py": "91ad12f0ba569f51f3f703eeef7bdd4ffd245752b77d2a6061297ca72ff5f3a6",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/evaluator.py": "4227473e56907070ea02c84dcb5d8825f3069ad87b00acab9814884c7556cff7",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/single_env.py": "e1d55a61b38249b9ec4dd68930241d7be1fdad4771aaa689cd9532a8e4e2ac59",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/r1pro.yaml": "a98fa8a81472adfecfb642778d4d7a01e20131be7f70824e0ae095d665cdbb93"
+  },
+  "original_metadata_sha256": "1a59e30e43f7af9b868e032aaaf3245a8701602207b08ddf1bde8edf7c1fd2dd",
+  "task": "turning_on_radio",
+  "seed": 0,
+  "eval_instances": [
+    301,
+    302
+  ],
+  "eval_steps": 3224,
+  "train_instance": 1,
+  "ppo_steps": 256,
+  "gate": {
+    "minimum_probes": 8,
+    "mean_action_error": 0.005,
+    "max_action_error": 0.05,
+    "initial_error": 0.0001,
+    "score_gap": 0.1
+  },
+  "gpu_count": 1,
+  "quota_type": "spot",
+  "max_job_seconds": 21600,
+  "training_condition": "All frozen closed-loop and same-input checks pass.",
+  "training_scope": "One on-policy batch, one epoch, original RLinf GAE/PPO functions; single process, no Ray/FSDP.",
+  "rules_snapshot": "2026-09-11; online refresh unavailable 2026-10-23; same 6 GPU-hour cap.",
+  "authorization": "Current user request plus research_autonomy_authorization_20261020.json",
+  "initialization_timeout_seconds": 1800,
+  "recovery": {
+    "attempt": 2,
+    "previous_job": "b1k-rlinf-1020-smoke01",
+    "previous_uid": "6a421bba1d3540468911de89edfa3146",
+    "previous_state": "FAILED",
+    "reason": "Initial simulator setup was still compiling kernels when the 600-second watchdog expired.",
+    "scope_unchanged": true
+  }
+}
