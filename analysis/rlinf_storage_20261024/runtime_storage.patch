@@ -1,0 +1,61 @@
+--- a/common.py
++++ b/common.py
+@@ -3,6 +3,7 @@
+ import socket
+ import signal
+ import subprocess
++import tempfile
+ from multiprocessing.connection import Connection
+ from pathlib import Path
+ 
+@@ -61,13 +62,14 @@
+                 str(code / "BEHAVIOR-1K/bddl3"),
+             ]
+         )
++        self.scratch = tempfile.TemporaryDirectory(prefix="b1k-sim-cache-")
+         for key, name in [
+             ("OMNIGIBSON_APPDATA_PATH", "appdata"),
+             ("XDG_CACHE_HOME", "cache"),
+             ("XDG_CONFIG_HOME", "config"),
+             ("WARP_CACHE_PATH", "warp"),
+         ]:
+-            directory = self.output / name
++            directory = Path(self.scratch.name) / name
+             directory.mkdir()
+             env[key] = str(directory)
+         self.process = subprocess.Popen(
+@@ -131,6 +133,7 @@
+                     self.process.wait()
+         self.conn.close()
+         self.log.close()
++        self.scratch.cleanup()
+ 
+     def abort(self):
+         try:
+@@ -144,6 +147,7 @@
+             self.process.wait(timeout=15)
+         self.conn.close()
+         self.log.close()
++        self.scratch.cleanup()
+ 
+ 
+ def torch_model(plan):
+--- a/bootstrap.py
++++ b/bootstrap.py
+@@ -4,6 +4,7 @@
+ import hashlib
+ import json
+ import os
++import resource
+ import re
+ import shutil
+ import subprocess
+@@ -22,6 +23,8 @@
+ 
+ 
+ def run(config):
++    # Native crashes must not create multi-gigabyte cores in the AFS cwd.
++    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+     root = Path(config["root"])
+     root.mkdir(parents=True, exist_ok=False)
+     # Stay within the allocated 14 CPU cores before JAX creates its pools.
