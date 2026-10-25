@@ -1,0 +1,263 @@
+{
+  "upstream_commit": "91a302ec50ddacd1fdabc5859b85e3661d768236",
+  "converted": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261020/smoke01/checkpoint",
+  "code": "/mnt/afs/260010165/behavior_1k/code_snapshots/b1k-video1688977-20261013",
+  "runtime": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306",
+  "original": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/checkpoints/original1688977",
+  "tokenizer": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/openpi-cache/big_vision/paligemma_tokenizer.model",
+  "supplemental_library": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/library_snapshots/behavior-libxml-repair3-20261008-011710",
+  "supplemental_library_sha256": "66e5e790156270c67a266b49b115228f8159f032b2f336b61f4a32b511a0a8ec",
+  "original_source_sha256": {
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/eval.py": "91ad12f0ba569f51f3f703eeef7bdd4ffd245752b77d2a6061297ca72ff5f3a6",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/evaluator.py": "4227473e56907070ea02c84dcb5d8825f3069ad87b00acab9814884c7556cff7",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/single_env.py": "e1d55a61b38249b9ec4dd68930241d7be1fdad4771aaa689cd9532a8e4e2ac59",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/r1pro.yaml": "a98fa8a81472adfecfb642778d4d7a01e20131be7f70824e0ae095d665cdbb93"
+  },
+  "original_metadata_sha256": "1a59e30e43f7af9b868e032aaaf3245a8701602207b08ddf1bde8edf7c1fd2dd",
+  "task": "turning_on_radio",
+  "gate": {
+    "minimum_probes": 8,
+    "mean_action_error": 0.005,
+    "max_action_error": 0.05,
+    "initial_error": 0.0001,
+    "score_gap": 0.1
+  },
+  "initialization_timeout_seconds": 1800,
+  "job_name": "b1k-ppo-grip-1025-a01",
+  "output": "/mnt/afs/260010165/behavior_1k/rlinf_conservative_20261024/gripper_probe_20261025a/results",
+  "seed": 0,
+  "model_seed": 0,
+  "policy_precision": "float32",
+  "gpu_count": 1,
+  "quota_type": "spot",
+  "max_job_seconds": 3600,
+  "compute_timeout_seconds": 3300,
+  "eval_instances": [
+    301
+  ],
+  "eval_seeds": [
+    0
+  ],
+  "eval_steps": 3224,
+  "train_instance": null,
+  "train_seeds": [
+    [
+      2000,
+      2001,
+      2002,
+      2003
+    ],
+    [
+      2010,
+      2011,
+      2012,
+      2013
+    ]
+  ],
+  "rounds": 2,
+  "train_steps_per_round": 3224,
+  "eval_policy": "deterministic 10-step ODE with explicit NumPy initial noise; greedy generated subtasks",
+  "warm_start": null,
+  "optimizer": {
+    "actor_lr": 1e-07,
+    "value_lr": 0.0001,
+    "weight_decay": 0.01,
+    "microbatch_chunks": 1,
+    "accumulate_chunks": 32,
+    "epochs_per_round": 1,
+    "clip_ratio": 0.2,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "kl_target": 0.01,
+    "shuffle_chunks": true,
+    "shuffle_seed": 602410,
+    "kl_check": "whole current rollout batch after each candidate optimizer step; restore pre-step parameters and optimizer on violation"
+  },
+  "reward": {
+    "source": "unchanged simulator reward",
+    "chunk_aggregation": "sum of up to 16 control rewards, multiplied by 10"
+  },
+  "evaluation": {
+    "checkpoints": [
+      "original1688977 (reused verified baseline)",
+      "conservative_after_round_02"
+    ],
+    "cases": [
+      [
+        301,
+        0
+      ]
+    ],
+    "paired_initial_pose_tolerance": 0.0001,
+    "no_checkpoint_selection": true,
+    "no_evaluation_rewards_for_training": true
+  },
+  "storage": {
+    "keep_all_round_overlays": true,
+    "keep_optimizer_for_latest_complete_round": true,
+    "archive_reports_logs_actions_only": true,
+    "upload_round_overlays_and_final_optimizer_separately": true,
+    "estimated_new_disk_upper_bound_gib": 15,
+    "ephemeral_simulator_cache": "explicit /tmp, removed on simulator close/abort",
+    "core_dumps_enabled": false
+  },
+  "rules_snapshot": "2026-09-11; 2 GPUs total, <=6h each, 12 GPU-hours upper bound; owner-wide standard admission before each worker submission.",
+  "authorization": "Continuation of user-requested regression diagnosis: one isolated gripper-boundary intervention, no training; does not replace original evaluation; <=1 GPU-hour and <=2 active diagnostic GPUs.",
+  "accepted_gate": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/retry07/gpu_continuation/results/gate.json",
+  "train_instances": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "previous_run": "/mnt/afs/260010165/behavior_1k/rlinf_multiround_20261023/pilot01_reserved/results",
+  "previous_uid": "0a97d630ec844e61b6bec78401f3bf6a",
+  "previous_job": "b1k-ppo5-1023-r01",
+  "recovery": {
+    "complete_only": [],
+    "preserve_completed": [
+      [
+        301,
+        0
+      ],
+      [
+        301,
+        1
+      ],
+      [
+        301,
+        2
+      ],
+      [
+        302,
+        0
+      ],
+      [
+        302,
+        1
+      ],
+      [
+        302,
+        2
+      ]
+    ],
+    "checkpoint_round": 5,
+    "trainable_sha256": "c2f49e602ac612650bddaacc6bb588842d1fdf640c7d31822cac6436d91faeef"
+  },
+  "expected_original_trainable_sha256": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+  "critic_warmup": {
+    "max_samples_per_trajectory": 64,
+    "epochs": 100,
+    "learning_rate": 0.0001,
+    "batch_size": 64,
+    "seed": 20261024,
+    "validation_stride": 5,
+    "source_rounds": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "target": "discounted observed return; only truly terminal trajectories, no terminal assumption for truncated failure",
+    "use_holdout_for_early_stop": false,
+    "excluded_sources": "Nonterminal/truncated prior episodes are excluded; warmup is initialization, not on-policy fitting."
+  },
+  "protocol": {
+    "episodes_per_round": 4,
+    "max_new_train_controls": 22568,
+    "new_evaluation_episodes": 6,
+    "recovery_evaluation_episodes": 0,
+    "max_new_total_episodes": 13,
+    "max_live_gpus": 2,
+    "max_initialization_attempts_per_incomplete_case": 2,
+    "no_completed_episode_retries": true,
+    "gate_original_parameter_hash": true,
+    "no_actor_warm_start": true
+  },
+  "resume_run": "/mnt/afs/260010165/behavior_1k/rlinf_conservative_20261024/pilot01/results",
+  "resume_job": "b1k-ppoc2-1024-a01",
+  "resume_uid": "9b71a258461e47fcb40e1b54e81e5269",
+  "resume": {
+    "previous_phase": "training_rollout",
+    "previous_round": 1,
+    "previous_episode": 2,
+    "training_updates_completed": 0,
+    "preserve_completed_evaluation": true,
+    "reuse_saved_episodes_if_policy_replay_matches": true,
+    "new_job_hours_cap": 6,
+    "combined_job_hours_cap": null,
+    "cause": "User-requested two-GPU migration; no completed trajectories repeated."
+  },
+  "runtime_storage": {
+    "cache_location": "node-local temporary directory, cleaned after each simulator",
+    "core_dump_limit_bytes": 0,
+    "max_persistent_bytes": 3221225472,
+    "max_checkpoint_write_reservation_bytes": 6442450944,
+    "preserve_native_logs_before_scratch_cleanup": true
+  },
+  "resume_sources": [
+    "/mnt/afs/260010165/behavior_1k/rlinf_conservative_20261024/resume03/results",
+    "/mnt/afs/260010165/behavior_1k/rlinf_conservative_20261024/pilot01/results"
+  ],
+  "migration": {
+    "expected_complete_relative_paths": [
+      "training/round_01/episode_01/rollout.pt"
+    ],
+    "completed_rollouts": {},
+    "previous_job": "b1k-ppoc2-1024-a03",
+    "previous_uid": "6a26775e09ef45dca42200545b48170f",
+    "previous_writer_stopped": true,
+    "reuse_completed": true,
+    "optimizer_updates_before_migration": 0,
+    "parallelism": "two single-GPU workers, four fixed episodes, synchronous one-GPU PPO update"
+  },
+  "audit": {
+    "checkpoints": [
+      {
+        "name": "base",
+        "directory": null,
+        "hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c"
+      },
+      {
+        "name": "round_1",
+        "directory": "/mnt/afs/260010165/behavior_1k/rlinf_conservative_20261024/dual01/results/checkpoints/round_01",
+        "hash": "54d28015124cd40dad39a4897a57d65238b7dc34868c421cf8affd5d20cc709c"
+      },
+      {
+        "name": "round_2",
+        "directory": "/mnt/afs/260010165/behavior_1k/rlinf_conservative_20261024/dual01/results/checkpoints/round_02",
+        "hash": "f7d8b88c60bef9054cff41cecab3a8bf44671492bff705aa7f38bcffe88f2b4f"
+      }
+    ],
+    "no_training": true,
+    "no_simulation": false
+  },
+  "diagnostic_control": {
+    "source": "conservative_ppo_dual_20261024",
+    "checkpoints": [
+      "after_round_02"
+    ],
+    "cases": [
+      [
+        301,
+        0
+      ]
+    ],
+    "max_episodes": 1,
+    "max_controls": 3224,
+    "same_worker": true,
+    "no_training": true,
+    "new_replicate_not_replacement": true,
+    "purpose": "Causal diagnostic only: snap near-open gripper commands to +1 without changing learned weights.",
+    "intervention": {
+      "indices": [
+        14,
+        22
+      ],
+      "near_open_min": 0.999,
+      "near_open_max_exclusive": 1.0,
+      "replacement": 1.0
+    }
+  }
+}

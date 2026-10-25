@@ -1,0 +1,130 @@
+{
+  "upstream_commit": "91a302ec50ddacd1fdabc5859b85e3661d768236",
+  "converted": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261020/smoke01/checkpoint",
+  "code": "/mnt/afs/260010165/behavior_1k/code_snapshots/b1k-video1688977-20261013",
+  "runtime": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306",
+  "original": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/checkpoints/original1688977",
+  "tokenizer": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/openpi-cache/big_vision/paligemma_tokenizer.model",
+  "supplemental_library": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/library_snapshots/behavior-libxml-repair3-20261008-011710",
+  "supplemental_library_sha256": "66e5e790156270c67a266b49b115228f8159f032b2f336b61f4a32b511a0a8ec",
+  "original_source_sha256": {
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/eval.py": "91ad12f0ba569f51f3f703eeef7bdd4ffd245752b77d2a6061297ca72ff5f3a6",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/evaluator.py": "4227473e56907070ea02c84dcb5d8825f3069ad87b00acab9814884c7556cff7",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/single_env.py": "e1d55a61b38249b9ec4dd68930241d7be1fdad4771aaa689cd9532a8e4e2ac59",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/r1pro.yaml": "a98fa8a81472adfecfb642778d4d7a01e20131be7f70824e0ae095d665cdbb93"
+  },
+  "original_metadata_sha256": "1a59e30e43f7af9b868e032aaaf3245a8701602207b08ddf1bde8edf7c1fd2dd",
+  "task": "turning_on_radio",
+  "initialization_timeout_seconds": 1800,
+  "job_name": "b1k-interface-1025",
+  "output": "/mnt/afs/260010165/behavior_1k/rlinf_interface_fix_20261025/pilot01/results",
+  "seed": 0,
+  "model_seed": 0,
+  "policy_precision": "float32",
+  "gpu_count": 2,
+  "max_job_seconds": 7200,
+  "compute_timeout_seconds": 6600,
+  "eval_instances": [
+    301,
+    302
+  ],
+  "eval_seeds": [
+    0
+  ],
+  "eval_steps": 3224,
+  "eval_policy": "deterministic 10-step ODE with explicit NumPy initial noise; greedy generated subtasks",
+  "evaluation": {
+    "checkpoints": [
+      "original1688977",
+      "conservative_after_round_02"
+    ],
+    "cases": [
+      [
+        301,
+        0
+      ],
+      [
+        302,
+        0
+      ]
+    ],
+    "paired_initial_pose_tolerance": 0.0001,
+    "no_checkpoint_selection": true,
+    "no_evaluation_rewards_for_training": true
+  },
+  "authorization": "User requested correcting the gripper interface. Implement a shared train/eval mapping, verify unchanged raw PPO density, and compare original/PPO checkpoints on two fixed instances. No training; at most two 5090 GPUs for two hours each.",
+  "accepted_gate": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/retry07/gpu_continuation/results/gate.json",
+  "expected_original_trainable_sha256": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+  "protocol": {
+    "episodes_per_round": 4,
+    "max_new_train_controls": 22568,
+    "new_evaluation_episodes": 6,
+    "recovery_evaluation_episodes": 0,
+    "max_new_total_episodes": 13,
+    "max_live_gpus": 2,
+    "max_initialization_attempts_per_incomplete_case": 2,
+    "no_completed_episode_retries": true,
+    "gate_original_parameter_hash": true,
+    "no_actor_warm_start": true
+  },
+  "runtime_storage": {
+    "cache_location": "node-local temporary directory, cleaned after each simulator",
+    "core_dump_limit_bytes": 0,
+    "max_persistent_bytes": 2147483648,
+    "max_checkpoint_write_reservation_bytes": 6442450944,
+    "preserve_native_logs_before_scratch_cleanup": true
+  },
+  "audit": {
+    "checkpoints": [
+      {
+        "name": "base",
+        "directory": null,
+        "hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c"
+      },
+      {
+        "name": "round_2",
+        "directory": "/mnt/afs/260010165/behavior_1k/rlinf_conservative_20261024/dual01/results/checkpoints/round_02",
+        "hash": "f7d8b88c60bef9054cff41cecab3a8bf44671492bff705aa7f38bcffe88f2b4f"
+      }
+    ],
+    "no_training": true,
+    "no_simulation": false
+  },
+  "action_interface": {
+    "version": "r1pro_gripper_open_v1",
+    "gripper_open_tolerance": 0.001,
+    "gripper_indices": [
+      14,
+      22
+    ],
+    "raw_policy_actions_preserved": true
+  },
+  "validation": {
+    "instances": [
+      301,
+      302
+    ],
+    "seed": 0,
+    "episodes_per_worker": 2,
+    "max_new_episodes": 4,
+    "checkpoints": [
+      "original1688977",
+      "PPO_after_round_02"
+    ],
+    "same_worker_within_pair": true,
+    "same_interface_for_both": true,
+    "no_training": true,
+    "max_active_gpus": 2,
+    "max_gpu_hours": 4,
+    "do_not_replace_previous_results": true
+  },
+  "rules_snapshot": "2026-09-11; at most 2 RTX 5090 GPUs, <=2h each, <=4 GPU-hours; owner-wide standard admission before each worker submission.",
+  "storage": {
+    "estimated_new_disk_upper_bound_gib_per_worker": 2,
+    "copy_checkpoints": false,
+    "keep_raw_actions": true,
+    "keep_videos": true,
+    "ephemeral_simulator_cache": "explicit /tmp; clean on close or abort",
+    "core_dumps_enabled": false
+  }
+}
