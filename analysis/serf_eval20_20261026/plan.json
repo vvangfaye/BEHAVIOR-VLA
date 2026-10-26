@@ -1,0 +1,158 @@
+{
+  "created_at_unix": 1792976854.7445133,
+  "authorization": "User: 请帮我完成, referring to repair, dynamic-map validation and fixed 20-instance paired evaluation",
+  "task": "putting_shoes_on_rack",
+  "task_id": 22,
+  "instance_indices": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19
+  ],
+  "instance_ids": [
+    73,
+    282,
+    256,
+    281,
+    280,
+    9,
+    173,
+    285,
+    278,
+    290,
+    92,
+    277,
+    160,
+    98,
+    297,
+    286,
+    284,
+    45,
+    127,
+    283
+  ],
+  "conditions": [
+    "image",
+    "serf"
+  ],
+  "seed": 0,
+  "episodes": 40,
+  "max_concurrent_5090": 2,
+  "quota_preference": "owner-free Reserved first; Spot otherwise",
+  "gpu_hour_budget": 56,
+  "gate": {
+    "kind": "cached-action replay with tracking diagnostics, not formal scoring",
+    "instance": 256,
+    "steps": 4000,
+    "max_gpu_seconds": 3600,
+    "minimum_moved_visible_samples": 10,
+    "moved_threshold_m": 0.2,
+    "median_centroid_error_max_m": 0.15,
+    "p95_centroid_error_max_m": 0.35,
+    "depth_valid_fraction_min": 0.9,
+    "maximum_intrinsics_relative_error": 0.02
+  },
+  "evaluation": {
+    "worker_count": 2,
+    "indices_by_rank": {
+      "0": [
+        0,
+        2,
+        4,
+        6,
+        8,
+        10,
+        12,
+        14,
+        16,
+        18
+      ],
+      "1": [
+        1,
+        3,
+        5,
+        7,
+        9,
+        11,
+        13,
+        15,
+        17,
+        19
+      ]
+    },
+    "max_seconds_per_worker": 86400,
+    "max_generation_per_worker": 3,
+    "resume_only_completed_valid_cases": true,
+    "max_automatic_failure_recoveries": 1,
+    "native_max_steps": true,
+    "author_action_config": {
+      "horizon": 30,
+      "execute": 26,
+      "keep": 4,
+      "compressed_steps": 20,
+      "flow_steps": 20,
+      "eval_tricks": true
+    },
+    "recovery_policy": "One code-fix restart after generation 1, then at most one infrastructure/preemption recovery; subtract elapsed time from the original 24-hour shard limit.",
+    "max_generation_by_rank": {
+      "0": 3,
+      "1": 4
+    },
+    "instance_asset_recovery": {
+      "recorded_at": 1793012834.7378714,
+      "rank": 1,
+      "generation": 4,
+      "cause": "17 official instance state files absent from the staged pilot subset",
+      "repair": "All 20 official state files checked by content hash; missing 17 inserted atomically",
+      "budget": "Subtract elapsed time from the original per-shard 24-hour limit; no increase to GPU count or total GPU-hour budget",
+      "preserve": "Both completed 282 episodes recovered across all prior generations",
+      "further_retries": false
+    }
+  },
+  "storage": {
+    "afs_output_budget_GiB": 0,
+    "model_location": "node /tmp; existing private AOSS checkpoint source reused",
+    "additional_map_bytes": 326818896,
+    "new_large_afs_writes": false,
+    "working_maps_and_outputs": "node-local /tmp",
+    "per_episode_archive": "existing private AOSS",
+    "reason": "Avoid personal AFS quota growth and protected SDK screenshot directories; do not change shared runtime permissions"
+  },
+  "inference_transport": {
+    "disable_keepalive": "client and server for long local calls",
+    "abort_ambiguous_request": true,
+    "every_action_counter_assertion": true
+  },
+  "analysis": {
+    "primary": "paired mean final score difference SERF minus image",
+    "secondary": [
+      "wins/ties/losses",
+      "whole-task success",
+      "paired bootstrap 95% CI"
+    ],
+    "repetitions": "one seed; expand repeats only under a separately recorded plan"
+  },
+  "old_six": "diagnostic only, excluded from new formal results",
+  "scope_limit": "No training or additional tasks; no memory ablation in this round",
+  "repair_serial_gate": {
+    "source_sha256": "bc88be3cdfd201183bb42379c6aac4a164f9a8e1f991d90bf42ccacedbb664be",
+    "pending_rank": 1,
+    "require_rank0_steps": 100
+  }
+}
