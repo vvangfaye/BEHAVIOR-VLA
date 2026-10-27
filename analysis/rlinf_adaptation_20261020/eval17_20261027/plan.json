@@ -1,0 +1,310 @@
+{
+  "upstream_commit": "91a302ec50ddacd1fdabc5859b85e3661d768236",
+  "converted": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261020/smoke01/checkpoint",
+  "code": "/mnt/afs/260010165/behavior_1k/code_snapshots/b1k-video1688977-20261013",
+  "runtime": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306",
+  "original": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/checkpoints/original1688977",
+  "tokenizer": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/openpi-cache/big_vision/paligemma_tokenizer.model",
+  "supplemental_library": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/library_snapshots/behavior-libxml-repair3-20261008-011710",
+  "supplemental_library_sha256": "66e5e790156270c67a266b49b115228f8159f032b2f336b61f4a32b511a0a8ec",
+  "original_source_sha256": {
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/eval.py": "91ad12f0ba569f51f3f703eeef7bdd4ffd245752b77d2a6061297ca72ff5f3a6",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/evaluator.py": "4227473e56907070ea02c84dcb5d8825f3069ad87b00acab9814884c7556cff7",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/single_env.py": "e1d55a61b38249b9ec4dd68930241d7be1fdad4771aaa689cd9532a8e4e2ac59",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/r1pro.yaml": "a98fa8a81472adfecfb642778d4d7a01e20131be7f70824e0ae095d665cdbb93"
+  },
+  "original_metadata_sha256": "1a59e30e43f7af9b868e032aaaf3245a8701602207b08ddf1bde8edf7c1fd2dd",
+  "task": "turning_on_radio",
+  "initialization_timeout_seconds": 1800,
+  "seed": 0,
+  "model_seed": 0,
+  "policy_precision": "float32",
+  "eval_instances": [
+    301,
+    302,
+    303,
+    304,
+    305,
+    306,
+    307,
+    308,
+    309,
+    310
+  ],
+  "eval_seeds": [
+    0,
+    1,
+    2
+  ],
+  "eval_steps": 3224,
+  "eval_policy": "deterministic 10-step ODE with explicit NumPy initial noise; greedy generated subtasks",
+  "accepted_gate": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/retry07/gpu_continuation/results/gate.json",
+  "expected_original_trainable_sha256": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+  "action_interface": {
+    "gripper_open_tolerance": 0.0,
+    "description": "original execution interface; no snapping"
+  },
+  "experiment": "eval17_20261027",
+  "no_training": true,
+  "gpu_count": 2,
+  "quota_type": "reserved",
+  "max_job_seconds": 32400,
+  "compute_timeout_seconds": 30600,
+  "remote_root": "/mnt/afs/260010165/behavior_1k/rlinf_eval17_20261027/pilot01",
+  "output": "/mnt/afs/260010165/behavior_1k/rlinf_eval17_20261027/pilot01/worker_0/results",
+  "evaluation": {
+    "checkpoints": [
+      "original1688977",
+      "sampling32_after_round_02"
+    ],
+    "cases": [
+      [
+        301,
+        0
+      ],
+      [
+        301,
+        1
+      ],
+      [
+        301,
+        2
+      ],
+      [
+        302,
+        0
+      ],
+      [
+        302,
+        1
+      ],
+      [
+        302,
+        2
+      ],
+      [
+        303,
+        0
+      ],
+      [
+        303,
+        1
+      ],
+      [
+        303,
+        2
+      ],
+      [
+        304,
+        0
+      ],
+      [
+        304,
+        1
+      ],
+      [
+        304,
+        2
+      ],
+      [
+        305,
+        0
+      ],
+      [
+        305,
+        1
+      ],
+      [
+        305,
+        2
+      ],
+      [
+        306,
+        0
+      ],
+      [
+        306,
+        1
+      ],
+      [
+        306,
+        2
+      ],
+      [
+        307,
+        0
+      ],
+      [
+        307,
+        1
+      ],
+      [
+        307,
+        2
+      ],
+      [
+        308,
+        0
+      ],
+      [
+        308,
+        1
+      ],
+      [
+        308,
+        2
+      ],
+      [
+        309,
+        0
+      ],
+      [
+        309,
+        1
+      ],
+      [
+        309,
+        2
+      ],
+      [
+        310,
+        0
+      ],
+      [
+        310,
+        1
+      ],
+      [
+        310,
+        2
+      ]
+    ],
+    "paired_initial_pose_tolerance": 0.0001,
+    "no_checkpoint_selection": true,
+    "no_evaluation_rewards_for_training": true
+  },
+  "protocol": {
+    "max_live_gpus": 2,
+    "max_new_baseline_episodes": 24,
+    "new_ppo17_episodes": 30,
+    "max_total_new_episodes": 54,
+    "max_initialization_attempts_per_incomplete_case": 2,
+    "no_completed_episode_retries": true
+  },
+  "reuse": {
+    "baseline_root": "/mnt/afs/260010165/behavior_1k/rlinf_multiround_20261023/pilot01_reserved/results/baseline",
+    "baseline_cases": [
+      [
+        301,
+        0
+      ],
+      [
+        301,
+        1
+      ],
+      [
+        301,
+        2
+      ],
+      [
+        302,
+        0
+      ],
+      [
+        302,
+        1
+      ],
+      [
+        302,
+        2
+      ]
+    ],
+    "frozen_hash": "732f7442cf1acc5c1dbe95a8e1aac2e072315ceabd2892fe9e9ae09bf2454324",
+    "baseline_checks": {
+      "weights_unchanged": true,
+      "trainable_sha_before": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "trainable_sha_after": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "cases": [
+        [
+          301,
+          0
+        ],
+        [
+          301,
+          1
+        ],
+        [
+          301,
+          2
+        ],
+        [
+          302,
+          0
+        ],
+        [
+          302,
+          1
+        ],
+        [
+          302,
+          2
+        ]
+      ],
+      "evaluation_policy": "deterministic 10-step ODE with explicit NumPy initial noise; greedy generated subtasks"
+    },
+    "baseline_manifest": {
+      "i301_s0/result.json": "4fd246c91d5165fdbca1878ba29d11f89b0d8e91ccc36fcce1c3831a35b081c1",
+      "i301_s0/initial.json": "0d07846a6359f4c5df52e9a773d52af533adeaa9f14b46c9a5877390cca1d7b9",
+      "i301_s0/spec.json": "fc0b1a1751c62bec72a0b86717af27567bb71b6ed812ec53abfb74052613b660",
+      "i301_s1/result.json": "4033cbb0342376d4057c55248abbb6f12ee4e2206fa3ce4385fdd83fcc761cde",
+      "i301_s1/initial.json": "0d07846a6359f4c5df52e9a773d52af533adeaa9f14b46c9a5877390cca1d7b9",
+      "i301_s1/spec.json": "e4a8cf05cbb5e684a84744b2e74bf6e9c33457f4c639827aa12252af2b6bc2f2",
+      "i301_s2/result.json": "11be3dca3de013a26b10e2bc42707a09b41a5f8b1db2730a916b9f98bd40a3b0",
+      "i301_s2/initial.json": "0d07846a6359f4c5df52e9a773d52af533adeaa9f14b46c9a5877390cca1d7b9",
+      "i301_s2/spec.json": "ecfd2546e24b3c325197157a2891088293d4fa496afa130231315eab28e5d2a4",
+      "i302_s0/result.json": "20425a68dc3041ebea2fc2e230c2f105bf24ac970f2f1b391e101cab4091293a",
+      "i302_s0/initial.json": "e0c7a0e7a4647fde8117df914d27bf8c3518f115ad29505b4c531561caab87d5",
+      "i302_s0/spec.json": "fea119014f6fbbb15c97d3c6d22a60e4ac00f2af5942717f98be7e5f640ce99f",
+      "i302_s1/result.json": "ff9eb000c788532cc82d3ec092af208c841269f63cdbf9ffa96557cdf0b07ebb",
+      "i302_s1/initial.json": "e0c7a0e7a4647fde8117df914d27bf8c3518f115ad29505b4c531561caab87d5",
+      "i302_s1/spec.json": "b37180fba23624e2452f3d22c7aef6ba3bfd02c27ab0ec4b067ee72800407561",
+      "i302_s2/result.json": "8dbd5bf09764d20c6a07adc163ed30833169b385bbcb293df9367260026da31c",
+      "i302_s2/initial.json": "e0c7a0e7a4647fde8117df914d27bf8c3518f115ad29505b4c531561caab87d5",
+      "i302_s2/spec.json": "b26424f7240aa9f0e24540330504cd6090ebe81a3b3344e176eaa7d5b0596ffd"
+    }
+  },
+  "checkpoint": {
+    "directory": "/mnt/afs/260010165/behavior_1k/rlinf_sampling32_20261025/pilot01/attempt02/results/checkpoints/round_01",
+    "parameter_sha256": "5da5dac04c4455b59d5626d82e0194f5dec44ecbfeb6c06dd6579691b438a1c6",
+    "file_sha256": "111b033da85a6a25546b73b63d3919ceb83928f1465b9bbd92cb76ebe3521434",
+    "file_bytes": 1731476107,
+    "completed_updates": 17
+  },
+  "runtime_storage": {
+    "cache_location": "node-local /tmp; cleaned after each simulator",
+    "core_dump_limit_bytes": 0,
+    "max_persistent_bytes": 8589934592,
+    "shared_budget_roots": [
+      "/mnt/afs/260010165/behavior_1k/rlinf_eval17_20261027/pilot01/worker_0/results",
+      "/mnt/afs/260010165/behavior_1k/rlinf_eval17_20261027/pilot01/worker_1/results"
+    ]
+  },
+  "audit": {
+    "checkpoints": [
+      {
+        "directory": "/mnt/afs/260010165/behavior_1k/rlinf_sampling32_20261025/pilot01/attempt02/results/checkpoints/round_01",
+        "hash": "5da5dac04c4455b59d5626d82e0194f5dec44ecbfeb6c06dd6579691b438a1c6"
+      }
+    ]
+  },
+  "authorization": {
+    "request": "评估17次优化后的模型；最多两张5090，仅固定评测，不恢复训练",
+    "previous_training_queue_remains_cancelled": true
+  },
+  "rules": {
+    "snapshot": "2026-09-11",
+    "live_refresh": "Feishu page inaccessible via web on 2026-10-27; account-wide active quota checked via SCO",
+    "max_reserved_gpus_owner": 4,
+    "max_job_gpu_hours": 18
+  }
+}
