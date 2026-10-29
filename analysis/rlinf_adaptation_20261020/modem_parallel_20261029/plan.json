@@ -1,0 +1,936 @@
+{
+  "upstream_commit": "91a302ec50ddacd1fdabc5859b85e3661d768236",
+  "converted": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261020/smoke01/checkpoint",
+  "code": "/mnt/afs/260010165/behavior_1k/code_snapshots/b1k-video1688977-20261013",
+  "runtime": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306",
+  "original": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/checkpoints/original1688977",
+  "tokenizer": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/openpi-cache/big_vision/paligemma_tokenizer.model",
+  "original_metadata_sha256": "1a59e30e43f7af9b868e032aaaf3245a8701602207b08ddf1bde8edf7c1fd2dd",
+  "supplemental_library": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/library_snapshots/behavior-libxml-repair3-20261008-011710",
+  "supplemental_library_sha256": "66e5e790156270c67a266b49b115228f8159f032b2f336b61f4a32b511a0a8ec",
+  "original_source_sha256": {
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/eval.py": "91ad12f0ba569f51f3f703eeef7bdd4ffd245752b77d2a6061297ca72ff5f3a6",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/evaluator.py": "4227473e56907070ea02c84dcb5d8825f3069ad87b00acab9814884c7556cff7",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/single_env.py": "e1d55a61b38249b9ec4dd68930241d7be1fdad4771aaa689cd9532a8e4e2ac59",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/r1pro.yaml": "a98fa8a81472adfecfb642778d4d7a01e20131be7f70824e0ae095d665cdbb93",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/object_states/next_to.py": "d43126dc0a3916549158c02d15d4c0b5417f4f7fbb4186111e4053b2a9c35aff",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/object_states/on_top.py": "5c05e3e5640bf3b5fc81decb629be3d9d4603df69b53ce040ce8f77862ba0efd",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/object_states/toggle.py": "21686ecdbf860f6304f284e1ea51d6c37d9f77239125caa05df522aeb80c2629",
+    "openpi/src/openpi/configs/tasks/b1k.py": "77f4b4536e3499095a29382f03a7069e3e10599e00752ebdb2f195ce0010421e"
+  },
+  "expected_original_trainable_sha256": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+  "accepted_gate": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/retry07/gpu_continuation/results/gate.json",
+  "action_interface": {
+    "gripper_open_tolerance": 0.0,
+    "description": "original execution interface; no snapping"
+  },
+  "experiment": "modem_ppo_20261028",
+  "task": "installing_a_modem",
+  "remote_root": "/mnt/afs/260010165/behavior_1k/rlinf_modem_20261028/pilot01",
+  "output": "/mnt/afs/260010165/behavior_1k/rlinf_modem_20261028/pilot01/results",
+  "seed": 0,
+  "model_seed": 0,
+  "policy_precision": "float32",
+  "eval_policy": "deterministic 10-step ODE with explicit NumPy initial noise; greedy generated subtasks",
+  "eval_instances": [
+    301,
+    302,
+    303,
+    304,
+    305,
+    306,
+    307,
+    308,
+    309,
+    310
+  ],
+  "eval_steps": 3620,
+  "train_steps_per_round": 3620,
+  "train_instances": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16
+  ],
+  "rounds": 2,
+  "train_seeds": [
+    [
+      280000,
+      280001,
+      280002,
+      280003,
+      280004,
+      280005,
+      280006,
+      280007,
+      280008,
+      280009,
+      280010,
+      280011,
+      280012,
+      280013,
+      280014,
+      280015,
+      280016,
+      280017,
+      280018,
+      280019,
+      280020,
+      280021,
+      280022,
+      280023,
+      280024,
+      280025,
+      280026,
+      280027,
+      280028,
+      280029,
+      280030,
+      280031
+    ],
+    [
+      281000,
+      281001,
+      281002,
+      281003,
+      281004,
+      281005,
+      281006,
+      281007,
+      281008,
+      281009,
+      281010,
+      281011,
+      281012,
+      281013,
+      281014,
+      281015,
+      281016,
+      281017,
+      281018,
+      281019,
+      281020,
+      281021,
+      281022,
+      281023,
+      281024,
+      281025,
+      281026,
+      281027,
+      281028,
+      281029,
+      281030,
+      281031
+    ]
+  ],
+  "evaluation": {
+    "cases": [
+      [
+        1,
+        0
+      ],
+      [
+        2,
+        0
+      ],
+      [
+        3,
+        0
+      ],
+      [
+        4,
+        0
+      ],
+      [
+        5,
+        0
+      ],
+      [
+        6,
+        0
+      ],
+      [
+        7,
+        0
+      ],
+      [
+        8,
+        0
+      ],
+      [
+        9,
+        0
+      ],
+      [
+        10,
+        0
+      ],
+      [
+        11,
+        0
+      ],
+      [
+        12,
+        0
+      ],
+      [
+        13,
+        0
+      ],
+      [
+        14,
+        0
+      ],
+      [
+        15,
+        0
+      ],
+      [
+        16,
+        0
+      ],
+      [
+        301,
+        0
+      ],
+      [
+        301,
+        1
+      ],
+      [
+        301,
+        2
+      ],
+      [
+        302,
+        0
+      ],
+      [
+        302,
+        1
+      ],
+      [
+        302,
+        2
+      ],
+      [
+        303,
+        0
+      ],
+      [
+        303,
+        1
+      ],
+      [
+        303,
+        2
+      ],
+      [
+        304,
+        0
+      ],
+      [
+        304,
+        1
+      ],
+      [
+        304,
+        2
+      ],
+      [
+        305,
+        0
+      ],
+      [
+        305,
+        1
+      ],
+      [
+        305,
+        2
+      ],
+      [
+        306,
+        0
+      ],
+      [
+        306,
+        1
+      ],
+      [
+        306,
+        2
+      ],
+      [
+        307,
+        0
+      ],
+      [
+        307,
+        1
+      ],
+      [
+        307,
+        2
+      ],
+      [
+        308,
+        0
+      ],
+      [
+        308,
+        1
+      ],
+      [
+        308,
+        2
+      ],
+      [
+        309,
+        0
+      ],
+      [
+        309,
+        1
+      ],
+      [
+        309,
+        2
+      ],
+      [
+        310,
+        0
+      ],
+      [
+        310,
+        1
+      ],
+      [
+        310,
+        2
+      ]
+    ],
+    "training_cases": [
+      [
+        1,
+        0
+      ],
+      [
+        2,
+        0
+      ],
+      [
+        3,
+        0
+      ],
+      [
+        4,
+        0
+      ],
+      [
+        5,
+        0
+      ],
+      [
+        6,
+        0
+      ],
+      [
+        7,
+        0
+      ],
+      [
+        8,
+        0
+      ],
+      [
+        9,
+        0
+      ],
+      [
+        10,
+        0
+      ],
+      [
+        11,
+        0
+      ],
+      [
+        12,
+        0
+      ],
+      [
+        13,
+        0
+      ],
+      [
+        14,
+        0
+      ],
+      [
+        15,
+        0
+      ],
+      [
+        16,
+        0
+      ]
+    ],
+    "heldout_cases": [
+      [
+        301,
+        0
+      ],
+      [
+        301,
+        1
+      ],
+      [
+        301,
+        2
+      ],
+      [
+        302,
+        0
+      ],
+      [
+        302,
+        1
+      ],
+      [
+        302,
+        2
+      ],
+      [
+        303,
+        0
+      ],
+      [
+        303,
+        1
+      ],
+      [
+        303,
+        2
+      ],
+      [
+        304,
+        0
+      ],
+      [
+        304,
+        1
+      ],
+      [
+        304,
+        2
+      ],
+      [
+        305,
+        0
+      ],
+      [
+        305,
+        1
+      ],
+      [
+        305,
+        2
+      ],
+      [
+        306,
+        0
+      ],
+      [
+        306,
+        1
+      ],
+      [
+        306,
+        2
+      ],
+      [
+        307,
+        0
+      ],
+      [
+        307,
+        1
+      ],
+      [
+        307,
+        2
+      ],
+      [
+        308,
+        0
+      ],
+      [
+        308,
+        1
+      ],
+      [
+        308,
+        2
+      ],
+      [
+        309,
+        0
+      ],
+      [
+        309,
+        1
+      ],
+      [
+        309,
+        2
+      ],
+      [
+        310,
+        0
+      ],
+      [
+        310,
+        1
+      ],
+      [
+        310,
+        2
+      ]
+    ],
+    "paired_initial_pose_tolerance": 0.0001,
+    "no_checkpoint_selection": true
+  },
+  "optimizer": {
+    "actor_lr": 1e-07,
+    "value_lr": 0.0001,
+    "weight_decay": 0.01,
+    "microbatch_chunks": 1,
+    "accumulate_chunks": null,
+    "epochs_per_round": 1,
+    "clip_ratio": 0.2,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "kl_target": 0.01,
+    "shuffle_chunks": true,
+    "shuffle_seed": 602410,
+    "kl_check": "whole current rollout batch after each candidate optimizer step; restore pre-step parameters and optimizer on violation",
+    "updates_per_round": [
+      17,
+      17
+    ],
+    "partition": "One shuffled pass per round; every chunk once, partitioned into exactly 17 optimizer steps"
+  },
+  "critic_warmup": {
+    "epochs": 100,
+    "learning_rate": 0.0001,
+    "batch_size": 64,
+    "seed": 20261028,
+    "validation_stride": 5,
+    "max_samples_per_trajectory": 32,
+    "source": "first 32 on-policy modem rollouts only, both success and time-limit failure",
+    "finite_horizon": true,
+    "refresh_values_before_first_gae": true
+  },
+  "critic_initialization": "Fresh original-model value head; never load radio critic; fit on modem round 1 before actor updates",
+  "goal_contract": {
+    "target_bddl_id": "modem.n.01_1",
+    "tv_bddl_id": "television_receiver.n.01_1",
+    "cabinet_bddl_ids": [
+      "cabinet.n.01_1",
+      "cabinet.n.01_2"
+    ],
+    "goals": [
+      "toggled_on",
+      "nextto_tv",
+      "shared_tv_cabinet"
+    ],
+    "bddl_sha256": "4965d015fa14a43d2a08c6b11c814db069c052b3c751e4f6540f2e5884c3d8b8",
+    "read_only": true
+  },
+  "shaping": {
+    "enabled": true,
+    "beta": 1.0,
+    "gamma": 0.99,
+    "potential": "number of currently satisfied three task goals",
+    "boundary": "action chunk, same gamma as GAE",
+    "terminal_phi": 0.0,
+    "timeout_is_terminal": true,
+    "task_reward_multiplier": 10.0,
+    "formula": "beta * (gamma * phi_next - phi_current); phi_next=0 at success or finite-horizon timeout",
+    "evaluation_shaping": false
+  },
+  "initialization_timeout_seconds": 1800,
+  "protocol": {
+    "max_initialization_attempts_per_incomplete_case": 2,
+    "episodes_per_round": 32,
+    "total_training_episodes": 64,
+    "baseline_episodes": 46,
+    "final_episodes": 46,
+    "max_new_episodes": 156,
+    "no_completed_episode_retries": true,
+    "new_baseline_episodes": 42
+  },
+  "runtime_storage": {
+    "max_persistent_bytes": 32212254720,
+    "shared_budget_roots": [
+      "/mnt/afs/260010165/behavior_1k/rlinf_modem_20261028/pilot01/results"
+    ],
+    "base_weights": "reuse existing AFS; no full copies",
+    "keep_optimizer": "one per completed round, two total",
+    "cache_location": "node-local /tmp",
+    "core_dump_limit_bytes": 0
+  },
+  "source_identity": {
+    "frozen_hash": "732f7442cf1acc5c1dbe95a8e1aac2e072315ceabd2892fe9e9ae09bf2454324",
+    "cold_trainable_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+    "modem_bddl_sha256": "4965d015fa14a43d2a08c6b11c814db069c052b3c751e4f6540f2e5884c3d8b8"
+  },
+  "phase_order": [
+    "baseline",
+    "sample1",
+    "train1",
+    "sample2",
+    "train2",
+    "final"
+  ],
+  "phase_limits_seconds": {
+    "baseline": 7200,
+    "sample1": 5400,
+    "train1": 28800,
+    "sample2": 5400,
+    "train2": 28800,
+    "final": 7200
+  },
+  "max_live_gpus": 8,
+  "max_total_gpu_hours": 80,
+  "max_wall_hours": 72,
+  "max_attempts_per_phase": 2,
+  "authorization": {
+    "request": "请帮我跑这个，规划下实验",
+    "date": "2026-10-28",
+    "gpu_limit": 8,
+    "other_experiments_unchanged": true,
+    "routine_private_code_upload_authorized": true,
+    "parallel_request": "单卡太慢了，我要中午出结果的话要多卡跑吧？"
+  },
+  "dependencies": [
+    {
+      "job": "b1k-mid-1028-t0a1",
+      "uid": "40fa7a27b2ec43a0a8c2399cb5fc526a"
+    },
+    {
+      "job": "b1k-mid-1028-e1a1",
+      "uid": "d63a23af89404ce781f19d0b4cfc78cf"
+    }
+  ],
+  "rules": {
+    "snapshot": "2026-09-11",
+    "online_refresh": "Feishu source inaccessible on 2026-10-29; 2026-09-11 snapshot retained, actual quota queried at every submit",
+    "standard_limit": 4,
+    "prefer_unused_reserved_else_spot": true
+  },
+  "comparisons": {
+    "primary": "Original1688977 vs final 34-update PPO on 30 fixed heldout episodes (10 instances x 3 seeds); report score, success and paired flips",
+    "secondary": "same comparison on 16 training instances, new evaluation seed",
+    "limitation": "One task, one training seed, PPO plus goal shaping arm only; cannot isolate shaping contribution or infer all-task gains"
+  },
+  "dependency_status_file": "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/rlinf_adaptation_20261020/subtask_reward_ppo_20261028/latest_status.json",
+  "dependency_campaign_directory": "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/rlinf_adaptation_20261020/subtask_reward_ppo_20261028",
+  "task_prompt": "Install the modem by placing it on the cabinet and turning it on.",
+  "task_prompt_source": "/mnt/afs/260010165/behavior_1k/code_snapshots/b1k-video1688977-20261013/openpi/src/openpi/configs/tasks/b1k.py",
+  "task_prompt_source_sha256": "77f4b4536e3499095a29382f03a7069e3e10599e00752ebdb2f195ce0010421e",
+  "startup_repair": {},
+  "attempt_caps": {},
+  "first_case_gate": false,
+  "prior_terminal_gpu_seconds_upper_bound": {
+    "690c8a4f6a9241408aa884bff7a6114b": 640.0,
+    "f17a45ea6d3f40c19c8a15c7ad6c67bc": 373.0,
+    "211743a22ccf4aeebb07f9368393259b": 598.705234,
+    "5a019c4c8386480c96e84916b0a6c75f": 0
+  },
+  "parallel_workers": 8,
+  "worker_prefix": "p8_",
+  "previous_generation_directory": "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/rlinf_adaptation_20261020/modem_ppo_20261028",
+  "first_case_dependency": {
+    "job": "b1k-mdm-1028-br0a3",
+    "uid": "ba2cf1e37838424b99161ab02541fade"
+  },
+  "generation": "parallel8_20261029",
+  "baseline_sources": {
+    "i1_s0": {
+      "directory": "/mnt/afs/260010165/behavior_1k/rlinf_modem_20261028/noon01/results/baseline/i1_s0",
+      "files": {
+        "result.json": "9b533550123b8c091308779594ec282ba136a1308869f5fc4eaa85d007ab7171",
+        "initial.json": "4dae01709987e4c16d1baa3c89d6f1fd5e6f73d3533a88a291f26bb81a4da671",
+        "spec.json": "f230599a6b813449e6f16bd2a102658ff95bb44874fa773191024feb4cc0691c",
+        "actions.json": "4bd1a7f751ec0a4b142632748502f640d2c6e73d50df79be4adda55c48591b08",
+        "goal_summary.json": "1b84ac638931770e4a77b2f770f517290aac33c337c919beff5534a9dbac212e",
+        "prompt_contract.json": "047710d36bd8467fd83d0f44a45589122b1c8c03122fda4a70c866e01fbf05c7"
+      },
+      "checkpoint": "original1688977",
+      "cold_trainable_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c"
+    },
+    "i2_s0": {
+      "directory": "/mnt/afs/260010165/behavior_1k/rlinf_modem_20261028/noon01/results/baseline/i2_s0",
+      "files": {
+        "result.json": "a4ef74666ec13b29c9b3895d1faf6d56c90c64b05b09de7242345b68d06ba0bb",
+        "initial.json": "ec4be20c9bba378150a844f263d6370d6a79f88837182839b7b3171436327aea",
+        "spec.json": "5922816457ee435bee54821e09f1e5e4937a241db9497c41b201b32b034ef68e",
+        "actions.json": "aebc593573a6b14efe037645593eeeebebd1557c43da1c6f00f3690699566b17",
+        "goal_summary.json": "f2d5a4dbc21a1dba7126f25276cd8b9f22c49efacac99ffcac6627b71e78fdd7",
+        "prompt_contract.json": "047710d36bd8467fd83d0f44a45589122b1c8c03122fda4a70c866e01fbf05c7"
+      },
+      "checkpoint": "original1688977",
+      "cold_trainable_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c"
+    },
+    "i301_s0": {
+      "directory": "/mnt/afs/260010165/behavior_1k/rlinf_modem_20261028/noon01/results/baseline/i301_s0",
+      "files": {
+        "result.json": "f7046dd440f122f2a8bef7e90d11ef162c454a83be25b0f91be61582d99fe026",
+        "initial.json": "06ba48af393ec12902b88f5b2ca131cb664c8d9cb82110a409db8ad8b55fa60e",
+        "spec.json": "b782476aed88e92ce21a9e87b53a9d7e84b5bb3b7578d07dffc21b102139fce3",
+        "actions.json": "34fc9f23afdc70debc23d067d3ee415996cccc18eb518ee5ac5c09fa0b51ff08",
+        "goal_summary.json": "b1b0f5a06f808f0e3cea3b8b0b67b95e1869e8367e7c3091419886fb06b84107",
+        "prompt_contract.json": "047710d36bd8467fd83d0f44a45589122b1c8c03122fda4a70c866e01fbf05c7"
+      },
+      "checkpoint": "original1688977",
+      "cold_trainable_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c"
+    },
+    "i302_s0": {
+      "directory": "/mnt/afs/260010165/behavior_1k/rlinf_modem_20261028/noon01/results/baseline/i302_s0",
+      "files": {
+        "result.json": "974b9ae9ff792945502146174d46eff87b523310a421094dea6dab5bc370a78f",
+        "initial.json": "da5658fe263b6060515e98a0c6f2fd072b3f61156458a09a30159bda3acd1870",
+        "spec.json": "cedc891802fa14544d37ca98532e870cbbafcac6ad93492efc9de2845d8bfa48",
+        "actions.json": "88f00881df45cbf8e2d98b1cb19feb29f83fc505b28372547252d62e70b8a310",
+        "goal_summary.json": "c6bdeeb216d3958a39648b4897cfa4b9072f6d6453bf3571f51de690bc636eb3",
+        "prompt_contract.json": "047710d36bd8467fd83d0f44a45589122b1c8c03122fda4a70c866e01fbf05c7"
+      },
+      "checkpoint": "original1688977",
+      "cold_trainable_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c"
+    }
+  },
+  "evaluation_runtime_order": [
+    [
+      301,
+      0
+    ],
+    [
+      301,
+      1
+    ],
+    [
+      301,
+      2
+    ],
+    [
+      302,
+      0
+    ],
+    [
+      302,
+      1
+    ],
+    [
+      302,
+      2
+    ],
+    [
+      303,
+      0
+    ],
+    [
+      303,
+      1
+    ],
+    [
+      303,
+      2
+    ],
+    [
+      304,
+      0
+    ],
+    [
+      304,
+      1
+    ],
+    [
+      304,
+      2
+    ],
+    [
+      305,
+      0
+    ],
+    [
+      305,
+      1
+    ],
+    [
+      305,
+      2
+    ],
+    [
+      306,
+      0
+    ],
+    [
+      306,
+      1
+    ],
+    [
+      306,
+      2
+    ],
+    [
+      307,
+      0
+    ],
+    [
+      307,
+      1
+    ],
+    [
+      307,
+      2
+    ],
+    [
+      308,
+      0
+    ],
+    [
+      308,
+      1
+    ],
+    [
+      308,
+      2
+    ],
+    [
+      309,
+      0
+    ],
+    [
+      309,
+      1
+    ],
+    [
+      309,
+      2
+    ],
+    [
+      310,
+      0
+    ],
+    [
+      310,
+      1
+    ],
+    [
+      310,
+      2
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      0
+    ],
+    [
+      5,
+      0
+    ],
+    [
+      6,
+      0
+    ],
+    [
+      7,
+      0
+    ],
+    [
+      8,
+      0
+    ],
+    [
+      9,
+      0
+    ],
+    [
+      10,
+      0
+    ],
+    [
+      11,
+      0
+    ],
+    [
+      12,
+      0
+    ],
+    [
+      13,
+      0
+    ],
+    [
+      14,
+      0
+    ],
+    [
+      15,
+      0
+    ],
+    [
+      16,
+      0
+    ]
+  ],
+  "resume_authorization": {
+    "request": "那就用8张5090继续跑modem的完整两轮实验，复用已完成的基线，重点看看新实例上的score和成功率有没有提升。",
+    "at": "2026-10-29T03:36:58.276312+00:00",
+    "max_live_gpus": 8,
+    "baseline_reuse_count": 4,
+    "actor_start": "original1688977",
+    "pilot_checkpoint_not_loaded": true
+  }
+}
