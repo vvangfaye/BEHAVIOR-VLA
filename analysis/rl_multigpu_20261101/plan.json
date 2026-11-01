@@ -1,0 +1,22 @@
+{
+  "created_at": 1793513068.5248942,
+  "instruction": "\u53ef\u4ee5\u7528\u66f4\u591a\u76845090\u8dd1train\u7684",
+  "quota": "spot",
+  "gpus_per_training_job": 4,
+  "training_variants": [
+    "control",
+    "gamma1_ppo",
+    "balanced_ppo",
+    "group_outcome"
+  ],
+  "max_live_gpus_including_existing": 32,
+  "max_total_gpu_hours_including_existing": 512,
+  "max_training_seconds_per_job": 43200,
+  "max_probe_seconds": 900,
+  "max_attempts_per_training_branch": 2,
+  "source_rollouts": "reuse exact original 32 water trajectories",
+  "optimizer_steps_per_branch": 17,
+  "base_checkpoint": "1688977",
+  "before_replacing_single_gpu": "CPU distributed tests, 4 GPU NCCL probe and real-model parity gate",
+  "checkpoint_policy": "Save each accepted update, clean incomplete self-created snapshot directories before resuming, keep one verified committed snapshot and one temporary writer."
+}

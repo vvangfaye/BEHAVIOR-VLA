@@ -1,0 +1,604 @@
+{
+  "upstream_commit": "91a302ec50ddacd1fdabc5859b85e3661d768236",
+  "converted": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261020/smoke01/checkpoint",
+  "code": "/mnt/afs/260010165/behavior_1k/code_snapshots/b1k-video1688977-20261013",
+  "runtime": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306",
+  "original": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/checkpoints/original1688977",
+  "tokenizer": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/openpi-cache/big_vision/paligemma_tokenizer.model",
+  "original_metadata_sha256": "1a59e30e43f7af9b868e032aaaf3245a8701602207b08ddf1bde8edf7c1fd2dd",
+  "supplemental_library": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/library_snapshots/behavior-libxml-repair3-20261008-011710",
+  "supplemental_library_sha256": "66e5e790156270c67a266b49b115228f8159f032b2f336b61f4a32b511a0a8ec",
+  "original_source_sha256": {
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/eval.py": "91ad12f0ba569f51f3f703eeef7bdd4ffd245752b77d2a6061297ca72ff5f3a6",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/evaluator.py": "4227473e56907070ea02c84dcb5d8825f3069ad87b00acab9814884c7556cff7",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/single_env.py": "e1d55a61b38249b9ec4dd68930241d7be1fdad4771aaa689cd9532a8e4e2ac59",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/r1pro.yaml": "a98fa8a81472adfecfb642778d4d7a01e20131be7f70824e0ae095d665cdbb93",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/object_states/next_to.py": "d43126dc0a3916549158c02d15d4c0b5417f4f7fbb4186111e4053b2a9c35aff",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/object_states/on_top.py": "5c05e3e5640bf3b5fc81decb629be3d9d4603df69b53ce040ce8f77862ba0efd",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/object_states/toggle.py": "21686ecdbf860f6304f284e1ea51d6c37d9f77239125caa05df522aeb80c2629",
+    "openpi/src/openpi/configs/tasks/b1k.py": "77f4b4536e3499095a29382f03a7069e3e10599e00752ebdb2f195ce0010421e"
+  },
+  "expected_original_trainable_sha256": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+  "accepted_gate": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/retry07/gpu_continuation/results/gate.json",
+  "action_interface": {
+    "gripper_open_tolerance": 0.0,
+    "description": "original execution interface; no snapping"
+  },
+  "experiment": "rlinf_multitask_water_20261029",
+  "task": "bringing_water",
+  "remote_root": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water",
+  "output": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results",
+  "seed": 0,
+  "model_seed": 0,
+  "policy_precision": "float32",
+  "eval_policy": "deterministic 10-step ODE with explicit NumPy initial noise; greedy generated subtasks",
+  "eval_instances": [
+    301,
+    302,
+    303,
+    304,
+    305,
+    306,
+    307,
+    308,
+    309,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    319,
+    320
+  ],
+  "eval_steps": 14157,
+  "train_steps_per_round": 14157,
+  "train_instances": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16
+  ],
+  "rounds": 1,
+  "train_seeds": [
+    [
+      290170,
+      290171,
+      290172,
+      290173,
+      290174,
+      290175,
+      290176,
+      290177,
+      290178,
+      290179,
+      290180,
+      290181,
+      290182,
+      290183,
+      290184,
+      290185,
+      290186,
+      290187,
+      290188,
+      290189,
+      290190,
+      290191,
+      290192,
+      290193,
+      290194,
+      290195,
+      290196,
+      290197,
+      290198,
+      290199,
+      290200,
+      290201
+    ]
+  ],
+  "evaluation": {
+    "cases": [
+      [
+        1,
+        0
+      ],
+      [
+        2,
+        0
+      ],
+      [
+        3,
+        0
+      ],
+      [
+        4,
+        0
+      ],
+      [
+        301,
+        0
+      ],
+      [
+        302,
+        0
+      ],
+      [
+        303,
+        0
+      ],
+      [
+        304,
+        0
+      ],
+      [
+        305,
+        0
+      ],
+      [
+        306,
+        0
+      ],
+      [
+        307,
+        0
+      ],
+      [
+        308,
+        0
+      ],
+      [
+        309,
+        0
+      ],
+      [
+        310,
+        0
+      ],
+      [
+        311,
+        0
+      ],
+      [
+        312,
+        0
+      ],
+      [
+        313,
+        0
+      ],
+      [
+        314,
+        0
+      ],
+      [
+        315,
+        0
+      ],
+      [
+        316,
+        0
+      ],
+      [
+        317,
+        0
+      ],
+      [
+        318,
+        0
+      ],
+      [
+        319,
+        0
+      ],
+      [
+        320,
+        0
+      ]
+    ],
+    "training_cases": [
+      [
+        1,
+        0
+      ],
+      [
+        2,
+        0
+      ],
+      [
+        3,
+        0
+      ],
+      [
+        4,
+        0
+      ]
+    ],
+    "heldout_cases": [
+      [
+        301,
+        0
+      ],
+      [
+        302,
+        0
+      ],
+      [
+        303,
+        0
+      ],
+      [
+        304,
+        0
+      ],
+      [
+        305,
+        0
+      ],
+      [
+        306,
+        0
+      ],
+      [
+        307,
+        0
+      ],
+      [
+        308,
+        0
+      ],
+      [
+        309,
+        0
+      ],
+      [
+        310,
+        0
+      ],
+      [
+        311,
+        0
+      ],
+      [
+        312,
+        0
+      ],
+      [
+        313,
+        0
+      ],
+      [
+        314,
+        0
+      ],
+      [
+        315,
+        0
+      ],
+      [
+        316,
+        0
+      ],
+      [
+        317,
+        0
+      ],
+      [
+        318,
+        0
+      ],
+      [
+        319,
+        0
+      ],
+      [
+        320,
+        0
+      ]
+    ],
+    "checkpoints": [
+      "original1688977",
+      "after_17_updates"
+    ],
+    "primary": "20 distinct held-out instances, each seed 0"
+  },
+  "optimizer": {
+    "actor_lr": 1e-07,
+    "value_lr": 0.0001,
+    "weight_decay": 0.01,
+    "microbatch_chunks": 1,
+    "accumulate_chunks": null,
+    "epochs_per_round": 1,
+    "clip_ratio": 0.2,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "kl_target": 0.01,
+    "shuffle_chunks": true,
+    "shuffle_seed": 602410,
+    "kl_check": "whole current rollout batch after each candidate optimizer step; restore pre-step parameters and optimizer on violation",
+    "updates_per_round": [
+      17
+    ],
+    "partition": "One shuffled pass per round; every chunk once, partitioned into exactly 17 optimizer steps"
+  },
+  "critic_warmup": {
+    "epochs": 100,
+    "learning_rate": 0.0001,
+    "batch_size": 64,
+    "seed": 20261028,
+    "validation_stride": 5,
+    "max_samples_per_trajectory": 32,
+    "source": "Only this task first 32 online trajectories; no transferred critic",
+    "finite_horizon": true,
+    "refresh_values_before_first_gae": true
+  },
+  "critic_initialization": "Fresh original-model value head; never load radio critic; fit on modem round 1 before actor updates",
+  "goal_contract": {
+    "goals": [
+      "bottle_1_on_table",
+      "bottle_2_on_table",
+      "fridge_closed"
+    ],
+    "predicates": [
+      {
+        "name": "bottle_1_on_table",
+        "predicate": "ontop",
+        "arguments": [
+          "bottle.n.01_1",
+          "coffee_table.n.01_1"
+        ]
+      },
+      {
+        "name": "bottle_2_on_table",
+        "predicate": "ontop",
+        "arguments": [
+          "bottle.n.01_2",
+          "coffee_table.n.01_1"
+        ]
+      },
+      {
+        "name": "fridge_closed",
+        "predicate": "open",
+        "arguments": [
+          "electric_refrigerator.n.01_1"
+        ],
+        "negated": true
+      }
+    ],
+    "bddl_sha256": "90e7602fbec064f90c21e7921f582209b2a7a3436afd823231166c69ae489297",
+    "read_only": true
+  },
+  "shaping": {
+    "enabled": true,
+    "beta": 1.0,
+    "gamma": 0.99,
+    "potential": "number of currently satisfied three task goals",
+    "boundary": "action chunk, same gamma as GAE",
+    "terminal_phi": 0.0,
+    "timeout_is_terminal": true,
+    "task_reward_multiplier": 10.0,
+    "formula": "beta * (gamma * phi_next - phi_current); phi_next=0 at success or finite-horizon timeout",
+    "evaluation_shaping": false
+  },
+  "initialization_timeout_seconds": 1800,
+  "protocol": {
+    "max_initialization_attempts_per_incomplete_case": 2,
+    "episodes_per_round": 32,
+    "total_training_episodes": 32,
+    "baseline_episodes": 24,
+    "final_episodes": 24,
+    "max_new_episodes": 80,
+    "no_completed_episode_retries": true,
+    "new_baseline_episodes": 24
+  },
+  "runtime_storage": {
+    "max_persistent_bytes": 30064771072,
+    "shared_budget_roots": [
+      "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results"
+    ],
+    "base_weights": "reuse existing AFS; no full copies",
+    "keep_optimizer": "one completed round; 32 rollout files already present",
+    "cache_location": "node-local /tmp",
+    "core_dump_limit_bytes": 0
+  },
+  "source_identity": {
+    "frozen_hash": "732f7442cf1acc5c1dbe95a8e1aac2e072315ceabd2892fe9e9ae09bf2454324",
+    "cold_trainable_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+    "task_bddl_sha256": "90e7602fbec064f90c21e7921f582209b2a7a3436afd823231166c69ae489297"
+  },
+  "phase_order": [
+    "baseline",
+    "sample1",
+    "train1",
+    "final"
+  ],
+  "phase_limits_seconds": {
+    "baseline": 21600,
+    "sample1": 21600,
+    "train1": 172800,
+    "final": 21600
+  },
+  "max_live_gpus": 8,
+  "max_total_gpu_hours": 160,
+  "max_wall_hours": 168,
+  "max_attempts_per_phase": 2,
+  "authorization": {
+    "request": "再用多个任务说明下目前的RL是有效的",
+    "date": "2026-10-29",
+    "purpose": "Test, rather than assume, multi-task improvement",
+    "automatic_private_code_upload": true,
+    "global_new_campaign_concurrency": 8,
+    "other_projects_unchanged": true
+  },
+  "dependencies": [
+    {
+      "job": "b1k-mid-1028-t0a1",
+      "uid": "40fa7a27b2ec43a0a8c2399cb5fc526a"
+    },
+    {
+      "job": "b1k-mid-1028-e1a1",
+      "uid": "d63a23af89404ce781f19d0b4cfc78cf"
+    }
+  ],
+  "rules": {
+    "snapshot": "2026-09-11",
+    "online_refresh": "Feishu source inaccessible on 2026-10-29; 2026-09-11 snapshot retained, actual quota queried at every submit",
+    "standard_limit": 4,
+    "prefer_unused_reserved_else_spot": true
+  },
+  "comparisons": {
+    "primary": "heldout mean score and success rate, paired initial states",
+    "no_checkpoint_selection": true,
+    "report_negative_results": true,
+    "historical_radio_and_modem": "separate reference panels; their settings differ"
+  },
+  "dependency_status_file": "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/rlinf_adaptation_20261020/subtask_reward_ppo_20261028/latest_status.json",
+  "dependency_campaign_directory": "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/rlinf_adaptation_20261020/subtask_reward_ppo_20261028",
+  "task_prompt": "Retrieve the two bottles from the refrigerator in the kitchen, bring them to the living room, and place both on the coffee table. Make sure the refrigerator is closed when you finish.",
+  "task_prompt_source": "/mnt/afs/260010165/behavior_1k/code_snapshots/b1k-video1688977-20261013/openpi/src/openpi/configs/tasks/b1k.py",
+  "task_prompt_source_sha256": "77f4b4536e3499095a29382f03a7069e3e10599e00752ebdb2f195ce0010421e",
+  "parallel_workers": 8,
+  "worker_prefix": "m1_",
+  "generation": "multitask_pilot_v1",
+  "evaluation_runtime_order": [
+    [
+      301,
+      0
+    ],
+    [
+      302,
+      0
+    ],
+    [
+      303,
+      0
+    ],
+    [
+      304,
+      0
+    ],
+    [
+      305,
+      0
+    ],
+    [
+      306,
+      0
+    ],
+    [
+      307,
+      0
+    ],
+    [
+      308,
+      0
+    ],
+    [
+      309,
+      0
+    ],
+    [
+      310,
+      0
+    ],
+    [
+      311,
+      0
+    ],
+    [
+      312,
+      0
+    ],
+    [
+      313,
+      0
+    ],
+    [
+      314,
+      0
+    ],
+    [
+      315,
+      0
+    ],
+    [
+      316,
+      0
+    ],
+    [
+      317,
+      0
+    ],
+    [
+      318,
+      0
+    ],
+    [
+      319,
+      0
+    ],
+    [
+      320,
+      0
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      0
+    ]
+  ],
+  "task_id": 17,
+  "job_prefix": "b1k-mtv-1029-water",
+  "aoss_prefix": "behavior1k/rlinf-multitask-20261029/water/",
+  "eval_seeds": [
+    0
+  ],
+  "metadata_verified": true,
+  "storage_admission": {
+    "account_root": "/mnt/afs/260010165",
+    "quota_bytes": 2000000000000,
+    "scan_timeout_seconds": 900,
+    "gate": "baseline rank 0 must pass before parallel expansion"
+  }
+}

@@ -1,0 +1,503 @@
+{
+  "experiment": "rl_scheme_comparison_20261101",
+  "created_at": "2026-11-01T03:41:13.371749+00:00",
+  "authorization": "User asked to use free 5090 machines to explore better RL schemes; existing experiment and expert-data deletion hold preserved.",
+  "task": "bringing_water",
+  "checkpoint": "original1688977",
+  "training_receipts": 32,
+  "training_policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+  "source_output": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results",
+  "source_control_checkpoint": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/checkpoints/round_01",
+  "variants": {
+    "gamma1_ppo": {
+      "description": "PPO without temporal discount; reward-shaping gamma changes consistently to 1",
+      "gamma": 1.0,
+      "weighting": "chunks",
+      "advantage": "gae"
+    },
+    "balanced_ppo": {
+      "description": "Existing PPO, with equal total loss weight per trajectory",
+      "gamma": 0.99,
+      "weighting": "trajectories",
+      "advantage": "gae"
+    },
+    "group_outcome": {
+      "description": "Critic-free group-relative final success, with equal total loss weight per trajectory",
+      "gamma": null,
+      "weighting": "trajectories",
+      "advantage": "group_relative_success"
+    }
+  },
+  "requested_updates": 17,
+  "actor_lr": 1e-07,
+  "value_lr": 0.0001,
+  "kl_target": 0.01,
+  "eval_cases": [
+    [
+      301,
+      0
+    ],
+    [
+      301,
+      1
+    ],
+    [
+      302,
+      0
+    ],
+    [
+      302,
+      1
+    ],
+    [
+      303,
+      0
+    ],
+    [
+      303,
+      1
+    ],
+    [
+      304,
+      0
+    ],
+    [
+      304,
+      1
+    ],
+    [
+      305,
+      0
+    ],
+    [
+      305,
+      1
+    ],
+    [
+      306,
+      0
+    ],
+    [
+      306,
+      1
+    ],
+    [
+      307,
+      0
+    ],
+    [
+      307,
+      1
+    ],
+    [
+      308,
+      0
+    ],
+    [
+      308,
+      1
+    ],
+    [
+      309,
+      0
+    ],
+    [
+      309,
+      1
+    ],
+    [
+      310,
+      0
+    ],
+    [
+      310,
+      1
+    ],
+    [
+      311,
+      0
+    ],
+    [
+      311,
+      1
+    ],
+    [
+      312,
+      0
+    ],
+    [
+      312,
+      1
+    ],
+    [
+      313,
+      0
+    ],
+    [
+      313,
+      1
+    ],
+    [
+      314,
+      0
+    ],
+    [
+      314,
+      1
+    ],
+    [
+      315,
+      0
+    ],
+    [
+      315,
+      1
+    ],
+    [
+      316,
+      0
+    ],
+    [
+      316,
+      1
+    ],
+    [
+      317,
+      0
+    ],
+    [
+      317,
+      1
+    ],
+    [
+      318,
+      0
+    ],
+    [
+      318,
+      1
+    ],
+    [
+      319,
+      0
+    ],
+    [
+      319,
+      1
+    ],
+    [
+      320,
+      0
+    ],
+    [
+      320,
+      1
+    ]
+  ],
+  "new_baseline_cases": [
+    [
+      301,
+      1
+    ],
+    [
+      302,
+      1
+    ],
+    [
+      303,
+      1
+    ],
+    [
+      304,
+      1
+    ],
+    [
+      305,
+      1
+    ],
+    [
+      306,
+      1
+    ],
+    [
+      307,
+      1
+    ],
+    [
+      308,
+      1
+    ],
+    [
+      309,
+      1
+    ],
+    [
+      310,
+      1
+    ],
+    [
+      311,
+      1
+    ],
+    [
+      312,
+      1
+    ],
+    [
+      313,
+      1
+    ],
+    [
+      314,
+      1
+    ],
+    [
+      315,
+      1
+    ],
+    [
+      316,
+      1
+    ],
+    [
+      317,
+      1
+    ],
+    [
+      318,
+      1
+    ],
+    [
+      319,
+      1
+    ],
+    [
+      320,
+      1
+    ]
+  ],
+  "reuse_baseline_cases": [
+    [
+      301,
+      0
+    ],
+    [
+      302,
+      0
+    ],
+    [
+      303,
+      0
+    ],
+    [
+      304,
+      0
+    ],
+    [
+      305,
+      0
+    ],
+    [
+      306,
+      0
+    ],
+    [
+      307,
+      0
+    ],
+    [
+      308,
+      0
+    ],
+    [
+      309,
+      0
+    ],
+    [
+      310,
+      0
+    ],
+    [
+      311,
+      0
+    ],
+    [
+      312,
+      0
+    ],
+    [
+      313,
+      0
+    ],
+    [
+      314,
+      0
+    ],
+    [
+      315,
+      0
+    ],
+    [
+      316,
+      0
+    ],
+    [
+      317,
+      0
+    ],
+    [
+      318,
+      0
+    ],
+    [
+      319,
+      0
+    ],
+    [
+      320,
+      0
+    ]
+  ],
+  "control_extra_cases": [
+    [
+      301,
+      1
+    ],
+    [
+      302,
+      1
+    ],
+    [
+      303,
+      1
+    ],
+    [
+      304,
+      1
+    ],
+    [
+      305,
+      1
+    ],
+    [
+      306,
+      1
+    ],
+    [
+      307,
+      1
+    ],
+    [
+      308,
+      1
+    ],
+    [
+      309,
+      1
+    ],
+    [
+      310,
+      1
+    ],
+    [
+      311,
+      1
+    ],
+    [
+      312,
+      1
+    ],
+    [
+      313,
+      1
+    ],
+    [
+      314,
+      1
+    ],
+    [
+      315,
+      1
+    ],
+    [
+      316,
+      1
+    ],
+    [
+      317,
+      1
+    ],
+    [
+      318,
+      1
+    ],
+    [
+      319,
+      1
+    ],
+    [
+      320,
+      1
+    ]
+  ],
+  "max_new_gpu_jobs": 32,
+  "max_total_gpu_hours": 384,
+  "max_wall_hours": 48,
+  "train_timeout_seconds": 86400,
+  "eval_timeout_seconds": 5400,
+  "attempt_cap": 2,
+  "remote_root": "/mnt/afs/260010165/behavior_1k/rl_scheme_comparison_20261101",
+  "aoss_prefix": "behavior1k/rl-scheme-comparison-20261101/",
+  "storage_new_budget_gib": 64,
+  "storage_existing_budget_gib": 64,
+  "storage_margin_gib": 20,
+  "primary_outcomes": [
+    "held-out success rate",
+    "held-out mean score"
+  ],
+  "report_all_variants": true,
+  "limitations": [
+    "one fixed on-policy batch and one training seed",
+    "group_outcome changes advantage estimator and trajectory weighting jointly"
+  ],
+  "references": [
+    "https://rlinf.readthedocs.io/en/release-v0.2/rst_source/examples/embodied/pi0.html"
+  ],
+  "base_source_sha256": {
+    "baseline_driver.py": "681e349568c7c1554ce16cf08b52493d075f2b890a3739d5c872aac95b1bb43d",
+    "bootstrap.py": "6a3af8e8727f8103f34a50a3d419f5f2347e3aed8a31e130984c24f4603f02eb",
+    "capacity_admission.py": "8822f38417a646518e5ddb1e8145b287dea96525b13c15e0ed2766da349985b2",
+    "common.py": "d05e5d7ec669b80d4949a1829938504d642550c67b2fe515b424d0782c52e12c",
+    "driver.py": "681e349568c7c1554ce16cf08b52493d075f2b890a3739d5c872aac95b1bb43d",
+    "eval_utils.py": "a2f592001111df23beb579534c3ea86945492515f6db9dcc9bfbe6210a6bc6f7",
+    "experiment.py": "863dfac67b87dcfe2cbddc38a12a3859cab6624809adcf0ae1cb18f3eed811df",
+    "goals.py": "1e666f7c473e69bb3d0e86091df34f49d4c85b28c434f153c72eb2e7eea25aa0",
+    "helpers.py": "ca4bf0a9f9af53031502d5c02045aa0385ce94209be92100414616cc7b046f1e",
+    "resource_watch.py": "80123e5dd94994db99151c2701332e64a45b2308f6c13c7912dac991c0dd4021",
+    "simulator.py": "73160e6f2532cafd5ad35c7d2aeec9129bdd2649751734f0fc09013d28da7f8a",
+    "storage_guard.py": "c2977a3896f214a2a68a4dea72dcf41fcd88b1b1996cb3cef0f0e42fc55a11b6",
+    "training.py": "ff35bf3f660bf16695b53c0d57129d4b022d62d156c2a3993cba478588165b1b",
+    "b1k_rlinf/action_interface.py": "f347a7b8e3773b519590cec9cf8df39c5181f30905955c0a648a3547894c1139",
+    "b1k_rlinf/export.py": "21700c5a7551a379fbb1390af08dd0e8929dd98d4b632c79b79f2eae24fd9054",
+    "b1k_rlinf/factory.py": "78c0071b41d16039c7d0b51c0ee875f2ab904e348ad5443a733e3bee00d8611a",
+    "b1k_rlinf/io.py": "7df1e36327197a6603078c1e374a3a39ff6e288cfdb0c2a079ea4502ae1a0db1",
+    "b1k_rlinf/launch.py": "7f30dc81f532d29d3efd8cbb7c68a4534ce8fe4e9517f552ff9e971e967083f5",
+    "b1k_rlinf/model.py": "d633a455b304f3300132081aeeb0e9d1a980d8616190ab0a2fb49622cb12fe40",
+    "b1k_rlinf/precision.py": "9f26df0e9a1a8a105db113d37fea278284b7b3aaa3dd07a53e94f3d249fc9dea",
+    "b1k_rlinf/prepare.py": "e713208920f0786d55562a0a804f31b25d6b82fe998db5ef5767605f528b3cb8",
+    "b1k_rlinf/reference_check.py": "2f05d627d0d7aeafa68e1b792a8525a4167bc9c2c83d573e932d9dcd83e4d3a8",
+    "b1k_rlinf/tokenizer.py": "068385b7d66f3d233f6487b1719f2ff78cbc582a84ef42812a50ed0d4ddb50b7",
+    "b1k_rlinf/verify.py": "6ba790038bdcf34e97760d2df5e2499a417212b59d6cf3fe478b72065e1c0efe",
+    "b1k_rlinf/__init__.py": "c17ba0de3a2b2b85273864e8176953f58dcf7de20a415cd187794fa5e0a9d9a5"
+  },
+  "max_total_comparison_and_original_gpus": 32,
+  "reserve_original_until_complete": 8,
+  "storage_bounds": {
+    "comparison_total_budget_bytes": 55834574848,
+    "training_worker_limit_bytes": 17179869184,
+    "evaluation_worker_limit_bytes": 536870912,
+    "derivation": "3 training outputs x 8 GiB + 160 completed evaluation outputs x estimated 128 MiB + 4 GiB metadata/startup allowance = 48 GiB. Measured maximum complete evaluation output is 45.8 MiB; each worker retains a 512 MiB ceiling for the existing 256 MiB startup reservation.",
+    "estimated_completed_evaluation_bytes": 134217728
+  },
+  "combined_training_storage": true
+}
