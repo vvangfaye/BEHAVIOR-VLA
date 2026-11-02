@@ -1,0 +1,198 @@
+{
+  "experiment": "rl_cross_task_trash_20261102",
+  "created_at": 1793586379.1506238,
+  "authorization": "User asked to test the current combined trajectory-weighted gamma=1 method on other tasks.",
+  "task_label": "trash",
+  "task": "picking_up_trash",
+  "source_campaign": "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/rlinf_adaptation_20261020/multitask_validation_20261029/trash",
+  "variant": "balanced_gamma1_ppo",
+  "start_checkpoint": "original1688977",
+  "source_trajectories": 32,
+  "source_chunks": 15526,
+  "source_successes": 2,
+  "optimizer_steps": 17,
+  "actor_lr": 1e-07,
+  "value_lr": 0.0001,
+  "gae_lambda": 0.95,
+  "gamma": 1.0,
+  "shaping_gamma": 1.0,
+  "weighting": "N/(32*T_i)",
+  "train_gpus": 4,
+  "eval_parallel_gpus": 6,
+  "max_total_live_gpus": 32,
+  "quota_type": "spot",
+  "train_timeout_seconds": 43200,
+  "eval_timeout_seconds": 5400,
+  "attempt_cap": 2,
+  "max_total_gpu_hours": 192,
+  "max_wall_hours": 48,
+  "eval_cases": [
+    [
+      301,
+      0
+    ],
+    [
+      302,
+      0
+    ],
+    [
+      303,
+      0
+    ],
+    [
+      304,
+      0
+    ],
+    [
+      305,
+      0
+    ],
+    [
+      306,
+      0
+    ],
+    [
+      307,
+      0
+    ],
+    [
+      308,
+      0
+    ],
+    [
+      309,
+      0
+    ],
+    [
+      310,
+      0
+    ],
+    [
+      311,
+      0
+    ],
+    [
+      312,
+      0
+    ],
+    [
+      313,
+      0
+    ],
+    [
+      314,
+      0
+    ],
+    [
+      315,
+      0
+    ],
+    [
+      316,
+      0
+    ],
+    [
+      317,
+      0
+    ],
+    [
+      318,
+      0
+    ],
+    [
+      319,
+      0
+    ],
+    [
+      320,
+      0
+    ]
+  ],
+  "evaluation_variants": [
+    "balanced_gamma1_ppo",
+    "control"
+  ],
+  "control_checkpoint": {
+    "trainable_sha256": "4f3b856b8b1e211ce05e6f6ae8df86076ffaabb6335630293416ddec4b64ea99",
+    "round_trip": true,
+    "model_bytes": 1731476107,
+    "optimizer_bytes": 3462991691,
+    "directory": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/trash/results/checkpoints/round_01",
+    "round": 1,
+    "optimizer_steps": 17,
+    "cumulative_optimizer_steps": 17,
+    "reward_contract_sha256": "ad699314fb428e1b0be6884fae27db4afee37a3b547c2d432f302416a40be97d",
+    "collection_policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c"
+  },
+  "control_needs_evaluation": false,
+  "reuse_existing_baselines": true,
+  "no_new_training_rollouts": true,
+  "remote_root": "/mnt/afs/260010165/behavior_1k/rl_cross_task_20261102/trash",
+  "aoss_prefix": "behavior1k/rl-cross-task-20261102/trash/",
+  "training_storage_limit_bytes": 17179869184,
+  "evaluation_storage_limit_bytes": 536870912,
+  "campaign_storage_reserve_bytes": 103079215104,
+  "other_remaining_commitments_bytes": 38654705664,
+  "storage_margin_bytes": 21474836480,
+  "storage_admission": {
+    "account_root": "/mnt/afs/260010165",
+    "quota_bytes": 2000000000000,
+    "scan_timeout_seconds": 900,
+    "gate": "baseline rank 0 must pass before parallel expansion"
+  },
+  "source_rollout_receipts_sha256": "5870762940aeca8df53215934daf8f5fa34e14e0a3a40812d248c8f12ecfda2d",
+  "runtime_sha256": {
+    "bootstrap.py": "58a73a0dc38d6ca41db2ab1f87bd07d1e0e6ffab5e4440475d673000d1407988",
+    "capacity_admission.py": "8822f38417a646518e5ddb1e8145b287dea96525b13c15e0ed2766da349985b2",
+    "common.py": "d05e5d7ec669b80d4949a1829938504d642550c67b2fe515b424d0782c52e12c",
+    "comparison_driver.py": "201eb39c28818801d7f219781c5f8ebb699f759ca73557e90269327dfdf256a7",
+    "distributed_driver.py": "b68b3028d1adab655512e4cde661b614f842dd8f0073b15adb4d86fc31a63177",
+    "eval_utils.py": "a2f592001111df23beb579534c3ea86945492515f6db9dcc9bfbe6210a6bc6f7",
+    "experiment.py": "863dfac67b87dcfe2cbddc38a12a3859cab6624809adcf0ae1cb18f3eed811df",
+    "goals.py": "1e666f7c473e69bb3d0e86091df34f49d4c85b28c434f153c72eb2e7eea25aa0",
+    "helpers.py": "ca4bf0a9f9af53031502d5c02045aa0385ce94209be92100414616cc7b046f1e",
+    "kl_batch.py": "a84b2d78eeaeeb146fe7e0a45d3ec1c95fd019b829ed50f520fca40e39d19b49",
+    "parallel_training.py": "c8e00529ed714548cc6a301291d99366eb571c6ea6b9f5712c1dd179f8c2582b",
+    "resource_watch.py": "80123e5dd94994db99151c2701332e64a45b2308f6c13c7912dac991c0dd4021",
+    "simulator.py": "73160e6f2532cafd5ad35c7d2aeec9129bdd2649751734f0fc09013d28da7f8a",
+    "single_bootstrap.py": "4ed120d76132b528d6e2246f17f98d4359620f05a4d87dfe389704203063b3cb",
+    "storage_guard.py": "c2977a3896f214a2a68a4dea72dcf41fcd88b1b1996cb3cef0f0e42fc55a11b6",
+    "training.py": "ff35bf3f660bf16695b53c0d57129d4b022d62d156c2a3993cba478588165b1b",
+    "variant_update.py": "c8bf761c841ea04909ecca330e9092ef28316e39b01bb8ccc332a97282e287c2",
+    "b1k_rlinf/action_interface.py": "f347a7b8e3773b519590cec9cf8df39c5181f30905955c0a648a3547894c1139",
+    "b1k_rlinf/export.py": "21700c5a7551a379fbb1390af08dd0e8929dd98d4b632c79b79f2eae24fd9054",
+    "b1k_rlinf/factory.py": "78c0071b41d16039c7d0b51c0ee875f2ab904e348ad5443a733e3bee00d8611a",
+    "b1k_rlinf/io.py": "7df1e36327197a6603078c1e374a3a39ff6e288cfdb0c2a079ea4502ae1a0db1",
+    "b1k_rlinf/launch.py": "7f30dc81f532d29d3efd8cbb7c68a4534ce8fe4e9517f552ff9e971e967083f5",
+    "b1k_rlinf/model.py": "d633a455b304f3300132081aeeb0e9d1a980d8616190ab0a2fb49622cb12fe40",
+    "b1k_rlinf/precision.py": "9f26df0e9a1a8a105db113d37fea278284b7b3aaa3dd07a53e94f3d249fc9dea",
+    "b1k_rlinf/prepare.py": "e713208920f0786d55562a0a804f31b25d6b82fe998db5ef5767605f528b3cb8",
+    "b1k_rlinf/reference_check.py": "2f05d627d0d7aeafa68e1b792a8525a4167bc9c2c83d573e932d9dcd83e4d3a8",
+    "b1k_rlinf/tokenizer.py": "068385b7d66f3d233f6487b1719f2ff78cbc582a84ef42812a50ed0d4ddb50b7",
+    "b1k_rlinf/verify.py": "6ba790038bdcf34e97760d2df5e2499a417212b59d6cf3fe478b72065e1c0efe",
+    "b1k_rlinf/__init__.py": "c17ba0de3a2b2b85273864e8176953f58dcf7de20a415cd187794fa5e0a9d9a5"
+  },
+  "baseline_result_sha256": {
+    "i301_s0": "8f71a8f6f6cbcb82f2d0fc380d025b88970279af30b7fe79efe1c797e7bde8dc",
+    "i302_s0": "bdbd3747c3682c350ac1ce842f3148bc98388a7e226f1208e334b6adcb60e440",
+    "i303_s0": "688cc4848b686e15092963ab81ccffdfba850162a234ad90d287c7173b00dd29",
+    "i304_s0": "60c9a36ed7377765be036f7fd98ee3e0555eb4fd6919e0de6a01e15aa75f25f9",
+    "i305_s0": "ee6fa984a995b0a2541fc6cbc1c91cd7629a1748bb3a148bc7d52ad5d9c985e6",
+    "i306_s0": "b689fcc7348a5e62551d4d8cb418f722166f682bd6373765d258df1c54884584",
+    "i307_s0": "6e46e2562ef9f3efff07f23fe38d3d2111e47927756a1a5c58bbb2908de71026",
+    "i308_s0": "002da7cd69e623ca3e413063663c2899f0e7fdd05fd1aac8ba23d1aa56853923",
+    "i309_s0": "f929f71781f35ffd783f5e25d43946284966ed01b2491650d87bc652ffe031be",
+    "i310_s0": "818e0183ed3588e0f2e79a2bcbfdca845a4cf600390e1bdc52d88c1ae45c6ce6",
+    "i311_s0": "88a793e6352f478223ca2baf51903310eacc1abd8f06f24b6d636b33d2f4a309",
+    "i312_s0": "5de2039c7d4198a5b20be9f70ed551811f3cf93092d319e6deb43715acf02bab",
+    "i313_s0": "c4a670ff14866186eb6f44f6702c2602fca352bf0ecb2f99c191b7928e5c156d",
+    "i314_s0": "f819d68d593c4794a5fe4ba913bdd4335248f36e9fd793218b14402bde551aa5",
+    "i315_s0": "fa1804dbc4114942ba168bc62f4f0a06cf6d809e411d5497de3d0cbcc99f2cf5",
+    "i316_s0": "4ee3175a2279f06b6931116555798007f745a14b0cacb07523e1e7a47961a6d1",
+    "i317_s0": "62d750f9e9b394a0d7637421b9a581854712bc2e6d5736d47b45da381a5eea22",
+    "i318_s0": "e8a04908a17da3c2b951a2df3b02b09257912bd62f1b5e52d3edc3dc8ed7eecd",
+    "i319_s0": "adfdb89c9df3073b000862348a052bb6bc271e5077527e868f468e52fa73926d",
+    "i320_s0": "e8781e3bfbb6594b28029e09a90283a304d2f274e6d4419dfea29d920df2da51"
+  },
+  "restored_input_budget_bytes": 12884901888
+}

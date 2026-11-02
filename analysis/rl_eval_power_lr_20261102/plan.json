@@ -1,0 +1,1358 @@
+{
+  "experiment": "rl_eval_power_lr_20261102",
+  "created_at": 1793613256.5179873,
+  "authorization": "User 2026-11-02: \"请帮我分别做1和2\" — (1) make evaluation accurate: about 150-300 paired episodes per arm, iterate on a short task first; (2) make updates bigger: scan actor LR 1e-6..5e-6 and check clip_fraction / KL against the 0.01 rollback line. Durable research authorization: AGENTS.md (2026-10-20); prefer free Reserved, else Spot (2026-10-24).",
+  "task": "installing_a_modem",
+  "task_label": "modem",
+  "start_checkpoint": "original1688977",
+  "source_campaign": "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/rl_cross_task_20261102/modem",
+  "source_plan_sha256": "ffea29fd18c56bc05951c8562e48cc44590c441e3210601b062143ea5422cf97",
+  "source_rollout_receipts_sha256": "095868f48cb34ef1e8740b01fa2b366b5f493dba2784720bc462a2f2b1bb407a",
+  "restored_receipts_sha256": "fa6a9e1eb5947ff595477a9b910b474e720505e3afc47dacad33708206797995",
+  "source_trajectories": 32,
+  "source_chunks": 5677,
+  "training_arms": {
+    "lr1e7": {
+      "actor_lr": 1e-07,
+      "evaluate": false,
+      "purpose": "same-runtime KL/clip reference at the current LR"
+    },
+    "lr1e6": {
+      "actor_lr": 1e-06,
+      "evaluate": true
+    },
+    "lr5e6": {
+      "actor_lr": 5e-06,
+      "evaluate": true
+    },
+    "lr5e7": {
+      "actor_lr": 5e-07,
+      "evaluate": true,
+      "purpose": "largest LR expected to accept all 17 updates under the 0.01 KL guard (uses all 32-rollout data)"
+    }
+  },
+  "training_common": {
+    "variant": "control",
+    "value_lr": 0.0001,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "optimizer_steps": 17,
+    "clip_ratio": 0.2,
+    "kl_target": 0.01,
+    "kl_rollback": true,
+    "allow_kl_early_stop": true,
+    "train_gpus": 4,
+    "kl_batch_size": 8
+  },
+  "eval_cases": [
+    [
+      301,
+      0
+    ],
+    [
+      301,
+      1
+    ],
+    [
+      301,
+      2
+    ],
+    [
+      301,
+      3
+    ],
+    [
+      301,
+      4
+    ],
+    [
+      301,
+      5
+    ],
+    [
+      301,
+      6
+    ],
+    [
+      301,
+      7
+    ],
+    [
+      301,
+      8
+    ],
+    [
+      301,
+      9
+    ],
+    [
+      302,
+      0
+    ],
+    [
+      302,
+      1
+    ],
+    [
+      302,
+      2
+    ],
+    [
+      302,
+      3
+    ],
+    [
+      302,
+      4
+    ],
+    [
+      302,
+      5
+    ],
+    [
+      302,
+      6
+    ],
+    [
+      302,
+      7
+    ],
+    [
+      302,
+      8
+    ],
+    [
+      302,
+      9
+    ],
+    [
+      303,
+      0
+    ],
+    [
+      303,
+      1
+    ],
+    [
+      303,
+      2
+    ],
+    [
+      303,
+      3
+    ],
+    [
+      303,
+      4
+    ],
+    [
+      303,
+      5
+    ],
+    [
+      303,
+      6
+    ],
+    [
+      303,
+      7
+    ],
+    [
+      303,
+      8
+    ],
+    [
+      303,
+      9
+    ],
+    [
+      304,
+      0
+    ],
+    [
+      304,
+      1
+    ],
+    [
+      304,
+      2
+    ],
+    [
+      304,
+      3
+    ],
+    [
+      304,
+      4
+    ],
+    [
+      304,
+      5
+    ],
+    [
+      304,
+      6
+    ],
+    [
+      304,
+      7
+    ],
+    [
+      304,
+      8
+    ],
+    [
+      304,
+      9
+    ],
+    [
+      305,
+      0
+    ],
+    [
+      305,
+      1
+    ],
+    [
+      305,
+      2
+    ],
+    [
+      305,
+      3
+    ],
+    [
+      305,
+      4
+    ],
+    [
+      305,
+      5
+    ],
+    [
+      305,
+      6
+    ],
+    [
+      305,
+      7
+    ],
+    [
+      305,
+      8
+    ],
+    [
+      305,
+      9
+    ],
+    [
+      306,
+      0
+    ],
+    [
+      306,
+      1
+    ],
+    [
+      306,
+      2
+    ],
+    [
+      306,
+      3
+    ],
+    [
+      306,
+      4
+    ],
+    [
+      306,
+      5
+    ],
+    [
+      306,
+      6
+    ],
+    [
+      306,
+      7
+    ],
+    [
+      306,
+      8
+    ],
+    [
+      306,
+      9
+    ],
+    [
+      307,
+      0
+    ],
+    [
+      307,
+      1
+    ],
+    [
+      307,
+      2
+    ],
+    [
+      307,
+      3
+    ],
+    [
+      307,
+      4
+    ],
+    [
+      307,
+      5
+    ],
+    [
+      307,
+      6
+    ],
+    [
+      307,
+      7
+    ],
+    [
+      307,
+      8
+    ],
+    [
+      307,
+      9
+    ],
+    [
+      308,
+      0
+    ],
+    [
+      308,
+      1
+    ],
+    [
+      308,
+      2
+    ],
+    [
+      308,
+      3
+    ],
+    [
+      308,
+      4
+    ],
+    [
+      308,
+      5
+    ],
+    [
+      308,
+      6
+    ],
+    [
+      308,
+      7
+    ],
+    [
+      308,
+      8
+    ],
+    [
+      308,
+      9
+    ],
+    [
+      309,
+      0
+    ],
+    [
+      309,
+      1
+    ],
+    [
+      309,
+      2
+    ],
+    [
+      309,
+      3
+    ],
+    [
+      309,
+      4
+    ],
+    [
+      309,
+      5
+    ],
+    [
+      309,
+      6
+    ],
+    [
+      309,
+      7
+    ],
+    [
+      309,
+      8
+    ],
+    [
+      309,
+      9
+    ],
+    [
+      310,
+      0
+    ],
+    [
+      310,
+      1
+    ],
+    [
+      310,
+      2
+    ],
+    [
+      310,
+      3
+    ],
+    [
+      310,
+      4
+    ],
+    [
+      310,
+      5
+    ],
+    [
+      310,
+      6
+    ],
+    [
+      310,
+      7
+    ],
+    [
+      310,
+      8
+    ],
+    [
+      310,
+      9
+    ],
+    [
+      311,
+      0
+    ],
+    [
+      311,
+      1
+    ],
+    [
+      311,
+      2
+    ],
+    [
+      311,
+      3
+    ],
+    [
+      311,
+      4
+    ],
+    [
+      311,
+      5
+    ],
+    [
+      311,
+      6
+    ],
+    [
+      311,
+      7
+    ],
+    [
+      311,
+      8
+    ],
+    [
+      311,
+      9
+    ],
+    [
+      312,
+      0
+    ],
+    [
+      312,
+      1
+    ],
+    [
+      312,
+      2
+    ],
+    [
+      312,
+      3
+    ],
+    [
+      312,
+      4
+    ],
+    [
+      312,
+      5
+    ],
+    [
+      312,
+      6
+    ],
+    [
+      312,
+      7
+    ],
+    [
+      312,
+      8
+    ],
+    [
+      312,
+      9
+    ],
+    [
+      313,
+      0
+    ],
+    [
+      313,
+      1
+    ],
+    [
+      313,
+      2
+    ],
+    [
+      313,
+      3
+    ],
+    [
+      313,
+      4
+    ],
+    [
+      313,
+      5
+    ],
+    [
+      313,
+      6
+    ],
+    [
+      313,
+      7
+    ],
+    [
+      313,
+      8
+    ],
+    [
+      313,
+      9
+    ],
+    [
+      314,
+      0
+    ],
+    [
+      314,
+      1
+    ],
+    [
+      314,
+      2
+    ],
+    [
+      314,
+      3
+    ],
+    [
+      314,
+      4
+    ],
+    [
+      314,
+      5
+    ],
+    [
+      314,
+      6
+    ],
+    [
+      314,
+      7
+    ],
+    [
+      314,
+      8
+    ],
+    [
+      314,
+      9
+    ],
+    [
+      315,
+      0
+    ],
+    [
+      315,
+      1
+    ],
+    [
+      315,
+      2
+    ],
+    [
+      315,
+      3
+    ],
+    [
+      315,
+      4
+    ],
+    [
+      315,
+      5
+    ],
+    [
+      315,
+      6
+    ],
+    [
+      315,
+      7
+    ],
+    [
+      315,
+      8
+    ],
+    [
+      315,
+      9
+    ],
+    [
+      316,
+      0
+    ],
+    [
+      316,
+      1
+    ],
+    [
+      316,
+      2
+    ],
+    [
+      316,
+      3
+    ],
+    [
+      316,
+      4
+    ],
+    [
+      316,
+      5
+    ],
+    [
+      316,
+      6
+    ],
+    [
+      316,
+      7
+    ],
+    [
+      316,
+      8
+    ],
+    [
+      316,
+      9
+    ],
+    [
+      317,
+      0
+    ],
+    [
+      317,
+      1
+    ],
+    [
+      317,
+      2
+    ],
+    [
+      317,
+      3
+    ],
+    [
+      317,
+      4
+    ],
+    [
+      317,
+      5
+    ],
+    [
+      317,
+      6
+    ],
+    [
+      317,
+      7
+    ],
+    [
+      317,
+      8
+    ],
+    [
+      317,
+      9
+    ],
+    [
+      318,
+      0
+    ],
+    [
+      318,
+      1
+    ],
+    [
+      318,
+      2
+    ],
+    [
+      318,
+      3
+    ],
+    [
+      318,
+      4
+    ],
+    [
+      318,
+      5
+    ],
+    [
+      318,
+      6
+    ],
+    [
+      318,
+      7
+    ],
+    [
+      318,
+      8
+    ],
+    [
+      318,
+      9
+    ],
+    [
+      319,
+      0
+    ],
+    [
+      319,
+      1
+    ],
+    [
+      319,
+      2
+    ],
+    [
+      319,
+      3
+    ],
+    [
+      319,
+      4
+    ],
+    [
+      319,
+      5
+    ],
+    [
+      319,
+      6
+    ],
+    [
+      319,
+      7
+    ],
+    [
+      319,
+      8
+    ],
+    [
+      319,
+      9
+    ],
+    [
+      320,
+      0
+    ],
+    [
+      320,
+      1
+    ],
+    [
+      320,
+      2
+    ],
+    [
+      320,
+      3
+    ],
+    [
+      320,
+      4
+    ],
+    [
+      320,
+      5
+    ],
+    [
+      320,
+      6
+    ],
+    [
+      320,
+      7
+    ],
+    [
+      320,
+      8
+    ],
+    [
+      320,
+      9
+    ]
+  ],
+  "eval_arms": {
+    "orig": {
+      "checkpoint": null,
+      "cases": "all",
+      "label": "original 1688977"
+    },
+    "origrep": {
+      "checkpoint": null,
+      "cases": "seeds_0_4",
+      "label": "original 1688977, independent repeat (A/A noise floor)"
+    },
+    "old17": {
+      "checkpoint": "/mnt/afs/260010165/behavior_1k/rl_cross_task_20261102/modem/restored_control/round_01",
+      "trainable_sha256": "e8a532a69ce0e104c8ef98409e714d5fd43c6bc3c5b7029a691dc71743c73c65",
+      "cases": "all",
+      "label": "existing modem plain PPO, 17 updates, LR 1e-7 (behind the 25->19 result)"
+    },
+    "lr1e6": {
+      "checkpoint": "training:lr1e6",
+      "cases": "all",
+      "label": "plain PPO, 17 updates, LR 1e-6"
+    },
+    "lr5e6": {
+      "checkpoint": "training:lr5e6",
+      "cases": "all",
+      "label": "plain PPO, up to 17 updates, LR 5e-6"
+    },
+    "lr5e7": {
+      "checkpoint": "training:lr5e7",
+      "cases": "all",
+      "label": "plain PPO, 17 updates, LR 5e-7"
+    }
+  },
+  "repeat_cases": [
+    [
+      301,
+      0
+    ],
+    [
+      301,
+      1
+    ],
+    [
+      301,
+      2
+    ],
+    [
+      301,
+      3
+    ],
+    [
+      301,
+      4
+    ],
+    [
+      302,
+      0
+    ],
+    [
+      302,
+      1
+    ],
+    [
+      302,
+      2
+    ],
+    [
+      302,
+      3
+    ],
+    [
+      302,
+      4
+    ],
+    [
+      303,
+      0
+    ],
+    [
+      303,
+      1
+    ],
+    [
+      303,
+      2
+    ],
+    [
+      303,
+      3
+    ],
+    [
+      303,
+      4
+    ],
+    [
+      304,
+      0
+    ],
+    [
+      304,
+      1
+    ],
+    [
+      304,
+      2
+    ],
+    [
+      304,
+      3
+    ],
+    [
+      304,
+      4
+    ],
+    [
+      305,
+      0
+    ],
+    [
+      305,
+      1
+    ],
+    [
+      305,
+      2
+    ],
+    [
+      305,
+      3
+    ],
+    [
+      305,
+      4
+    ],
+    [
+      306,
+      0
+    ],
+    [
+      306,
+      1
+    ],
+    [
+      306,
+      2
+    ],
+    [
+      306,
+      3
+    ],
+    [
+      306,
+      4
+    ],
+    [
+      307,
+      0
+    ],
+    [
+      307,
+      1
+    ],
+    [
+      307,
+      2
+    ],
+    [
+      307,
+      3
+    ],
+    [
+      307,
+      4
+    ],
+    [
+      308,
+      0
+    ],
+    [
+      308,
+      1
+    ],
+    [
+      308,
+      2
+    ],
+    [
+      308,
+      3
+    ],
+    [
+      308,
+      4
+    ],
+    [
+      309,
+      0
+    ],
+    [
+      309,
+      1
+    ],
+    [
+      309,
+      2
+    ],
+    [
+      309,
+      3
+    ],
+    [
+      309,
+      4
+    ],
+    [
+      310,
+      0
+    ],
+    [
+      310,
+      1
+    ],
+    [
+      310,
+      2
+    ],
+    [
+      310,
+      3
+    ],
+    [
+      310,
+      4
+    ],
+    [
+      311,
+      0
+    ],
+    [
+      311,
+      1
+    ],
+    [
+      311,
+      2
+    ],
+    [
+      311,
+      3
+    ],
+    [
+      311,
+      4
+    ],
+    [
+      312,
+      0
+    ],
+    [
+      312,
+      1
+    ],
+    [
+      312,
+      2
+    ],
+    [
+      312,
+      3
+    ],
+    [
+      312,
+      4
+    ],
+    [
+      313,
+      0
+    ],
+    [
+      313,
+      1
+    ],
+    [
+      313,
+      2
+    ],
+    [
+      313,
+      3
+    ],
+    [
+      313,
+      4
+    ],
+    [
+      314,
+      0
+    ],
+    [
+      314,
+      1
+    ],
+    [
+      314,
+      2
+    ],
+    [
+      314,
+      3
+    ],
+    [
+      314,
+      4
+    ],
+    [
+      315,
+      0
+    ],
+    [
+      315,
+      1
+    ],
+    [
+      315,
+      2
+    ],
+    [
+      315,
+      3
+    ],
+    [
+      315,
+      4
+    ],
+    [
+      316,
+      0
+    ],
+    [
+      316,
+      1
+    ],
+    [
+      316,
+      2
+    ],
+    [
+      316,
+      3
+    ],
+    [
+      316,
+      4
+    ],
+    [
+      317,
+      0
+    ],
+    [
+      317,
+      1
+    ],
+    [
+      317,
+      2
+    ],
+    [
+      317,
+      3
+    ],
+    [
+      317,
+      4
+    ],
+    [
+      318,
+      0
+    ],
+    [
+      318,
+      1
+    ],
+    [
+      318,
+      2
+    ],
+    [
+      318,
+      3
+    ],
+    [
+      318,
+      4
+    ],
+    [
+      319,
+      0
+    ],
+    [
+      319,
+      1
+    ],
+    [
+      319,
+      2
+    ],
+    [
+      319,
+      3
+    ],
+    [
+      319,
+      4
+    ],
+    [
+      320,
+      0
+    ],
+    [
+      320,
+      1
+    ],
+    [
+      320,
+      2
+    ],
+    [
+      320,
+      3
+    ],
+    [
+      320,
+      4
+    ]
+  ],
+  "primary_test": "two-sided exact McNemar on paired success vs orig; paired sign-flip test on score",
+  "max_campaign_live_gpus": 32,
+  "combo_guard_account_total_gpus": 30,
+  "reserved_quota_gpus": 4,
+  "train_quota_type": "spot",
+  "eval_quota_policy": "reserved when own active Reserved GPUs + 1 <= 4, else spot",
+  "train_timeout_seconds": 21600,
+  "eval_timeout_seconds": 5400,
+  "eval_attempt_cap": 3,
+  "train_attempt_cap": 3,
+  "max_total_gpu_hours": 360,
+  "max_wall_hours": 36,
+  "remote_root": "/mnt/afs/260010165/behavior_1k/rl_eval_power_lr_20261102",
+  "aoss_prefix": "behavior1k/rl-eval-power-lr-20261102/",
+  "job_prefix": "b1k-plr-1102-",
+  "training_storage_limit_bytes": 17179869184,
+  "evaluation_storage_limit_bytes": 536870912,
+  "campaign_storage_reserve_bytes": 118111600640,
+  "storage_margin_bytes": 21474836480,
+  "runtime_sha256": {
+    "b1k_rlinf/__init__.py": "c17ba0de3a2b2b85273864e8176953f58dcf7de20a415cd187794fa5e0a9d9a5",
+    "b1k_rlinf/action_interface.py": "f347a7b8e3773b519590cec9cf8df39c5181f30905955c0a648a3547894c1139",
+    "b1k_rlinf/export.py": "21700c5a7551a379fbb1390af08dd0e8929dd98d4b632c79b79f2eae24fd9054",
+    "b1k_rlinf/factory.py": "78c0071b41d16039c7d0b51c0ee875f2ab904e348ad5443a733e3bee00d8611a",
+    "b1k_rlinf/io.py": "7df1e36327197a6603078c1e374a3a39ff6e288cfdb0c2a079ea4502ae1a0db1",
+    "b1k_rlinf/launch.py": "7f30dc81f532d29d3efd8cbb7c68a4534ce8fe4e9517f552ff9e971e967083f5",
+    "b1k_rlinf/model.py": "d633a455b304f3300132081aeeb0e9d1a980d8616190ab0a2fb49622cb12fe40",
+    "b1k_rlinf/precision.py": "9f26df0e9a1a8a105db113d37fea278284b7b3aaa3dd07a53e94f3d249fc9dea",
+    "b1k_rlinf/prepare.py": "e713208920f0786d55562a0a804f31b25d6b82fe998db5ef5767605f528b3cb8",
+    "b1k_rlinf/reference_check.py": "2f05d627d0d7aeafa68e1b792a8525a4167bc9c2c83d573e932d9dcd83e4d3a8",
+    "b1k_rlinf/tokenizer.py": "068385b7d66f3d233f6487b1719f2ff78cbc582a84ef42812a50ed0d4ddb50b7",
+    "b1k_rlinf/verify.py": "6ba790038bdcf34e97760d2df5e2499a417212b59d6cf3fe478b72065e1c0efe",
+    "bootstrap.py": "58a73a0dc38d6ca41db2ab1f87bd07d1e0e6ffab5e4440475d673000d1407988",
+    "capacity_admission.py": "8822f38417a646518e5ddb1e8145b287dea96525b13c15e0ed2766da349985b2",
+    "common.py": "d05e5d7ec669b80d4949a1829938504d642550c67b2fe515b424d0782c52e12c",
+    "comparison_driver.py": "c7acf28715e9dc4b9e6c8d654a21b0de6fa0cbaca67e88e841f10125cc88c2cb",
+    "distributed_driver.py": "acdede678671bd4a6c8038c38c9245e5b8b541e1c735815da1dc127a5f8c1928",
+    "eval_utils.py": "a2f592001111df23beb579534c3ea86945492515f6db9dcc9bfbe6210a6bc6f7",
+    "experiment.py": "863dfac67b87dcfe2cbddc38a12a3859cab6624809adcf0ae1cb18f3eed811df",
+    "goals.py": "a71ffb91ac2a92e6ab5500b069c23e86e921fb7bffc25643a751a9f66639ce18",
+    "helpers.py": "ca4bf0a9f9af53031502d5c02045aa0385ce94209be92100414616cc7b046f1e",
+    "kl_batch.py": "a84b2d78eeaeeb146fe7e0a45d3ec1c95fd019b829ed50f520fca40e39d19b49",
+    "parallel_training.py": "388583764b42f111f6abef9a2d6d609020f0086d6825780007d79cd4c08520e4",
+    "resource_watch.py": "80123e5dd94994db99151c2701332e64a45b2308f6c13c7912dac991c0dd4021",
+    "simulator.py": "12182a439be32b650d9c69842577ac56996ba4e5f3be108fa9acaab98f92ad72",
+    "single_bootstrap.py": "4ed120d76132b528d6e2246f17f98d4359620f05a4d87dfe389704203063b3cb",
+    "storage_guard.py": "c2977a3896f214a2a68a4dea72dcf41fcd88b1b1996cb3cef0f0e42fc55a11b6",
+    "training.py": "ff35bf3f660bf16695b53c0d57129d4b022d62d156c2a3993cba478588165b1b",
+    "variant_update.py": "c8bf761c841ea04909ecca330e9092ef28316e39b01bb8ccc332a97282e287c2"
+  },
+  "runtime_changes": {
+    "parallel_training.py": "read-only PPO diagnostics: RLinf actor/clip_fraction during gradient, and post-update full-batch fraction of chunk ratios outside [0.8, 1.2] via the existing full_kl observe hook",
+    "distributed_driver.py": "control variant may early-stop at the 0.01 KL rollback when allow_kl_early_stop; ready.json records early_stopped and actor_lr",
+    "comparison_driver.py": "final phase can evaluate the original policy without an overlay; writes policy_identity.json"
+  },
+  "phase2_gate": "Multi-round sample->update is NOT launched here. After this campaign, pick the largest LR whose paired success change vs orig is not significantly negative and whose clip fraction is nonzero; then run multi-round online PPO with that LR as a separate recorded campaign.",
+  "protected": [
+    "existing checkpoints and expert data",
+    "rl_combined_20261102 running evaluation",
+    "SkyWM jobs",
+    "source rollouts (read-only)"
+  ],
+  "amendments": [
+    {
+      "id": 1,
+      "at": 1793619339.838301,
+      "authorization": "User 2026-11-02 ~19:00: \"好的，补上5e-7这个点吧\"",
+      "reason": "lr5e6 accepted 0 updates (first-step KL 0.0156 > 0.01); lr1e6 reached KL 0.0061 after 6 candidates and is expected to early-stop at ~8-10 of 17, i.e. use only part of the 32-rollout data. 5e-7 should accept all 17 updates while moving the policy far more than 1e-7, removing the data-coverage confound.",
+      "change": "add training arm lr5e7 (actor LR 5e-7, otherwise identical) and evaluation arm lr5e7 (same 200 cases)",
+      "budget": "unchanged max_total_gpu_hours=360 and 32-GPU cap; the 200 lr5e6 evaluations skipped (policy equals the original) cover the 200 lr5e7 evaluations",
+      "plan_sha256_before": "31c2cc7b8a03f48403d59b32b08dd447dbc259c50ac7fb9a2c9f2812905b1818",
+      "running_jobs_unaffected": true
+    }
+  ]
+}

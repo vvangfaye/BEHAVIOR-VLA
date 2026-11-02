@@ -1,0 +1,248 @@
+{
+  "experiment": "rl_cross_task_modem_20261102",
+  "created_at": 1793586382.9154234,
+  "authorization": "User asked to test the current combined trajectory-weighted gamma=1 method on other tasks.",
+  "task_label": "modem",
+  "task": "installing_a_modem",
+  "source_campaign": "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/rlinf_adaptation_20261020/modem_parallel_20261029",
+  "variant": "balanced_gamma1_ppo",
+  "start_checkpoint": "original1688977",
+  "source_trajectories": 32,
+  "source_chunks": 5677,
+  "source_successes": 20,
+  "optimizer_steps": 17,
+  "actor_lr": 1e-07,
+  "value_lr": 0.0001,
+  "gae_lambda": 0.95,
+  "gamma": 1.0,
+  "shaping_gamma": 1.0,
+  "weighting": "N/(32*T_i)",
+  "train_gpus": 4,
+  "eval_parallel_gpus": 6,
+  "max_total_live_gpus": 32,
+  "quota_type": "spot",
+  "train_timeout_seconds": 43200,
+  "eval_timeout_seconds": 5400,
+  "attempt_cap": 2,
+  "max_total_gpu_hours": 192,
+  "max_wall_hours": 48,
+  "eval_cases": [
+    [
+      301,
+      0
+    ],
+    [
+      301,
+      1
+    ],
+    [
+      301,
+      2
+    ],
+    [
+      302,
+      0
+    ],
+    [
+      302,
+      1
+    ],
+    [
+      302,
+      2
+    ],
+    [
+      303,
+      0
+    ],
+    [
+      303,
+      1
+    ],
+    [
+      303,
+      2
+    ],
+    [
+      304,
+      0
+    ],
+    [
+      304,
+      1
+    ],
+    [
+      304,
+      2
+    ],
+    [
+      305,
+      0
+    ],
+    [
+      305,
+      1
+    ],
+    [
+      305,
+      2
+    ],
+    [
+      306,
+      0
+    ],
+    [
+      306,
+      1
+    ],
+    [
+      306,
+      2
+    ],
+    [
+      307,
+      0
+    ],
+    [
+      307,
+      1
+    ],
+    [
+      307,
+      2
+    ],
+    [
+      308,
+      0
+    ],
+    [
+      308,
+      1
+    ],
+    [
+      308,
+      2
+    ],
+    [
+      309,
+      0
+    ],
+    [
+      309,
+      1
+    ],
+    [
+      309,
+      2
+    ],
+    [
+      310,
+      0
+    ],
+    [
+      310,
+      1
+    ],
+    [
+      310,
+      2
+    ]
+  ],
+  "evaluation_variants": [
+    "balanced_gamma1_ppo",
+    "control"
+  ],
+  "control_checkpoint": {
+    "trainable_sha256": "e8a532a69ce0e104c8ef98409e714d5fd43c6bc3c5b7029a691dc71743c73c65",
+    "round_trip": true,
+    "model_bytes": 1731476107,
+    "optimizer_bytes": 3462991691,
+    "directory": "/mnt/afs/260010165/behavior_1k/rlinf_modem_20261028/pilot01/results/checkpoints/round_01",
+    "round": 1,
+    "optimizer_steps": 17,
+    "cumulative_optimizer_steps": 17,
+    "reward_contract_sha256": "ea8e2235af358f284011b53f8f203bdbc506eac4cef86dea6d0360406b03fb9c",
+    "collection_policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c"
+  },
+  "control_needs_evaluation": true,
+  "reuse_existing_baselines": true,
+  "no_new_training_rollouts": true,
+  "remote_root": "/mnt/afs/260010165/behavior_1k/rl_cross_task_20261102/modem",
+  "aoss_prefix": "behavior1k/rl-cross-task-20261102/modem/",
+  "training_storage_limit_bytes": 17179869184,
+  "evaluation_storage_limit_bytes": 536870912,
+  "campaign_storage_reserve_bytes": 103079215104,
+  "other_remaining_commitments_bytes": 38654705664,
+  "storage_margin_bytes": 21474836480,
+  "storage_admission": {
+    "account_root": "/mnt/afs/260010165",
+    "quota_bytes": 2000000000000,
+    "scan_timeout_seconds": 900,
+    "gate": "baseline rank 0 must pass before parallel expansion"
+  },
+  "source_rollout_receipts_sha256": "095868f48cb34ef1e8740b01fa2b366b5f493dba2784720bc462a2f2b1bb407a",
+  "runtime_sha256": {
+    "bootstrap.py": "58a73a0dc38d6ca41db2ab1f87bd07d1e0e6ffab5e4440475d673000d1407988",
+    "capacity_admission.py": "8822f38417a646518e5ddb1e8145b287dea96525b13c15e0ed2766da349985b2",
+    "common.py": "d05e5d7ec669b80d4949a1829938504d642550c67b2fe515b424d0782c52e12c",
+    "comparison_driver.py": "201eb39c28818801d7f219781c5f8ebb699f759ca73557e90269327dfdf256a7",
+    "distributed_driver.py": "b68b3028d1adab655512e4cde661b614f842dd8f0073b15adb4d86fc31a63177",
+    "eval_utils.py": "a2f592001111df23beb579534c3ea86945492515f6db9dcc9bfbe6210a6bc6f7",
+    "experiment.py": "863dfac67b87dcfe2cbddc38a12a3859cab6624809adcf0ae1cb18f3eed811df",
+    "goals.py": "a71ffb91ac2a92e6ab5500b069c23e86e921fb7bffc25643a751a9f66639ce18",
+    "helpers.py": "ca4bf0a9f9af53031502d5c02045aa0385ce94209be92100414616cc7b046f1e",
+    "kl_batch.py": "a84b2d78eeaeeb146fe7e0a45d3ec1c95fd019b829ed50f520fca40e39d19b49",
+    "parallel_training.py": "c8e00529ed714548cc6a301291d99366eb571c6ea6b9f5712c1dd179f8c2582b",
+    "resource_watch.py": "80123e5dd94994db99151c2701332e64a45b2308f6c13c7912dac991c0dd4021",
+    "simulator.py": "12182a439be32b650d9c69842577ac56996ba4e5f3be108fa9acaab98f92ad72",
+    "single_bootstrap.py": "4ed120d76132b528d6e2246f17f98d4359620f05a4d87dfe389704203063b3cb",
+    "storage_guard.py": "c2977a3896f214a2a68a4dea72dcf41fcd88b1b1996cb3cef0f0e42fc55a11b6",
+    "training.py": "ff35bf3f660bf16695b53c0d57129d4b022d62d156c2a3993cba478588165b1b",
+    "variant_update.py": "c8bf761c841ea04909ecca330e9092ef28316e39b01bb8ccc332a97282e287c2",
+    "b1k_rlinf/action_interface.py": "f347a7b8e3773b519590cec9cf8df39c5181f30905955c0a648a3547894c1139",
+    "b1k_rlinf/export.py": "21700c5a7551a379fbb1390af08dd0e8929dd98d4b632c79b79f2eae24fd9054",
+    "b1k_rlinf/factory.py": "78c0071b41d16039c7d0b51c0ee875f2ab904e348ad5443a733e3bee00d8611a",
+    "b1k_rlinf/io.py": "7df1e36327197a6603078c1e374a3a39ff6e288cfdb0c2a079ea4502ae1a0db1",
+    "b1k_rlinf/launch.py": "7f30dc81f532d29d3efd8cbb7c68a4534ce8fe4e9517f552ff9e971e967083f5",
+    "b1k_rlinf/model.py": "d633a455b304f3300132081aeeb0e9d1a980d8616190ab0a2fb49622cb12fe40",
+    "b1k_rlinf/precision.py": "9f26df0e9a1a8a105db113d37fea278284b7b3aaa3dd07a53e94f3d249fc9dea",
+    "b1k_rlinf/prepare.py": "e713208920f0786d55562a0a804f31b25d6b82fe998db5ef5767605f528b3cb8",
+    "b1k_rlinf/reference_check.py": "2f05d627d0d7aeafa68e1b792a8525a4167bc9c2c83d573e932d9dcd83e4d3a8",
+    "b1k_rlinf/tokenizer.py": "068385b7d66f3d233f6487b1719f2ff78cbc582a84ef42812a50ed0d4ddb50b7",
+    "b1k_rlinf/verify.py": "6ba790038bdcf34e97760d2df5e2499a417212b59d6cf3fe478b72065e1c0efe",
+    "b1k_rlinf/__init__.py": "c17ba0de3a2b2b85273864e8176953f58dcf7de20a415cd187794fa5e0a9d9a5"
+  },
+  "baseline_result_sha256": {
+    "i301_s0": "f7046dd440f122f2a8bef7e90d11ef162c454a83be25b0f91be61582d99fe026",
+    "i301_s1": "55f1d883a171079b85759c5fad1c87254e26171353aaf7ce2751f1be09132e68",
+    "i301_s2": "87c20cacf054cffbdfa87ae51ddc9d9dd5d6997465be377a249241057eefadd8",
+    "i302_s0": "974b9ae9ff792945502146174d46eff87b523310a421094dea6dab5bc370a78f",
+    "i302_s1": "c0b092e92528ba9b5bec7584223f0b08acb5a3b345ce03d02f3ae7fec325f9e6",
+    "i302_s2": "cf9608b671cae91e12c9a8a52320694ffa49e222d33128e58d93e0b6c894d46c",
+    "i303_s0": "0655e0677f5b35cd251652c044dad1194ddfb0401c200ff18c43a16d414eecae",
+    "i303_s1": "c56255ec4dd150717f54933022a3f79ee1b9010464a296ab5d3f151d9f4372ef",
+    "i303_s2": "8a375a26a8bcfd6ab11d239c9718b64987a173e578b2be3f83c612f66c034571",
+    "i304_s0": "0c684f42a83966cb7a4975d3c19e16316524ee586186d7c42abc9c272a126a88",
+    "i304_s1": "c884c3d7a0ea48f78d8b678b11c850e4480bd27f596ab86356f7370282d360ce",
+    "i304_s2": "8ce0ab80efd20d7e8f0fcef105f98e9ab2a183db5ca3865e6fa08962fb9d7fb7",
+    "i305_s0": "67535fb18299f488ad8746171a1317d4cb9424571bf7c891cc69998cb1f8c0e1",
+    "i305_s1": "16c5d96c181132693e7dc59d79e5279e7f3fb5d810d473f98e6d8e4742feeaf3",
+    "i305_s2": "7df3757f5664c0bc2f7f99a8be65236114fae3660bd928ca164f00b36e3231f2",
+    "i306_s0": "fd5832cf7803cf5753cfa5d3bf2e1a3e25bdd6d3848bf1c99bc132dbe937d870",
+    "i306_s1": "e2c7aa7a0191e4dc8b3bcda2fd3fb3cd24887a787260d4866a280e2b251c6b92",
+    "i306_s2": "5c1f46ff58fb82b4b31f7de78cad8dee4efb81d71ce8335df15b366746685ac4",
+    "i307_s0": "bd79195e7839965acc0712a78ca3061fb54e58dc41c959f1556ed69ee9f7f2c6",
+    "i307_s1": "13c4db27f3780b92c8aa916fe849616152841d2a3cd3752a8e71967f7d56a6df",
+    "i307_s2": "0655c821a838235c941fb6995b7bb36a7c74d70e09792ce4bedd29c4c08833c0",
+    "i308_s0": "0b70708ecc73fa669583b76673f8f8f1990b0da1bff217084fe261516757141e",
+    "i308_s1": "80e87b29a4157ec6c295d1ce10813268be59f4b51a0847743b38e1b40ea9af1d",
+    "i308_s2": "5e683a10096644edf0b1cde03a0e51747cd14889ee866676716dc051bb773816",
+    "i309_s0": "95ce744039ac68e4be5810493fb462279d0e67975f1d522f8af594bd7ded9599",
+    "i309_s1": "6a4098631a5679b6ab765d47c904cdd1612cdf0b08c4a7b86ff8f2f90c4e67f1",
+    "i309_s2": "7814ada626ede5a6d996607673e6c08ea6c73bf25308dae0833b6bf1d5e9a9a8",
+    "i310_s0": "200123f51b6cbebea74726a9a69d7cfc897edb96a3a41bd242fb6572d90456f4",
+    "i310_s1": "8e0ac7534cb13e85af2080470e1a7552e2ab5db585008e5ccbc0cdd58682c53d",
+    "i310_s2": "f1a1a1ae7797c922b8a88993fe10938b82e66f9b26050e5266972124fcaf5d4d"
+  },
+  "restored_input_budget_bytes": 12884901888
+}

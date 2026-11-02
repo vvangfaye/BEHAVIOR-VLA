@@ -1,0 +1,1933 @@
+{
+  "output": "/tmp/b1k-mechanism-20261102",
+  "result_key": "behavior1k/rl-mechanism-20261102/a1/result.json",
+  "receipts": [
+    {
+      "round": 1,
+      "episode": 1,
+      "instance": 1,
+      "seed": 290170,
+      "status": {
+        "steps": 9305,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_01/rollout.pt",
+      "sha256": "dbdc805b6eea432160621921ee2e60aff2617b7bfa84b0c942718cd61f453615",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 9305,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 7056,
+          "bottle_2_on_table": 7248,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -4.680000000000003,
+      "chunks": 582,
+      "source_task": "m1_sample1_r0_a1"
+    },
+    {
+      "round": 1,
+      "episode": 2,
+      "instance": 2,
+      "seed": 290171,
+      "status": {
+        "steps": 14157,
+        "score": 0.0,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_02/rollout.pt",
+      "sha256": "1ceb9949cc3ad2d3384129f34bce26a7f9cfbcffcb13a6dc73e3e4a0a6a827bd",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.0,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": null,
+          "bottle_2_on_table": null,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 0.0,
+      "shaping_reward": -9.839999999999856,
+      "chunks": 885,
+      "source_task": "m1_sample1_r1_a1"
+    },
+    {
+      "round": 1,
+      "episode": 3,
+      "instance": 3,
+      "seed": 290172,
+      "status": {
+        "steps": 14157,
+        "score": 0.0,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_03/rollout.pt",
+      "sha256": "132b43061df4a76147351697e1bba118e06c41abe59c38c5ab409887e90e124e",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": false
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": false,
+          "potential": 0.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.0,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": null,
+          "bottle_2_on_table": null,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": -5.0,
+      "shaping_reward": -1.9100000000000008,
+      "chunks": 885,
+      "source_task": "m1_sample1_r2_a1"
+    },
+    {
+      "round": 1,
+      "episode": 4,
+      "instance": 4,
+      "seed": 290173,
+      "status": {
+        "steps": 14157,
+        "score": 0.0,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_04/rollout.pt",
+      "sha256": "b509eb2c7315aaf5c571dfc8fba07eff598cfec67c262c2b44a9a7ac7b0b9189",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": false
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": false,
+          "potential": 0.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.0,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": null,
+          "bottle_2_on_table": null,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": -5.0,
+      "shaping_reward": -1.4600000000000004,
+      "chunks": 885,
+      "source_task": "m1_sample1_r3_a1"
+    },
+    {
+      "round": 1,
+      "episode": 5,
+      "instance": 5,
+      "seed": 290174,
+      "status": {
+        "steps": 9531,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_05/rollout.pt",
+      "sha256": "1cd5595fda446652a921b9af6b4cbd4d98c04cd7632cb6a44a629111260c9c14",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 9531,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 6992,
+          "bottle_2_on_table": 6960,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -5.070000000000004,
+      "chunks": 596,
+      "source_task": "m1_sample1_r4_a1"
+    },
+    {
+      "round": 1,
+      "episode": 6,
+      "instance": 6,
+      "seed": 290175,
+      "status": {
+        "steps": 14157,
+        "score": 0.6666666666666666,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_06/rollout.pt",
+      "sha256": "117fa3aab310af944c55a6bd952932c6147f9ae127f769e8734b8dcc2def9ab2",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": false
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": false,
+          "potential": 2.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.6666666666666666,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 6032,
+          "bottle_2_on_table": 5952,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 0.0,
+      "shaping_reward": -11.999999999999877,
+      "chunks": 885,
+      "source_task": "m1_sample1_r5_a1"
+    },
+    {
+      "round": 1,
+      "episode": 7,
+      "instance": 7,
+      "seed": 290176,
+      "status": {
+        "steps": 14157,
+        "score": 0.0,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_07/rollout.pt",
+      "sha256": "d9639e0bb965a8c9fdb1c9c29def2955047e83c6197e00d7fd4bb06b489ed83f",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": false
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": false,
+          "potential": 0.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.0,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": null,
+          "bottle_2_on_table": null,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": -5.0,
+      "shaping_reward": -1.5000000000000004,
+      "chunks": 885,
+      "source_task": "m1_sample1_r6_a1"
+    },
+    {
+      "round": 1,
+      "episode": 8,
+      "instance": 8,
+      "seed": 290177,
+      "status": {
+        "steps": 13260,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_08/rollout.pt",
+      "sha256": "a95a231ebaab8965c0953c7a6c57f01fa0c70a0fe5a41e1b9977fe3c9938e62c",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 13260,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 10928,
+          "bottle_2_on_table": 10320,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -5.840000000000004,
+      "chunks": 829,
+      "source_task": "m1_sample1_r7_a1"
+    },
+    {
+      "round": 1,
+      "episode": 9,
+      "instance": 9,
+      "seed": 290178,
+      "status": {
+        "steps": 14157,
+        "score": 0.0,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_09/rollout.pt",
+      "sha256": "481faac46eab37e831fb09a4270469eb95487b96d61889854f36f5a3a81436b0",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": false
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": false,
+          "potential": 0.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.0,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": null,
+          "bottle_2_on_table": null,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": -5.0,
+      "shaping_reward": -1.8000000000000007,
+      "chunks": 885,
+      "source_task": "m1_sample1_r0_a1"
+    },
+    {
+      "round": 1,
+      "episode": 10,
+      "instance": 10,
+      "seed": 290179,
+      "status": {
+        "steps": 10646,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_10/rollout.pt",
+      "sha256": "44033edc3c8da8bbd00cefc1d0451beed37da03a5e92d7310832de352e90b905",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 10646,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 6800,
+          "bottle_2_on_table": 6736,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -5.990000000000004,
+      "chunks": 666,
+      "source_task": "m1_sample1_r1_a1"
+    },
+    {
+      "round": 1,
+      "episode": 11,
+      "instance": 11,
+      "seed": 290180,
+      "status": {
+        "steps": 14157,
+        "score": 0.0,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_11/rollout.pt",
+      "sha256": "f31043484a4ba43d5b4bbba75c41e763e44dd3d758f90d90cef9bd950f4ea742",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": false
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": false,
+          "potential": 0.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.0,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": null,
+          "bottle_2_on_table": null,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": -5.0,
+      "shaping_reward": -1.7900000000000007,
+      "chunks": 885,
+      "source_task": "m1_sample1_r2_a1"
+    },
+    {
+      "round": 1,
+      "episode": 12,
+      "instance": 12,
+      "seed": 290181,
+      "status": {
+        "steps": 14157,
+        "score": 0.0,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_12/rollout.pt",
+      "sha256": "3e80eb9fb07905dca48596bbe3ccfef61c5051235420d8f0e81caa4771e71299",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": false
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": false,
+          "potential": 0.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.0,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": null,
+          "bottle_2_on_table": null,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": -5.0,
+      "shaping_reward": -7.349999999999909,
+      "chunks": 885,
+      "source_task": "m1_sample1_r3_a1"
+    },
+    {
+      "round": 1,
+      "episode": 13,
+      "instance": 13,
+      "seed": 290182,
+      "status": {
+        "steps": 14157,
+        "score": 0.0,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_13/rollout.pt",
+      "sha256": "893139c359c0beceb60a4c69027d7802c811edf2ea3e2f3b4683770d845a370a",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.0,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": null,
+          "bottle_2_on_table": null,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 0.0,
+      "shaping_reward": -2.410000000000001,
+      "chunks": 885,
+      "source_task": "m1_sample1_r4_a1"
+    },
+    {
+      "round": 1,
+      "episode": 14,
+      "instance": 14,
+      "seed": 290183,
+      "status": {
+        "steps": 14157,
+        "score": 0.0,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_14/rollout.pt",
+      "sha256": "0bb03cec5bee18e92e313c65084de96b007372c64f91b6c81e71f7638cd6462e",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": false
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": false,
+          "potential": 0.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.0,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": null,
+          "bottle_2_on_table": null,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": -5.0,
+      "shaping_reward": -1.3700000000000003,
+      "chunks": 885,
+      "source_task": "m1_sample1_r5_a1"
+    },
+    {
+      "round": 1,
+      "episode": 15,
+      "instance": 15,
+      "seed": 290184,
+      "status": {
+        "steps": 14157,
+        "score": 0.0,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_15/rollout.pt",
+      "sha256": "18e97e93713d4c7b46de3477565cf906043ee46907a33679605741bfcbe98d09",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": false
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": false,
+          "potential": 0.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.0,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": null,
+          "bottle_2_on_table": null,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": -5.0,
+      "shaping_reward": -1.9100000000000008,
+      "chunks": 885,
+      "source_task": "m1_sample1_r6_a1"
+    },
+    {
+      "round": 1,
+      "episode": 16,
+      "instance": 16,
+      "seed": 290185,
+      "status": {
+        "steps": 9301,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_16/rollout.pt",
+      "sha256": "5622989dd7c054240579df19455b17a2565529e4d3431d5d372f25f27730a6c8",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 9301,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 6880,
+          "bottle_2_on_table": 6592,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -4.770000000000003,
+      "chunks": 582,
+      "source_task": "m1_sample1_r7_a1"
+    },
+    {
+      "round": 1,
+      "episode": 17,
+      "instance": 1,
+      "seed": 290186,
+      "status": {
+        "steps": 9639,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_17/rollout.pt",
+      "sha256": "d6e40c35ffc4c2e910c37bf98d0ac27250a3dcff382ea6ffbab8a47b448fcf50",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 9639,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 6832,
+          "bottle_2_on_table": 6720,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -5.140000000000004,
+      "chunks": 603,
+      "source_task": "m1_sample1_r0_a1"
+    },
+    {
+      "round": 1,
+      "episode": 18,
+      "instance": 2,
+      "seed": 290187,
+      "status": {
+        "steps": 8488,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_18/rollout.pt",
+      "sha256": "a973f45abf7eca6c2c1d9ca5012b1c5aab8940f78cea6f8a7bf2d5feb737c16f",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 8488,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 5952,
+          "bottle_2_on_table": 6224,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -4.840000000000003,
+      "chunks": 531,
+      "source_task": "m1_sample1_r1_a1"
+    },
+    {
+      "round": 1,
+      "episode": 19,
+      "instance": 3,
+      "seed": 290188,
+      "status": {
+        "steps": 8235,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_19/rollout.pt",
+      "sha256": "bb9f31e00a2a26629842ac6c236dbb043f9d56359fa902f414f4169930d95794",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 8235,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 5680,
+          "bottle_2_on_table": 6064,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -4.690000000000003,
+      "chunks": 515,
+      "source_task": "m1_sample1_r2_a1"
+    },
+    {
+      "round": 1,
+      "episode": 20,
+      "instance": 4,
+      "seed": 290189,
+      "status": {
+        "steps": 9448,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_20/rollout.pt",
+      "sha256": "94d0cdd6f3ef9f02605f1e4b279daacca088fdca67188a95b39d1f4638d2bcb8",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 9448,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 5008,
+          "bottle_2_on_table": 5040,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -5.560000000000004,
+      "chunks": 591,
+      "source_task": "m1_sample1_r3_a1"
+    },
+    {
+      "round": 1,
+      "episode": 21,
+      "instance": 5,
+      "seed": 290190,
+      "status": {
+        "steps": 14157,
+        "score": 0.6666666666666666,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_21/rollout.pt",
+      "sha256": "525879d19fbdee640bd04fc592ef1eb107e397b537bb0650bd4ebbe4fa07efb2",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": false
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": false,
+          "potential": 2.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.6666666666666666,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 11888,
+          "bottle_2_on_table": 11952,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 0.0,
+      "shaping_reward": -6.709999999999948,
+      "chunks": 885,
+      "source_task": "m1_sample1_r4_a1"
+    },
+    {
+      "round": 1,
+      "episode": 22,
+      "instance": 6,
+      "seed": 290191,
+      "status": {
+        "steps": 11956,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_22/rollout.pt",
+      "sha256": "c0cbe62540091c91056ec516c52dce1882cb2870da8f13fb0a4b569a0cd01b66",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 11956,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 7200,
+          "bottle_2_on_table": 7376,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -7.449999999999973,
+      "chunks": 748,
+      "source_task": "m1_sample1_r5_a1"
+    },
+    {
+      "round": 1,
+      "episode": 23,
+      "instance": 7,
+      "seed": 290192,
+      "status": {
+        "steps": 7350,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_23/rollout.pt",
+      "sha256": "8f91a236b287894c5eb153f37fb6c5c8e010ee5054f21e27995873ba17812ffc",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 7350,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 5152,
+          "bottle_2_on_table": 5264,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -4.210000000000003,
+      "chunks": 460,
+      "source_task": "m1_sample1_r6_a1"
+    },
+    {
+      "round": 1,
+      "episode": 24,
+      "instance": 8,
+      "seed": 290193,
+      "status": {
+        "steps": 14157,
+        "score": 0.0,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_24/rollout.pt",
+      "sha256": "4a0c4ffde52b45831b7a51635e864d0ab554c8d0e20307043f630c5c45498768",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": false
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": false,
+          "potential": 0.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.0,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": null,
+          "bottle_2_on_table": null,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": -5.0,
+      "shaping_reward": -1.5400000000000005,
+      "chunks": 885,
+      "source_task": "m1_sample1_r7_a1"
+    },
+    {
+      "round": 1,
+      "episode": 25,
+      "instance": 9,
+      "seed": 290194,
+      "status": {
+        "steps": 10528,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_25/rollout.pt",
+      "sha256": "efdcb1b250b79036e9ce39ec1ad3e24f33000d647b48820f2259e3991ad5aaba",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 10528,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 7088,
+          "bottle_2_on_table": 6544,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -6.399999999999997,
+      "chunks": 658,
+      "source_task": "m1_sample1_r0_a1"
+    },
+    {
+      "round": 1,
+      "episode": 26,
+      "instance": 10,
+      "seed": 290195,
+      "status": {
+        "steps": 14157,
+        "score": 0.0,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_26/rollout.pt",
+      "sha256": "d0b5e02a3459ca3237b3a333a60204d848e8c504074f9a537a87d9d4777b6717",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.0,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": null,
+          "bottle_2_on_table": null,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 0.0,
+      "shaping_reward": -9.839999999999856,
+      "chunks": 885,
+      "source_task": "m1_sample1_r1_a1"
+    },
+    {
+      "round": 1,
+      "episode": 27,
+      "instance": 11,
+      "seed": 290196,
+      "status": {
+        "steps": 14157,
+        "score": 0.0,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_27/rollout.pt",
+      "sha256": "a8bffb7a0db1dbb85bf2509f1d1dc4a690157abed216dcd279ce991bddb32f6f",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": false
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": false,
+          "potential": 0.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.0,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": null,
+          "bottle_2_on_table": null,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": -5.0,
+      "shaping_reward": -7.899999999999897,
+      "chunks": 885,
+      "source_task": "m1_sample1_r2_a1"
+    },
+    {
+      "round": 1,
+      "episode": 28,
+      "instance": 12,
+      "seed": 290197,
+      "status": {
+        "steps": 9822,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_28/rollout.pt",
+      "sha256": "ea1029a4db77bdd6f911e70f847f5c0296c45781a2896b279298c195afe6d364",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 9822,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 7312,
+          "bottle_2_on_table": 7088,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -4.930000000000003,
+      "chunks": 614,
+      "source_task": "m1_sample1_r3_a1"
+    },
+    {
+      "round": 1,
+      "episode": 29,
+      "instance": 13,
+      "seed": 290198,
+      "status": {
+        "steps": 9002,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_29/rollout.pt",
+      "sha256": "e3dc73058777782d517fa5471e983c8f4bf8bfab8162e894734aa5aaf90df230",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 9002,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 6080,
+          "bottle_2_on_table": 6416,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -5.190000000000003,
+      "chunks": 563,
+      "source_task": "m1_sample1_r4_a1"
+    },
+    {
+      "round": 1,
+      "episode": 30,
+      "instance": 14,
+      "seed": 290199,
+      "status": {
+        "steps": 8521,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_30/rollout.pt",
+      "sha256": "551e6f8d00738fe96bc85c28f67bad4e12eb2e7af5cfb370977364ac2f3b72f8",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 8521,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 6496,
+          "bottle_2_on_table": 6048,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -3.9800000000000026,
+      "chunks": 533,
+      "source_task": "m1_sample1_r5_a1"
+    },
+    {
+      "round": 1,
+      "episode": 31,
+      "instance": 15,
+      "seed": 290200,
+      "status": {
+        "steps": 10819,
+        "score": 1.0,
+        "success": true
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_31/rollout.pt",
+      "sha256": "67a1e540de11834728d5779fd8441a07af4af0610be85194b35f8c05f07391dd",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true,
+          "potential": 3.0,
+          "all_goals": true
+        },
+        "official": {
+          "steps": 10819,
+          "score": 1.0,
+          "success": true
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 7152,
+          "bottle_2_on_table": 7152,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 5.0,
+      "shaping_reward": -5.930000000000003,
+      "chunks": 677,
+      "source_task": "m1_sample1_r6_a1"
+    },
+    {
+      "round": 1,
+      "episode": 32,
+      "instance": 16,
+      "seed": 290201,
+      "status": {
+        "steps": 14157,
+        "score": 0.6666666666666666,
+        "success": false
+      },
+      "policy_hash": "cc2b68e2950f05827e4d50d8cbe391c04ee6514cdd9e774fcbc203be992df51c",
+      "contract": "85cfd8bd080d740b64573bbb29a8049ef6fb2c70bad1d623d758eec833781880",
+      "path": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/training/round_01/episode_32/rollout.pt",
+      "sha256": "885dee36a641c1e49849b86ea2ed8f608434d67b8015a64bb5c9e2c439dcc7f4",
+      "goal_summary": {
+        "initial": {
+          "goals": {
+            "bottle_1_on_table": false,
+            "bottle_2_on_table": false,
+            "fridge_closed": true
+          },
+          "bottle_1_on_table": false,
+          "bottle_2_on_table": false,
+          "fridge_closed": true,
+          "potential": 1.0,
+          "all_goals": false
+        },
+        "final": {
+          "goals": {
+            "bottle_1_on_table": true,
+            "bottle_2_on_table": true,
+            "fridge_closed": false
+          },
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": false,
+          "potential": 2.0,
+          "all_goals": false
+        },
+        "official": {
+          "steps": 14157,
+          "score": 0.6666666666666666,
+          "success": false
+        },
+        "ever_achieved": {
+          "bottle_1_on_table": true,
+          "bottle_2_on_table": true,
+          "fridge_closed": true
+        },
+        "first_achieved_step": {
+          "bottle_1_on_table": 13200,
+          "bottle_2_on_table": 13024,
+          "fridge_closed": 0
+        }
+      },
+      "task_reward": 0.0,
+      "shaping_reward": -6.829999999999929,
+      "chunks": 885,
+      "source_task": "m1_sample1_r7_a1"
+    }
+  ],
+  "buffers": {
+    "control": "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029/water/results/checkpoints/round_01/buffers.pt",
+    "gamma1_ppo": "/mnt/afs/260010165/behavior_1k/rl_scheme_comparison_20261101/variants/gamma1_ppo/results/checkpoints/round_01/buffers.pt",
+    "balanced_ppo": "/mnt/afs/260010165/behavior_1k/rl_scheme_comparison_20261101/variants/balanced_ppo/results/checkpoints/round_01/buffers.pt",
+    "group_outcome": "/mnt/afs/260010165/behavior_1k/rl_scheme_comparison_20261101/variants/group_outcome/results/checkpoints/round_01/buffers.pt"
+  },
+  "source_sha256": "7890f9f239985db12524f0cbae38e052388cae76cdfc2470b2e98b1e9acf8c61"
+}

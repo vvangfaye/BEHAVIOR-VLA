@@ -1,0 +1,27 @@
+{
+  "scope": "Read-only comparison of modem and water source trajectories, fixed advantages, critic values and return ranking",
+  "tasks": {
+    "modem": {
+      "episodes": 32,
+      "chunks": 5677,
+      "variants": [
+        "ordinary",
+        "combined"
+      ]
+    },
+    "water": {
+      "episodes": 32,
+      "chunks": 23908,
+      "variants": [
+        "ordinary",
+        "gamma1",
+        "combined"
+      ]
+    }
+  },
+  "cpu_cores": 2,
+  "gpu_count": 0,
+  "max_seconds": 3600,
+  "model_updates": 0,
+  "npz_sha256": "2cf78f46ad38d071842507ea135b0de14124fa56fe894138035a27a2058ae674"
+}
