@@ -1,0 +1,70 @@
+# 1-GPU 5090 variant (2026-11-04): small eval jobs fit spec n12lp.nn.i10a.1 (14 vCPU / 60 GiB) and schedule into fragments.
+# 5090x4 cluster variant of libero_10_pi05_eval_cluster4.yaml (2026-11-04): 20 envs x 25 epochs instead of 500 x 1.
+# 4-GPU eval: use env.eval.total_num_envs=100 env.eval.rollout_epoch=5 (500 init states) + rollout.model.num_action_chunks=10.
+# 2-GPU variant of libero_10_pi05_sft_gpu0.yaml (same protocol: 500 init states, 520 steps, chunks 5, noise 0.3).
+defaults:
+  - env/libero_10@env.eval
+  - model/pi0_5@rollout.model
+  - override hydra/job_logging: stdout
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  searchpath:
+    - file://${oc.env:EMBODIED_PATH}/config/
+
+cluster:
+  num_nodes: 1
+  component_placement:
+    env,rollout: all   # both local GPUs, as in RLinf's official evaluations/libero/libero_10_openpi_pi05_eval.yaml
+
+runner:
+  task_type: embodied_eval
+  logger:
+    log_path: "../results"
+    project_name: rlinf
+    experiment_name: "libero_10_openpi_pi05_eval"
+    logger_backends: ["tensorboard"]
+
+  max_epochs: 1000
+  max_steps: -1
+
+  only_eval: True
+  val_check_interval: -1
+  save_interval: -1
+
+  resume_dir: null
+  ckpt_path: null
+
+env:
+  group_name: "EnvGroup"
+
+  eval:
+    rollout_epoch: 50
+    total_num_envs: 10    # 5090 x1 (60 GiB RAM: ~3.7 GB/env): 1 env worker x 10 envs; x 50 epochs = all 500 init states
+    auto_reset: True
+    ignore_terminations: True
+    max_episode_steps: 520
+    max_steps_per_rollout_epoch: 520
+    group_size: 1
+    is_eval: True
+    video_cfg:
+      save_video: False
+      video_base_dir: ${runner.logger.log_path}/video/eval
+
+rollout:
+  group_name: "RolloutGroup"
+  generation_backend: "huggingface"
+  recompute_logprobs: False
+  unnorm_key: libero_10
+  enable_offload: False
+  pipeline_stage_num: 1
+
+  model:
+    model_path: "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/libero_feasibility_20261103/models/RLinf-Pi05-LIBERO-SFT"
+    model_type: "openpi"
+    num_action_chunks: 5
+    openpi:
+      task: eval
+      noise_level: 0.3
