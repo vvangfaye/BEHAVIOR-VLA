@@ -1,0 +1,55 @@
+diff --git a/rlinf/envs/sim/libero/venv.py b/rlinf/envs/sim/libero/venv.py
+index 3d17d510..69168793 100644
+--- a/rlinf/envs/sim/libero/venv.py
++++ b/rlinf/envs/sim/libero/venv.py
+@@ -91,6 +91,19 @@ def _set_camera_rendering(env, enabled: bool) -> None:
+             observables[name]._enabled = enabled
+ 
+ 
++def _goal_frac(env) -> float:
++    """subgoal reward (local addition 2026-11-05): fraction of satisfied BDDL goal predicates of a LIBERO env."""
++    dom = getattr(env, "env", env)
++    goal = dom.parsed_problem["goal_state"]
++    return float(sum(bool(dom._eval_predicate(g)) for g in goal)) / max(len(goal), 1)
++
++
++def _goal_preds(env):
++    """goal_preds (local addition 2026-11-05): [predicate text, truth] for every BDDL goal conjunct."""
++    dom = getattr(env, "env", env)
++    return [[" ".join(str(x) for x in g), bool(dom._eval_predicate(g))] for g in dom.parsed_problem["goal_state"]]
++
++
+ def _worker(
+     parent: connection.Connection,
+     p: connection.Connection,
+@@ -161,6 +174,10 @@ def _worker(
+                 setattr(env.unwrapped, data["key"], data["value"])
+             elif cmd == "check_success":
+                 p.send(env.check_success())
++            elif cmd == "goal_frac":
++                p.send(_goal_frac(env))
++            elif cmd == "goal_preds":
++                p.send(_goal_preds(env))
+             elif cmd == "get_segmentation_of_interest":
+                 p.send(env.get_segmentation_of_interest(data))
+             elif cmd == "get_sim_state":
+@@ -266,6 +283,19 @@ class ReconfigureSubprocEnv(SubprocVectorEnv):
+ 
+         BaseVectorEnv.__init__(self, env_fns, worker_fn, **kwargs)
+ 
++    def goal_frac(self) -> np.ndarray:
++        """subgoal reward (local addition 2026-11-05): goal-predicate fraction of every env (queries sent first,
++        then collected, so the workers evaluate in parallel)."""
++        for w in self.workers:
++            w.parent_remote.send(["goal_frac", None])
++        return np.array([w.parent_remote.recv() for w in self.workers], dtype=np.float32)
++
++    def goal_preds(self):
++        """goal_preds (local addition 2026-11-05): per env, [predicate text, truth] of every goal conjunct."""
++        for w in self.workers:
++            w.parent_remote.send(["goal_preds", None])
++        return [w.parent_remote.recv() for w in self.workers]
++
+     def reconfigure_env_fns(self, env_fns, id=None):
+         self._assert_is_not_closed()
+         id = self._wrap_id(id)
