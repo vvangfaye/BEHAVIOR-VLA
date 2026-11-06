@@ -1,0 +1,98 @@
+{
+  "experiment": "supermimic_feasibility_20261106",
+  "created_date_cst": "2026-11-06",
+  "authorization": "User requested researching and implementing whether learned differentiable dynamics can alleviate slow B1K RL trajectory sampling; project standing research authorization applies.",
+  "objective": "Determine which parts of B1K sampling cost can be amortized, implement a differentiable one-chunk model-assisted actor interface, and test learned transitions on held-out real B1K trajectories before claiming simulator replacement.",
+  "scope": {
+    "task": "installing_a_modem",
+    "existing_data": "Verified existing B1K PPO rollouts, preferring the 2026-11-03 multi-round dataset; do not recollect completed episodes.",
+    "preserve": "All existing experiments, checkpoints, rewards, samplers and evaluation contracts remain unchanged.",
+    "human_demonstrations": 0,
+    "automatic_resubmission": false
+  },
+  "resource_caps": {
+    "local_cpu_threads": 8,
+    "local_cpu_wall_hours": 2,
+    "new_cloud_cpu_jobs": 1,
+    "cloud_cpu_spec": "n6ls.iu.i40.2c8g",
+    "cloud_cpu_max_seconds": 3600,
+    "new_gpu_jobs_phase1": 0,
+    "local_artifact_GiB": 4,
+    "new_afs_outputs_GiB": 0,
+    "new_real_environment_steps_phase1": 0
+  },
+  "phases": [
+    "Audit actual sampling timings and report unavailable decompositions rather than infer them.",
+    "Export real chunk transitions, executed actions, duration masks, resized visual summaries and terminal labels; split by instance, not adjacent frames.",
+    "Compare action-conditioned and state-only/persistence predictors; evaluate held-out one/two/four-chunk errors, event changes and reward prediction. Use train-only normalization and validation-only checkpoint selection.",
+    "Validate the actual Flow-SDE/ODE actor gradient path with frozen observation prefix and preserve existing PPO replay contracts.",
+    "Only after held-out action relevance, sufficient state observability, and restoration validity are demonstrated, design a separately recorded small simulator intervention experiment. Offline prediction or synthetic autograd tests alone cannot establish true return gradients or reduced real sampling."
+  ],
+  "decision_criteria": {
+    "data": "Real, source-verified trajectories; no temporal leakage or fabricated final next-state.",
+    "model": "Action-conditioned predictions must outperform state-only and persistence on held-out instances; rare event performance must be reported separately from mostly unchanged transitions.",
+    "gradients": "Actual action expert receives finite nonzero gradients; frozen modules do not. Surrogate finite differences are only an implementation check, not validation against physics.",
+    "speed": "Report CPU/GPU and full loop costs separately; do not equate fast model steps with the same factor reduction in RL sampling.",
+    "deployment": "No model-generated samples are passed to the old real on-policy PPO replay as if they were factual data."
+  },
+  "read_only_checks": {
+    "platform_rules_snapshot": "2026-09-11",
+    "platform_rules_live_fetch": "tool could not access page; CPU-only probe complies with published 2c8g and 128h limit",
+    "cpu_template_verified": "b1k-rl-mechanism-1102-a1",
+    "local_cuda_available": false,
+    "phase1_new_gpu_jobs": 0
+  },
+  "offline_training": {
+    "source_round": 1,
+    "source_episodes": 64,
+    "train_instances": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "validation_instances": [
+      11,
+      12,
+      13
+    ],
+    "test_instances": [
+      14,
+      15,
+      16
+    ],
+    "models": [
+      "full",
+      "no_action"
+    ],
+    "seeds": [
+      7,
+      8,
+      9
+    ],
+    "epochs": 30,
+    "hidden_width": 192,
+    "batch_size": 256,
+    "learning_rate": 0.001,
+    "visual_pca_dimensions": 32,
+    "selection": "minimum validation combined loss independently for each seed; test not used for selection",
+    "primary_rows": "all 16 actions executed, with no future realized duration as a varying input",
+    "gradient_diagnostic": "at most 256 complete test rows, normalized action perturbation RMS 0.02; model agreement only, not physical gradient verification"
+  },
+  "specific_export_approval": "User explicitly approved the 64-trajectory CPU export and specified private AOSS destination in response to the in-chat confirmation.",
+  "amendments": [
+    {
+      "reason": "Full-chunk filtering removed all test switch-on and whole-task success events.",
+      "change": "Run a separate CPU proposal-to-outcome diagnostic on all original rows with only pre-action time and request masks; retain original dynamics results.",
+      "scope": "Same approved 64 trajectories, no new uploads, GPU jobs or physical interaction.",
+      "evidence": "model/proposal_outcome_real/results.json"
+    }
+  ],
+  "result_summary": "evidence_summary.json"
+}

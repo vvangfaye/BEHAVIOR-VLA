@@ -1,0 +1,129 @@
+diff --git a/rlinf/envs/sim/calvin/calvin_gym_env.py b/rlinf/envs/sim/calvin/calvin_gym_env.py
+index 3480a07a..f284a2d5 100644
+--- a/rlinf/envs/sim/calvin/calvin_gym_env.py
++++ b/rlinf/envs/sim/calvin/calvin_gym_env.py
+@@ -66,6 +66,9 @@ class CalvinEnv(gym.Env):
+         self._elapsed_steps = np.zeros(self.num_envs, dtype=np.int32)
+ 
+         self.video_cfg = cfg.video_cfg
++        # agent manager calvin (local addition 2026-11-06): subtask index + chain pool for the manager
++        if not bool(self.cfg.get("is_eval", False)) and self.cfg.get("task_stats_dir", None):
++            self._calvin_write_tasks_json()
+ 
+     def _init_env(self):
+         env_fns = self.get_env_fns()
+@@ -138,6 +141,12 @@ class CalvinEnv(gym.Env):
+         self.task_descriptions = [None] * self.num_envs
+ 
+     def _get_random_reset_state_ids(self, num_reset_states):
++        _aw = self._agent_task_weights()  # agent manager calvin (local addition 2026-11-06): chain weights
++        if _aw is not None:
++            w = np.array([max(float(_aw.get(i, 1.0)), 0.0) for i in range(self.total_num_group_envs)], dtype=np.float64)
++            if w.sum() <= 0:
++                w[:] = 1.0
++            return self._generator.choice(self.total_num_group_envs, size=num_reset_states, p=w / w.sum()).astype(np.int64)
+         reset_state_ids = self._generator.integers(
+             low=0, high=self.total_num_group_envs, size=(num_reset_states,)
+         )
+@@ -328,6 +337,9 @@ class CalvinEnv(gym.Env):
+ 
+         if env_idx is None:
+             env_idx = np.arange(self.num_envs)
++            # agent manager calvin (local addition 2026-11-06): a full reset starts a rollout epoch
++            if not bool(self.cfg.get("is_eval", False)) and self.cfg.get("task_stats_dir", None):
++                self._ts_recorded = np.zeros(self.num_envs, dtype=bool)
+ 
+         if reset_state_ids is None:
+             num_reset_states = len(env_idx)
+@@ -364,6 +376,13 @@ class CalvinEnv(gym.Env):
+             terminations[:] = False
+ 
+         dones = terminations | truncations
++        if self.cfg.get("is_eval", False) and dones.any():
++            # Local addition (2026-11-04): one line per finished eval chain, for paired comparisons.
++            for i in np.nonzero(dones)[0]:
++                print(
++                    f"[calvin eval] trial_id={int(self.trial_ids[i])}, completed={int(self.current_task_idx[i])}",
++                    flush=True,
++                )
+         _auto_reset = auto_reset and self.auto_reset
+         if dones.any() and _auto_reset:
+             obs, infos = self._handle_auto_reset(dones, obs, infos)
+@@ -409,6 +428,10 @@ class CalvinEnv(gym.Env):
+         past_truncations = raw_chunk_truncations.any(dim=1)
+         past_dones = torch.logical_or(past_terminations, past_truncations)
+ 
++        # agent manager calvin (local addition 2026-11-06): per-subtask training statistics, before any auto-reset
++        if not bool(self.cfg.get("is_eval", False)) and self.cfg.get("task_stats_dir", None):
++            self._record_task_stats(past_dones.cpu().numpy())
++
+         if past_dones.any() and self.auto_reset:
+             obs_list[-1], infos_list[-1] = self._handle_auto_reset(
+                 past_dones.cpu().numpy(), obs_list[-1], infos_list[-1]
+@@ -451,6 +474,66 @@ class CalvinEnv(gym.Env):
+         infos["_elapsed_steps"] = dones
+         return obs, infos
+ 
++    # ---------------- agent manager calvin (local addition 2026-11-06) ----------------
++    def _calvin_write_tasks_json(self):
++        """Sorted subtask-type names and the chain pool as subtask indices -> <task_stats_dir>/tasks.json."""
++        import json as _json
++
++        chains = [list(self.task_suite.get_task_sequence(t)) for t in range(self.total_num_group_envs)]
++        names = sorted({s for c in chains for s in c})
++        self._calvin_sub_index = {s: i for i, s in enumerate(names)}
++        d = self.cfg.get("task_stats_dir")
++        os.makedirs(d, exist_ok=True)
++        tj = os.path.join(d, "tasks.json")
++        tmp = f"{tj}.{os.getpid()}.tmp"
++        suite = {"calvin_abc": "CALVIN ABC->D (training in scenes A, B, C)", "calvin_d": "CALVIN D->D",
++                 "calvin_abcd": "CALVIN ABCD->D"}.get(str(self.cfg.task_suite_name), "CALVIN")
++        with open(tmp, "w") as f:
++            _json.dump({"suite": suite, "kind": "calvin_chains", "tasks": names,
++                        "chains": [[self._calvin_sub_index[s] for s in c] for c in chains]}, f)
++        os.replace(tmp, tj)
++
++    def _agent_task_weights(self):
++        """Chain sampling weights {chain id: weight} from env.train.agent_weights_file (train envs only)."""
++        path = None if bool(self.cfg.get("is_eval", False)) else self.cfg.get("agent_weights_file", None)
++        if not path or not os.path.exists(path):
++            return None
++        try:
++            import json as _json
++
++            mt = os.path.getmtime(path)
++            cache = getattr(self, "_aw_cache", (None, None))
++            if cache[0] != mt:
++                with open(path) as f:
++                    self._aw_cache = (mt, {int(k): float(v) for k, v in _json.load(f).items()})
++            return self._aw_cache[1]
++        except Exception:
++            return None
++
++    def _record_task_stats(self, dones):
++        """First episode end of each env in this rollout epoch -> <task_stats_dir>/env_<pid>.jsonl: the attempted
++        subtasks of its chain (completed ones = 1, the failed or truncated one = 0)."""
++        import json as _json
++
++        if not hasattr(self, "_calvin_sub_index"):
++            self._calvin_write_tasks_json()
++        rec = getattr(self, "_ts_recorded", None)
++        if rec is None or len(rec) != self.num_envs:
++            rec = self._ts_recorded = np.zeros(self.num_envs, dtype=bool)
++        new = np.asarray(dones, dtype=bool) & ~rec
++        if not new.any():
++            return
++        d = self.cfg.get("task_stats_dir")
++        os.makedirs(d, exist_ok=True)
++        with open(os.path.join(d, f"env_{os.getpid()}.jsonl"), "a") as f:
++            for i in np.nonzero(new)[0]:
++                chain = [self._calvin_sub_index[s] for s in self.task_sequence[i]]
++                k = int(self.current_task_idx[i])
++                subs = [[chain[j], 1] for j in range(min(k, 5))] + ([[chain[k], 0]] if k < 5 else [])
++                f.write(_json.dumps({"task": int(subs[-1][0]), "s": int(k >= 5), "sub": subs,
++                                     "trial": int(self.trial_ids[i]), "done": k}) + "\n")
++        rec |= new
++
+     def _calc_step_reward(self, terminations):
+         reward = self.cfg.reward_coef * terminations
+         return reward
