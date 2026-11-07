@@ -1,0 +1,69 @@
+[
+  {
+    "name": "smoke",
+    "entry": "train",
+    "config": "libero_10_ppo_pi05_5090x4",
+    "overrides": [
+      "runner.max_epochs=3",
+      "runner.save_interval=3",
+      "actor.seed=42",
+      "env.train.seed=0",
+      "actor.optim.lr_scheduler=constant",
+      "+actor.prefix_cache=True",
+      "+actor.prefix_cache_pin=False",
+      "+actor.prefix_cache_max_gib=10",
+      "+env.train.task_stats_dir=/mnt/afs/260010165/rlinf_runs_20261104/pc_fixed_s1/smoke/task_stats",
+      "+algorithm.ppo_control.enable=True",
+      "+algorithm.ppo_control.policy=forced",
+      "+algorithm.ppo_control.out_dir=/mnt/afs/260010165/rlinf_runs_20261104/pc_fixed_s1/smoke/controller",
+      "+algorithm.ppo_control.rule_kl_threshold=0.0069",
+      "+algorithm.ppo_control.kl_stop=0.0207",
+      "+algorithm.ppo_control.verify_actor_identity=True",
+      "+algorithm.ppo_control.forced_mode=critic_first",
+      "env.train.total_num_envs=4",
+      "env.train.rollout_epoch=1",
+      "env.train.max_episode_steps=40",
+      "env.train.max_steps_per_rollout_epoch=40",
+      "actor.global_batch_size=8",
+      "actor.micro_batch_size=2"
+    ]
+  },
+  {
+    "name": "train",
+    "entry": "train",
+    "config": "libero_10_ppo_pi05_5090x4",
+    "overrides": [
+      "runner.max_epochs=20",
+      "runner.save_interval=10",
+      "actor.seed=42",
+      "env.train.seed=0",
+      "actor.optim.lr_scheduler=constant",
+      "+actor.prefix_cache=True",
+      "+actor.prefix_cache_pin=False",
+      "+actor.prefix_cache_max_gib=10",
+      "+env.train.task_stats_dir=/mnt/afs/260010165/rlinf_runs_20261104/pc_fixed_s1/train/task_stats",
+      "+algorithm.ppo_control.enable=True",
+      "+algorithm.ppo_control.policy=fixed",
+      "+algorithm.ppo_control.out_dir=/mnt/afs/260010165/rlinf_runs_20261104/pc_fixed_s1/train/controller",
+      "+algorithm.ppo_control.rule_kl_threshold=0.0069",
+      "+algorithm.ppo_control.kl_stop=0.0207",
+      "+algorithm.ppo_control.verify_actor_identity=True"
+    ],
+    "requires": [
+      "smoke"
+    ]
+  },
+  {
+    "name": "eval_s20",
+    "entry": "eval",
+    "config": "libero_10_pi05_eval_5090",
+    "ckpt_stage": "train",
+    "ckpt_step": 20,
+    "requires": [
+      "train"
+    ],
+    "overrides": [
+      "rollout.model.num_action_chunks=10"
+    ]
+  }
+]

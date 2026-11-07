@@ -1,0 +1,12 @@
+{
+  "source_logs": [
+    "analysis/libero_feasibility_20261103/results/ppo_balanced/console.log",
+    "analysis/libero_feasibility_20261103/results/ppo_balanced_seed3/console.log"
+  ],
+  "metric": "historical ordinary PPO training actor/approx_kl",
+  "n": 40,
+  "quantile": 0.9,
+  "rule_kl_threshold": 0.0069,
+  "epoch_end_stop_threshold": 0.0207,
+  "no_test_outcomes_used": true
+}

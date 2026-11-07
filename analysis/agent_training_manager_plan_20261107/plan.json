@@ -1,0 +1,232 @@
+{
+  "status": "running_with_reviewed_recovery",
+  "created_at_cst": "2026-11-07T00:13:10.764403+08:00",
+  "objective": "Test whether training-state-dependent allocation of actor and critic updates improves multi-task VLA PPO under a fixed environment-interaction budget, and whether an LLM controller outperforms statistical rules and its own replayed schedule.",
+  "existing_experiments": "Keep all already submitted takeover experiments on frozen configuration; complete and audit them first. Do not retarget active jobs.",
+  "phase_1": {
+    "benchmark": "LIBERO-Long / libero_10",
+    "model": "Existing RLinf-Pi05-LIBERO-SFT original weights",
+    "fixed": {
+      "rollouts_per_iteration": 128,
+      "iterations": 20,
+      "training_seeds": [
+        {
+          "actor": 42,
+          "environment": 0
+        },
+        {
+          "actor": 43,
+          "environment": 1
+        },
+        {
+          "actor": 44,
+          "environment": 2
+        }
+      ],
+      "actor_lr": 5e-06,
+      "critic_lr": 0.0001,
+      "gamma": 0.99,
+      "gae_lambda": 0.95,
+      "ppo_clip_low": 0.2,
+      "ppo_clip_high": 0.2,
+      "trajectory_length_normalization": true,
+      "sampling": "uniform tasks under existing sampler",
+      "reward": "native sparse reward; no added subgoal shaping",
+      "action_interface": "unchanged",
+      "sampler": "existing Flow-SDE training and fixed ODE evaluation; keep chain log-prob definition unchanged",
+      "maximum_update_passes_per_rollout": 4
+    },
+    "actions": {
+      "standard": {
+        "critic_only_passes": 0,
+        "joint_actor_critic_passes": 4
+      },
+      "short_update": {
+        "critic_only_passes": 0,
+        "joint_actor_critic_passes": 2
+      },
+      "critic_first": {
+        "critic_only_passes": 1,
+        "joint_actor_critic_passes": 3,
+        "after_critic_pass": "Recompute value predictions and GAE before any actor update; retain behavior-policy old log-probs."
+      }
+    },
+    "controller": {
+      "backend": "gpt-6.1-sol via existing Codex/AOSS relay",
+      "warmup_iterations": 2,
+      "decide_before_iterations": [
+        3,
+        5,
+        7,
+        9,
+        11,
+        13,
+        15,
+        17,
+        19
+      ],
+      "decision_applies_to_iterations": 2,
+      "input_history_iterations": 3,
+      "inputs": [
+        "training success counts by task and their denominators",
+        "return variance, lengths and terminal/truncation counts",
+        "critic return calibration and explained variance with estimator scope specified",
+        "old-policy ratio statistics, empirical KL and clipping fraction",
+        "actor/critic gradient summaries and prior executed decisions"
+      ],
+      "output_fields": [
+        "mode",
+        "supporting_metrics",
+        "reason"
+      ],
+      "forbidden_inputs": [
+        "official evaluation episode outcomes",
+        "test summaries"
+      ],
+      "timeout_or_invalid_reply": "standard",
+      "logging": "Freeze prompt/model settings and save complete inputs, replies, decisions, exact applied update counts and failure reasons."
+    },
+    "arms": [
+      "fixed standard PPO",
+      "deterministic statistical rule with same action set and same inputs",
+      "LLM controller with same action set and same inputs"
+    ],
+    "rule_baseline": {
+      "priority": [
+        "short_update if recent empirical KL exceeds frozen threshold",
+        "critic_first if value fit is worse than a constant baseline over two consecutive informative windows",
+        "standard otherwise"
+      ],
+      "calibration": "Fit numerical thresholds only from existing training logs and lock before running. No selection using final test outcomes."
+    },
+    "common_executor_constraints": [
+      "All three arms use identical finite-value, trajectory-mask, behavior-log-probability and empirical-KL checks. Numerical checks are implemented in code rather than decided by the LLM.",
+      "Critic-only updates leave actor parameters, actor optimizer moments and actor learning-rate schedule unchanged.",
+      "All update passes are counted and no arm may exceed four passes per rollout. Compare actual GPU-hours as well as environment interactions.",
+      "Preserve optimizer, scheduler, controller history and RNG provenance on resume. Do not claim environment RNG continuity unless saved and restored."
+    ],
+    "engineering_checks": [
+      "standard action matches frozen PPO loss, gradients and parameter updates under same precision and grouping",
+      "critic-only update preserves actor hash and actor optimizer/scheduler state",
+      "GAE after critic update uses current values and unchanged old action log-probabilities",
+      "DDP ranks agree on mode and exact pass count",
+      "invalid controller response and restart preserve correct finite state and logs"
+    ],
+    "evaluation": {
+      "fixed_episodes_per_checkpoint": 500,
+      "primary_checkpoint": "final iteration 20; no best-test-checkpoint selection",
+      "primary_metrics": [
+        "mean success over three training seeds",
+        "per-task success and regressions relative to same-seed standard PPO",
+        "paired episode gains/losses",
+        "training-seed dispersion",
+        "environment episodes and GPU-hours"
+      ],
+      "secondary_checkpoints": "Optional fixed iteration10 curves only if included identically for all arms before launch; not used to select the model.",
+      "interpretation": "500 paired episodes do not establish robustness across training seeds; report both. The historical fixed evaluation set is for comparability, not claimed to be entirely unseen."
+    },
+    "replay_control": {
+      "trigger": "Only if the LLM controller shows improvement worth attributing",
+      "arms": 3,
+      "description": "Replay a schedule generated on a different training seed, without reading current training-state feedback. Compare against the feedback controller on the same target seed.",
+      "schedule_assignment": [
+        {
+          "schedule_actor_seed": 42,
+          "target_actor_seed": 43,
+          "target_environment_seed": 1
+        },
+        {
+          "schedule_actor_seed": 43,
+          "target_actor_seed": 44,
+          "target_environment_seed": 2
+        },
+        {
+          "schedule_actor_seed": 44,
+          "target_actor_seed": 42,
+          "target_environment_seed": 0
+        }
+      ],
+      "interpretation": "Cross-seed schedule replay tests transfer of a fixed schedule. Exact self-replay on its original seed is only a reproducibility check, not an ablation of feedback."
+    },
+    "promotion_criteria": [
+      "A positive multi-seed effect relative to fixed PPO without a large recurring task-level collapse",
+      "An advantage over the same-action statistical rule, not solely over a poor fixed setting",
+      "Compare replay results before attributing improvement to feedback-dependent reasoning",
+      "If the rule or a fixed/replayed schedule explains the gain, simplify the method and do not claim a necessary LLM contribution"
+    ]
+  },
+  "phase_2": {
+    "condition": "Phase1 passes engineering and multi-seed evidence checks",
+    "scope": "Add reward configuration management as a separately registered ablation, starting with weights on existing verifiable progress signals.",
+    "comparisons": [
+      "PPO controller only",
+      "reward controller only",
+      "both"
+    ],
+    "constraints": [
+      "Freeze reward per rollout/update batch",
+      "Recompute targets and value fitting consistently after reward version changes",
+      "Keep benchmark success definitions and final evaluation independent",
+      "Use simulator-verifiable state predicates; visual judgement is advisory until independently validated"
+    ],
+    "future_work_not_authorized_by_this_plan": "Do not automatically launch phase2 or cross-benchmark expansions from this proposal."
+  },
+  "resources": {
+    "new_campaign_max_concurrent_5090_gpus": 8,
+    "max_gpus_per_job": 4,
+    "max_wall_hours_per_job": 7,
+    "max_gpu_hours_per_job": 28,
+    "primary_runs": 9,
+    "primary_gpu_hours_hard_upper_bound": 252,
+    "optional_replay_runs": 3,
+    "total_runs_hard_upper_bound": 12,
+    "total_gpu_hours_hard_upper_bound": 336,
+    "admission": "Respect global current-campaign cap and available quota; do not displace existing jobs. Idle Reserved first when verified; otherwise Spot.",
+    "submissions": "Follow current submission_policy.md: >=15min interval, <=3/hour, <=50/day, <=2 queued account jobs; no unattended automatic retries.",
+    "storage": "Budget persistent checkpoints and optimizer state before submissions; do not delete old data as part of this proposal.",
+    "data": "No new expert demonstration collection. Each PPO run still needs its stated on-policy interactions."
+  },
+  "implementation_locations": {
+    "controller": "rlinf/b1k_tools/ new opt-in module, separate from current manager v2/v3",
+    "actor": "rlinf/workers/actor/embodied_fsdp_actor_worker.py",
+    "ordering": "rlinf/runners/embodied_runner.py: receive rollout -> controller -> optional value update -> compute GAE -> actor/joint update",
+    "config": "new frozen config with feature disabled by default"
+  },
+  "research_positioning": {
+    "claim": "A validation plan, not a claim of a new training paradigm or established effectiveness.",
+    "prior_art": [
+      {
+        "name": "Population Based Training",
+        "url": "https://arxiv.org/abs/1711.09846",
+        "overlap": "automatic schedules of training hyperparameters"
+      },
+      {
+        "name": "A Self-Tuning Actor-Critic Algorithm",
+        "url": "https://arxiv.org/abs/2002.12928",
+        "overlap": "adapting actor-critic learning via meta-gradients"
+      },
+      {
+        "name": "LLM-ALSO",
+        "url": "https://arxiv.org/abs/2605.29293",
+        "overlap": "LLM diagnosis, proposal, validation and reward-shaping adaptation in cooperative MARL"
+      }
+    ]
+  },
+  "authorized_at": "2026-11-07",
+  "execution": {
+    "first_job": "b1k-rl-pc-fixed-s1",
+    "uid": "b26f093ea78645508fed472ddbe7fda8",
+    "gpus": 4,
+    "quota": "spot",
+    "stages": [
+      "smoke",
+      "train",
+      "eval_s20"
+    ],
+    "initial_verification": "cpu_verification.json",
+    "frozen_sources": "frozen_inputs.json",
+    "gpu_verification": "passed",
+    "maximum_parallel_new_gpus": 8,
+    "amendment": "execution_amendment_20261107.json"
+  }
+}
