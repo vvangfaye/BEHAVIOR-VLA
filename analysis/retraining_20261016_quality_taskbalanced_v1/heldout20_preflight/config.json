@@ -1,0 +1,90 @@
+{
+  "runtime": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306",
+  "code": "/mnt/afs/260010165/behavior_1k/code_snapshots/b1k-video1688977-20261013",
+  "pairs": [
+    [
+      "cook_bacon",
+      297
+    ],
+    [
+      "getting_organized_for_work",
+      194
+    ],
+    [
+      "hiding_Easter_eggs",
+      294
+    ],
+    [
+      "scrubbing_bathroom_floor",
+      19
+    ],
+    [
+      "putting_up_Christmas_decorations_inside",
+      144
+    ],
+    [
+      "tidying_bathroom",
+      172
+    ],
+    [
+      "wash_dog_toys",
+      33
+    ],
+    [
+      "stacking_wood",
+      204
+    ],
+    [
+      "installing_a_scanner",
+      35
+    ],
+    [
+      "spraying_fruit_trees",
+      137
+    ],
+    [
+      "sorting_bottles_cans_and_paper",
+      230
+    ],
+    [
+      "rearrange_your_room",
+      53
+    ],
+    [
+      "chopping_wood",
+      192
+    ],
+    [
+      "putting_dishes_away_after_cleaning",
+      118
+    ],
+    [
+      "clean_up_broken_glass",
+      12
+    ],
+    [
+      "halve_an_egg",
+      36
+    ],
+    [
+      "hanging_pictures",
+      162
+    ],
+    [
+      "vacuuming_floors",
+      149
+    ],
+    [
+      "moving_boxes_to_storage",
+      53
+    ],
+    [
+      "putting_shoes_on_rack",
+      250
+    ]
+  ],
+  "critical_files": {
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/eval.py": "91ad12f0ba569f51f3f703eeef7bdd4ffd245752b77d2a6061297ca72ff5f3a6",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/evaluator.py": "4227473e56907070ea02c84dcb5d8825f3069ad87b00acab9814884c7556cff7"
+  }
+}

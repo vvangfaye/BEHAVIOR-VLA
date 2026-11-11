@@ -1,0 +1,10 @@
+{
+  "purpose": "Measure actual FP32 JAX inference and memory beside the existing RTX 5090 simulator before switching the unfinished reference episode to GPU",
+  "job": "b1k-rlinf-1023-r07",
+  "uid": "cc2919cc6b5045d3ad07009a842762d7",
+  "resources": {"additional_gpus": 0, "existing_gpus": 1, "probe_max_seconds": 900},
+  "weights_updated": false,
+  "simulator_controls_added_by_probe": 0,
+  "unchanged": ["checkpoint1688977", "FP32", "task", "seed", "controller", "cameras", "acceptance thresholds"],
+  "authorization": "User explicitly requested measuring FP32 JAX plus simulator on one 5090 and switching to GPU if it runs. Persistent project research authorization also applies."
+}

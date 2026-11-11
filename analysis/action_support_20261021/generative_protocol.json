@@ -1,0 +1,21 @@
+{
+  "methods": [
+    "full_flow",
+    "mask_conditioned_flow",
+    "support_flow"
+  ],
+  "seed": 17,
+  "steps": 3000,
+  "batch": 256,
+  "lr": 0.0003,
+  "weight_decay": 0.0001,
+  "aux_mask_bce_weight": 0.1,
+  "inference_euler_steps": 10,
+  "test_samples_per_context": 8,
+  "split": "same episode hash folds: train 2,3,4; test 0; fold 1 unused",
+  "test_chunks": 1186,
+  "train_chunks": 3068,
+  "primary": "paired held-out conditional energy score: support_flow vs mask_conditioned_flow",
+  "scope": "proprio/history prototype; no image encoder or VLA checkpoint updates; one seed",
+  "feature_source": "same exact past-only features as train_activity; per-channel normalization fitted on train only"
+}

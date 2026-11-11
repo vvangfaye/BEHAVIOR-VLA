@@ -1,0 +1,41 @@
+diff --git a/rlinf/workers/actor/embodied_fsdp_actor_worker.py b/rlinf/workers/actor/embodied_fsdp_actor_worker.py
+index 097f832b..a23e7ed2 100644
+--- a/rlinf/workers/actor/embodied_fsdp_actor_worker.py
++++ b/rlinf/workers/actor/embodied_fsdp_actor_worker.py
+@@ -327,6 +327,28 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
+ 
+         advantages_and_returns = calculate_adv_and_returns(**kwargs)
+ 
++        # Trajectory-balanced PPO (BEHAVIOR "balanced_ppo", ported 2026-11-03): token-mean over chunks lets long
++        # (typically failed, time-limit) trajectories dominate the policy gradient. Weight every valid chunk of
++        # trajectory e by N / (K * L_e) (N valid chunks, K trajectories, L_e chunks in e) so each trajectory
++        # contributes equally; applied after GAE normalization, which equals weighting the clipped PPO actor
++        # term per chunk (w > 0). Opt-in; requires one trajectory per column (auto_reset off).
++        if self.cfg.algorithm.get("trajectory_balance", False):
++            mask = self.rollout_batch.get("loss_mask", None)
++            assert mask is not None, "trajectory_balance needs per-trajectory loss masks (auto_reset=False)"
++            valid = mask.float()
++            lengths = valid.sum(dim=0, keepdim=True)  # [1, B, 1] valid chunks per trajectory
++            trajectories = (lengths > 0).sum()
++            weights = valid.sum() / (trajectories * lengths.clamp(min=1.0))
++            advantages = advantages_and_returns["advantages"]
++            advantages_and_returns["advantages"] = advantages * weights.to(advantages.dtype).expand_as(
++                advantages[..., :1]
++            )
++            self._trajectory_balance_metrics = {
++                "trajectory_balance/weight_min": float(weights[lengths > 0].min()),
++                "trajectory_balance/weight_max": float(weights[lengths > 0].max()),
++                "trajectory_balance/mean_length": float(lengths[lengths > 0].mean()),
++            }
++
+         self.rollout_batch.update(advantages_and_returns)
+         if kwargs["loss_mask"] is not None:
+             self.rollout_batch.update({"loss_mask": kwargs["loss_mask"]})
+@@ -335,6 +357,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
+ 
+         rollout_metrics = compute_rollout_metrics(self.rollout_batch)
+         rollout_metrics.update(self._group_success_metrics)
++        rollout_metrics.update(getattr(self, "_trajectory_balance_metrics", {}))
+         return rollout_metrics
+ 
+     @Worker.timer("actor/compute_opd_teacher_logprobs")

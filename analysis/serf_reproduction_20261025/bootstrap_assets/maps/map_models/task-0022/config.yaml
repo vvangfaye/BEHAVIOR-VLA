@@ -1,0 +1,91 @@
+dataset:
+  original_image_size: 480
+dataset_dir: tmp_tasks/cache_latent-mapping-task-22-stage3-job-003-t5cfc
+decoder:
+  dropout: 0.2
+  hidden_dim: 384
+  num_res_blocks: 2
+  train_decoder: false
+dino_model:
+  backbone_weights_url: null
+  dinotxt_weights_url: null
+  image_size: 480
+  patch_size: 16
+encoder:
+  dropout: 0.2
+  hidden_dim: 384
+  num_res_blocks: 2
+  train_encoder: false
+  use_encoder_init: false
+episode_splits:
+  episode_00220230.hdf5: train
+  episode_00220410.hdf5: train
+  episode_00221860.hdf5: train
+  episode_00221900.hdf5: train
+  episode_00222150.hdf5: train
+  episode_00222280.hdf5: train
+  episode_00222360.hdf5: train
+  episode_00222440.hdf5: train
+  episode_00222540.hdf5: train
+  scene_278.hdf5: eval
+model_type: dino
+num_images: -1
+output_dir: tmp_tasks/cache_latent-mapping-task-22-stage3-job-003-t5cfc
+point_map:
+  feature_dim: 64
+  hash_table_size: 8388608
+  knn_k: 6
+  num_nei_cells: 2
+  search_alpha: 0.5
+  temperature: 0.05
+  voxel_size: 0.02
+robot_input_path: 4d_latent_mapping/mapping_data/robot/robot_data.hdf5
+scene_max:
+- 1.1
+- 7.8
+- 2.8
+scene_min:
+- -4.4
+- -1.2
+- -0.1
+target_envs:
+- episode_00220240.hdf5
+- episode_00220160.hdf5
+- episode_00220950.hdf5
+- episode_00221620.hdf5
+- scene_284.hdf5
+- episode_00222060.hdf5
+- episode_00221000.hdf5
+- episode_00220800.hdf5
+- episode_00221810.hdf5
+- episode_00220580.hdf5
+training:
+  batch_size: 32
+  cross_scene_inter: true
+  epochs: 10
+  inter_max_samples: 16384
+  inter_temperature: 0.1
+  intra_max_samples: 16384
+  intra_temperature: 0.1
+  lambda_consistency: 1.0
+  lambda_inter: 0.02
+  lambda_intra: 0.01
+  log_interval: 100
+  optimizer_lr: 0.001
+  save_interval: 5
+visualization:
+  enabled: false
+  filter_background: false
+  include_categories: []
+  interval: 1
+  max_points: 1000000
+  n_components: 3
+  point_size: 0.005
+  quantile_high: 0.98
+  quantile_low: 0.02
+  side_by_side_offset: 1.2
+  whiten: true
+  z_threshold: 2.5
+wandb:
+  enabled: true
+  project: neural-point-map-joint

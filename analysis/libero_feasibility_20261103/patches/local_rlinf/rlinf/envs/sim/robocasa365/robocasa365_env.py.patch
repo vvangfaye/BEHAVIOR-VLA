@@ -1,0 +1,165 @@
+diff --git a/rlinf/envs/sim/robocasa365/robocasa365_env.py b/rlinf/envs/sim/robocasa365/robocasa365_env.py
+index fdad40f5..5b7cbb84 100644
+--- a/rlinf/envs/sim/robocasa365/robocasa365_env.py
++++ b/rlinf/envs/sim/robocasa365/robocasa365_env.py
+@@ -15,6 +15,7 @@
+ """RoboCasa365 environment wrapper for RLinf."""
+ 
+ import copy
++import os
+ from typing import Any, Optional, Union
+ 
+ import gymnasium as gym
+@@ -152,6 +153,11 @@ class Robocasa365Env(gym.Env):
+         )
+         self._init_reset_state_ids()
+         self.update_reset_state_ids()
++        # progress reward (local addition 2026-11-05): potential-based shaping from the task's own state (train only)
++        self.subgoal_coef = float(cfg.get("subgoal_reward_coef", 0.0) or 0.0)
++        self._prev_progress = None
++        if self.subgoal_coef > 0 and not bool(cfg.get("is_eval", False)):
++            os.environ["B1K_RC_PROGRESS"] = "1"  # read by the env subprocesses (rlinf/envs/sim/robocasa/venv.py)
+         self._init_env()
+ 
+         self.prev_step_reward = np.zeros(self.num_envs)
+@@ -217,6 +223,12 @@ class Robocasa365Env(gym.Env):
+             ) % self.num_tasks
+             return group_task_ids.astype(np.int32, copy=False)
+ 
++        _aw = self._agent_task_weights()  # agent manager robocasa (local addition 2026-11-05)
++        if _aw is not None:
++            w = np.array([max(float(_aw.get(t, 1.0)), 0.0) for t in range(self.num_tasks)], dtype=np.float64)
++            if w.sum() <= 0:
++                w[:] = 1.0
++            return self._generator.choice(self.num_tasks, size=num_groups, p=w / w.sum()).astype(np.int32)
+         return self._generator.integers(
+             low=0,
+             high=self.num_tasks,
+@@ -224,6 +236,52 @@ class Robocasa365Env(gym.Env):
+             dtype=np.int32,
+         )
+ 
++    def _agent_task_weights(self):
++        """agent manager robocasa (local addition 2026-11-05): task weights from env.train.agent_weights_file."""
++        path = None if bool(self.cfg.get("is_eval", False)) else self.cfg.get("agent_weights_file", None)
++        if not path or not os.path.exists(path):
++            return None
++        try:
++            import json as _json
++
++            mt = os.path.getmtime(path)
++            cache = getattr(self, "_aw_cache", (None, None))
++            if cache[0] != mt:
++                with open(path) as f:
++                    self._aw_cache = (mt, {int(k): float(v) for k, v in _json.load(f).items()})
++            return self._aw_cache[1]
++        except Exception:
++            return None
++
++    def _record_task_stats(self, terms, dones):
++        """agent manager robocasa (local addition 2026-11-05): append the first episode end of each env in this
++        rollout epoch (success termination = 1, truncation = 0) to <task_stats_dir>/env_<pid>.jsonl; the first call
++        also writes <task_stats_dir>/tasks.json (task descriptions in task-id order) for the manager's prompt."""
++        import json as _json
++
++        d = self.cfg.get("task_stats_dir")
++        os.makedirs(d, exist_ok=True)
++        tj = os.path.join(d, "tasks.json")
++        if not getattr(self, "_ts_tasks_written", False):
++            if not os.path.exists(tj):
++                tmp = f"{tj}.{os.getpid()}.tmp"
++                with open(tmp, "w") as f:
++                    _json.dump({"suite": "RoboCasa365 " + str(self.cfg.get("task_mode", "atomic")),
++                                "tasks": [str(s.get("task_description", s.get("metadata_view", {}).get("task_name", "?")))
++                                          for s in self.task_specs]}, f)
++                os.replace(tmp, tj)
++            self._ts_tasks_written = True
++        rec = getattr(self, "_ts_recorded", None)
++        if rec is None or len(rec) != self.num_envs:
++            rec = self._ts_recorded = np.zeros(self.num_envs, dtype=bool)
++        new = np.asarray(dones, dtype=bool) & ~rec
++        if not new.any():
++            return
++        with open(os.path.join(d, f"env_{os.getpid()}.jsonl"), "a") as f:
++            for i in np.nonzero(new)[0]:
++                f.write(_json.dumps({"task": int(self.task_ids[i]), "s": int(bool(terms[i]))}) + "\n")
++        rec |= new
++
+     def _set_next_task_ids(
+         self, env_idx: Optional[Union[int, list[int], np.ndarray]] = None
+     ) -> np.ndarray:
+@@ -556,12 +614,17 @@ class Robocasa365Env(gym.Env):
+         del options
+         if env_idx is None:
+             env_idx = np.arange(self.num_envs)
++            # agent manager robocasa (local addition 2026-11-05): a full reset starts a rollout epoch
++            if not bool(self.cfg.get("is_eval", False)) and self.cfg.get("task_stats_dir", None):
++                self._ts_recorded = np.zeros(self.num_envs, dtype=bool)
+ 
+         if self.is_start:
+             self._is_start = False
+ 
+         if isinstance(env_idx, int):
+             env_idx = [env_idx]
++        if getattr(self, "_prev_progress", None) is not None:  # progress reward: no shaping across a reset
++            self._prev_progress[np.asarray(env_idx, dtype=np.int64)] = np.nan
+ 
+         raw_obs, info_list = self.env.reset(id=env_idx)
+ 
+@@ -575,6 +638,13 @@ class Robocasa365Env(gym.Env):
+ 
+         obs = self._wrap_obs(self.current_raw_obs, self.current_info_list)
+         self._reset_metrics(env_idx)
++        # Local addition (2026-11-04): per-episode eval logging state (see step()).
++        if getattr(self, "_eval_logged", None) is None or self._eval_logged.shape[0] != self.num_envs:
++            self._eval_logged = np.zeros(self.num_envs, dtype=bool)
++            self._eval_episode = np.full(self.num_envs, -1, dtype=np.int64)
++        idx = np.asarray(env_idx, dtype=np.int64)
++        self._eval_logged[idx] = False
++        self._eval_episode[idx] += 1
+         infos = {}
+         return obs, infos
+ 
+@@ -626,9 +696,31 @@ class Robocasa365Env(gym.Env):
+             [info.get("success", False) for info in info_lists]
+         ).astype(bool)
+         truncations = self._elapsed_steps >= self.task_horizons
++        if bool(self.cfg.get("is_eval", False)) and getattr(self, "_eval_logged", None) is not None:
++            # Local addition (2026-11-04): one line per finished eval episode (first success or horizon), so that
++            # per-task success rates and paired comparisons (same task/env/episode index) can be computed.
++            newly = (terminations | truncations) & ~self._eval_logged
++            for i in np.nonzero(newly)[0]:
++                task_name = self.task_specs[int(self.task_ids[i])]["metadata_view"].get("task_name", "?")
++                print(
++                    f"[robocasa eval] task={task_name}, env={int(self.seed_offset) * self.num_envs + int(i)}, "
++                    f"ep={int(self._eval_episode[i])}, seed={self.env_seeds[i]}, success={bool(terminations[i])}, "
++                    f"len={int(self._elapsed_steps[i])}",
++                    flush=True,
++                )
++            self._eval_logged |= newly
+         obs = self._wrap_obs(raw_obs, info_lists)
+ 
+         step_reward = self._calc_step_reward(terminations)
++        # progress reward (local addition 2026-11-05): coef * (Phi_t - Phi_{t-1}) on train envs
++        if getattr(self, "subgoal_coef", 0.0) > 0 and not bool(self.cfg.get("is_eval", False)):
++            prog = np.array([np.nan if info.get("progress") is None else float(info["progress"]) for info in info_lists],
++                            dtype=np.float32)
++            if self._prev_progress is None or len(self._prev_progress) != len(prog):
++                self._prev_progress = np.full(len(prog), np.nan, dtype=np.float32)
++            shaping = np.where(np.isnan(self._prev_progress) | np.isnan(prog), 0.0, prog - self._prev_progress)
++            step_reward = step_reward + self.subgoal_coef * shaping.astype(np.float32)
++            self._prev_progress = prog
+ 
+         infos = list_of_dict_to_dict_of_list(info_lists)
+         infos = self._record_metrics(step_reward, terminations, infos)
+@@ -694,6 +786,10 @@ class Robocasa365Env(gym.Env):
+         past_truncations = raw_chunk_truncations.any(dim=1)
+         past_dones = torch.logical_or(past_terminations, past_truncations)
+ 
++        # agent manager robocasa (local addition 2026-11-05): per-task training statistics
++        if not bool(self.cfg.get("is_eval", False)) and self.cfg.get("task_stats_dir", None):
++            self._record_task_stats(past_terminations.cpu().numpy(), past_dones.cpu().numpy())
++
+         if past_dones.any() and self.auto_reset:
+             obs_list[-1], infos_list[-1] = self._handle_auto_reset(
+                 past_dones.cpu().numpy(), obs_list[-1], infos_list[-1]

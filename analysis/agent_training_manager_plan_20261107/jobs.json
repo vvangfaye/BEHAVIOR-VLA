@@ -1,0 +1,92 @@
+[
+  {
+    "tag": "pc_fixed_s1",
+    "arm": "fixed",
+    "seed": 1,
+    "stages": "analysis/agent_training_manager_plan_20261107/stages/pc_fixed_s1.json",
+    "gpu_count": 4,
+    "wall_hours": 7,
+    "requires_engineering_gate": true,
+    "status": "prepared_not_submitted"
+  },
+  {
+    "tag": "pc_rule_s1",
+    "arm": "rule",
+    "seed": 1,
+    "stages": "analysis/agent_training_manager_plan_20261107/stages/pc_rule_s1.json",
+    "gpu_count": 4,
+    "wall_hours": 7,
+    "requires_engineering_gate": true,
+    "status": "prepared_not_submitted"
+  },
+  {
+    "tag": "pc_agent_s1",
+    "arm": "agent",
+    "seed": 1,
+    "stages": "analysis/agent_training_manager_plan_20261107/stages/pc_agent_s1.json",
+    "gpu_count": 4,
+    "wall_hours": 7,
+    "requires_engineering_gate": true,
+    "status": "prepared_not_submitted"
+  },
+  {
+    "tag": "pc_fixed_s2",
+    "arm": "fixed",
+    "seed": 2,
+    "stages": "analysis/agent_training_manager_plan_20261107/stages/pc_fixed_s2.json",
+    "gpu_count": 4,
+    "wall_hours": 7,
+    "requires_engineering_gate": true,
+    "status": "prepared_not_submitted"
+  },
+  {
+    "tag": "pc_rule_s2",
+    "arm": "rule",
+    "seed": 2,
+    "stages": "analysis/agent_training_manager_plan_20261107/stages/pc_rule_s2.json",
+    "gpu_count": 4,
+    "wall_hours": 7,
+    "requires_engineering_gate": true,
+    "status": "prepared_not_submitted"
+  },
+  {
+    "tag": "pc_agent_s2",
+    "arm": "agent",
+    "seed": 2,
+    "stages": "analysis/agent_training_manager_plan_20261107/stages/pc_agent_s2.json",
+    "gpu_count": 4,
+    "wall_hours": 7,
+    "requires_engineering_gate": true,
+    "status": "prepared_not_submitted"
+  },
+  {
+    "tag": "pc_fixed_s3",
+    "arm": "fixed",
+    "seed": 3,
+    "stages": "analysis/agent_training_manager_plan_20261107/stages/pc_fixed_s3.json",
+    "gpu_count": 4,
+    "wall_hours": 7,
+    "requires_engineering_gate": true,
+    "status": "prepared_not_submitted"
+  },
+  {
+    "tag": "pc_rule_s3",
+    "arm": "rule",
+    "seed": 3,
+    "stages": "analysis/agent_training_manager_plan_20261107/stages/pc_rule_s3.json",
+    "gpu_count": 4,
+    "wall_hours": 7,
+    "requires_engineering_gate": true,
+    "status": "prepared_not_submitted"
+  },
+  {
+    "tag": "pc_agent_s3",
+    "arm": "agent",
+    "seed": 3,
+    "stages": "analysis/agent_training_manager_plan_20261107/stages/pc_agent_s3.json",
+    "gpu_count": 4,
+    "wall_hours": 7,
+    "requires_engineering_gate": true,
+    "status": "prepared_not_submitted"
+  }
+]

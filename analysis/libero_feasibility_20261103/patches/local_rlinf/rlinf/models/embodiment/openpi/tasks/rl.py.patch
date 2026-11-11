@@ -1,0 +1,56 @@
+diff --git a/rlinf/models/embodiment/openpi/tasks/rl.py b/rlinf/models/embodiment/openpi/tasks/rl.py
+index 9dafb7f1..90740318 100644
+--- a/rlinf/models/embodiment/openpi/tasks/rl.py
++++ b/rlinf/models/embodiment/openpi/tasks/rl.py
+@@ -141,6 +141,14 @@ class Pi0RL(EnvIO, Pi0):
+         (~2.5GiB/layer at micro_batch=128) and OOM. When the VLM is trained,
+         prefix stays in the graph.
+         """
++        store = getattr(self, "_actor_prefix_store", None)
++        if store is not None and self.rl_cfg.train_expert_only:
++            # Opt-in (actor.prefix_cache): reuse the frozen prefix across PPO update epochs.
++            def build():
++                with torch.no_grad():
++                    return self.build_prefix_cache(observation)
++
++            return store.fetch_or_build(build, observation.state.device)
+         if self.rl_cfg.train_expert_only:
+             with torch.no_grad():
+                 return self.build_prefix_cache(observation)
+@@ -419,8 +427,36 @@ class Pi0RL(EnvIO, Pi0):
+             f"{type(self).__name__} does not support forward_type={forward_type!r}."
+         )
+ 
++    def espo_forward(self, forward_inputs: dict[str, torch.Tensor], espo_noise=None, espo_feature_fn=None,
++                     espo_z_only=False, **kwargs):
++        """ESPO (local addition, see openpi/espo.py): values from the prefix (critic) and the mean executed-action
++        features of the native ODE sampler from fixed noise espo_noise [B, M, H, D], differentiable in the expert.
++        espo_z_only=True returns just the pooled prefix z (first prepare pass). Called through the FSDP root forward."""
++        from rlinf.models.embodiment.openpi import espo
++
++        rl_cfg = self.rl_cfg
++        observation = self._observation_from_forward_inputs(forward_inputs)
++        prefix_out, prefix_mask, kv_cache = self._build_prefix_cache_for_actor(observation)
++        if espo_z_only:
++            return {"espo_z": espo.pooled_prefix(prefix_out.detach(), prefix_mask)}
++        values = None
++        if rl_cfg.add_value_head and rl_cfg.value_after_vlm:
++            values = rl_sampler.value_from_prefix(
++                self.value_head, prefix_out, prefix_mask, mode=rl_cfg.value_vlm_mode
++            ).float()
++        B, M = espo_noise.shape[0], espo_noise.shape[1]
++        z = espo.pooled_prefix(prefix_out.detach(), prefix_mask)
++        obs_m = espo.expand_observation(observation, M)
++        kv_m = espo._repeat(kv_cache, M)
++        mask_m = prefix_mask.repeat_interleave(M, dim=0)
++        u = espo.ode_executed_actions(self, obs_m, kv_m, mask_m, espo_noise.reshape(B * M, *espo_noise.shape[2:]))
++        phi = espo_feature_fn(z.repeat_interleave(M, dim=0), u).view(B, M, -1).mean(1)
++        return {"values": values, "espo_phi": phi, "espo_z": z, "espo_u": u.view(B, M, -1)}
++
+     def default_forward(self, forward_inputs: dict[str, torch.Tensor], **kwargs):
+         """PPO/GRPO recompute of logprobs and values from the stored chain."""
++        if kwargs.get("espo_noise", None) is not None or kwargs.get("espo_z_only", False):
++            return self.espo_forward(forward_inputs, **kwargs)
+         rl_cfg = self.rl_cfg
+         compute_values = kwargs.get("compute_values", True)
+         chains = forward_inputs["chains"]

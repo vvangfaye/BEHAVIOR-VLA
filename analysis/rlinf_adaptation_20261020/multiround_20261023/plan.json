@@ -1,0 +1,121 @@
+{
+  "upstream_commit": "91a302ec50ddacd1fdabc5859b85e3661d768236",
+  "converted": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261020/smoke01/checkpoint",
+  "code": "/mnt/afs/260010165/behavior_1k/code_snapshots/b1k-video1688977-20261013",
+  "runtime": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306",
+  "original": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/checkpoints/original1688977",
+  "tokenizer": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/openpi-cache/big_vision/paligemma_tokenizer.model",
+  "supplemental_library": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/library_snapshots/behavior-libxml-repair3-20261008-011710",
+  "supplemental_library_sha256": "66e5e790156270c67a266b49b115228f8159f032b2f336b61f4a32b511a0a8ec",
+  "original_source_sha256": {
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/eval.py": "91ad12f0ba569f51f3f703eeef7bdd4ffd245752b77d2a6061297ca72ff5f3a6",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/evaluator.py": "4227473e56907070ea02c84dcb5d8825f3069ad87b00acab9814884c7556cff7",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/single_env.py": "e1d55a61b38249b9ec4dd68930241d7be1fdad4771aaa689cd9532a8e4e2ac59",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/r1pro.yaml": "a98fa8a81472adfecfb642778d4d7a01e20131be7f70824e0ae095d665cdbb93"
+  },
+  "original_metadata_sha256": "1a59e30e43f7af9b868e032aaaf3245a8701602207b08ddf1bde8edf7c1fd2dd",
+  "task": "turning_on_radio",
+  "gate": {
+    "minimum_probes": 8,
+    "mean_action_error": 0.005,
+    "max_action_error": 0.05,
+    "initial_error": 0.0001,
+    "score_gap": 0.1
+  },
+  "initialization_timeout_seconds": 1800,
+  "job_name": "b1k-ppo5-1023-p01",
+  "output": "/mnt/afs/260010165/behavior_1k/rlinf_multiround_20261023/pilot01/results",
+  "seed": 0,
+  "model_seed": 0,
+  "policy_precision": "float32",
+  "gpu_count": 1,
+  "quota_type": "spot",
+  "max_job_seconds": 28800,
+  "compute_timeout_seconds": 25200,
+  "eval_instances": [
+    301,
+    302
+  ],
+  "eval_seeds": [
+    0,
+    1,
+    2
+  ],
+  "eval_steps": 3224,
+  "train_instance": 1,
+  "train_seeds": [
+    1000,
+    1001,
+    1002,
+    1003,
+    1004
+  ],
+  "rounds": 5,
+  "train_steps_per_round": 3224,
+  "eval_policy": "deterministic 10-step ODE with explicit NumPy initial noise; greedy generated subtasks",
+  "warm_start": {
+    "directory": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/retry07/gpu_continuation/results/ppo/checkpoint",
+    "expected_trainable_sha256": "9eb8cfdd724edd999f6f38fded89a94876241f2c2e91fe93f33a305dda3bbcbd",
+    "previous_controls": 256,
+    "previous_optimizer_steps": 4
+  },
+  "optimizer": {
+    "actor_lr": 1e-06,
+    "value_lr": 0.0001,
+    "weight_decay": 0.01,
+    "microbatch_chunks": 1,
+    "accumulate_chunks": 4,
+    "epochs_per_round": 1,
+    "clip_ratio": 0.2,
+    "gamma": 0.99,
+    "gae_lambda": 0.95
+  },
+  "reward": {
+    "source": "unchanged simulator reward",
+    "chunk_aggregation": "sum of up to 16 control rewards, multiplied by 10"
+  },
+  "evaluation": {
+    "checkpoints": [
+      "original1688977",
+      "after_round_05"
+    ],
+    "cases": [
+      [
+        301,
+        0
+      ],
+      [
+        301,
+        1
+      ],
+      [
+        301,
+        2
+      ],
+      [
+        302,
+        0
+      ],
+      [
+        302,
+        1
+      ],
+      [
+        302,
+        2
+      ]
+    ],
+    "paired_initial_pose_tolerance": 0.0001,
+    "no_checkpoint_selection": true,
+    "no_evaluation_rewards_for_training": true
+  },
+  "storage": {
+    "keep_all_round_overlays": true,
+    "keep_optimizer_for_latest_complete_round": true,
+    "archive_reports_logs_actions_only": true,
+    "upload_round_overlays_and_final_optimizer_separately": true
+  },
+  "rules_snapshot": "2026-09-11; 2026-10-23 refresh attempted but Feishu source inaccessible; unchanged one Spot RTX5090, finite eight-hour budget",
+  "authorization": "User requested single-5090 small multi-round PPO with frozen evaluation and comparison to original checkpoint; research_autonomy_authorization_20261020.json",
+  "accepted_gate": "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/retry07/gpu_continuation/results/gate.json"
+}

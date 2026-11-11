@@ -1,0 +1,279 @@
+{
+  "experiment": "rl_combined_20261102",
+  "authorization": "User: combine trajectory equal weighting and gamma=1; reuse exact existing 32 rollouts, 17 optimizer steps, fixed evaluation set.",
+  "variant": "balanced_gamma1_ppo",
+  "task": "bringing_water",
+  "start_checkpoint": "original1688977",
+  "source_campaign": "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/rl_scheme_comparison_20261101",
+  "source_trajectories": 32,
+  "source_chunks": 23908,
+  "gamma": 1.0,
+  "shaping_gamma": 1.0,
+  "weighting": "N/(32*T_i), equal total combined actor/critic loss weight per trajectory",
+  "optimizer_steps": 17,
+  "actor_lr": 1e-07,
+  "value_lr": 0.0001,
+  "gae_lambda": 0.95,
+  "shuffle_seed": 602410,
+  "train_gpus": 4,
+  "eval_parallel_gpus": 16,
+  "max_total_live_gpus": 32,
+  "quota_type": "spot",
+  "train_timeout_seconds": 43200,
+  "eval_timeout_seconds": 5400,
+  "attempt_cap": 2,
+  "max_total_gpu_hours": 192,
+  "max_wall_hours": 48,
+  "eval_cases": [
+    [
+      301,
+      0
+    ],
+    [
+      301,
+      1
+    ],
+    [
+      302,
+      0
+    ],
+    [
+      302,
+      1
+    ],
+    [
+      303,
+      0
+    ],
+    [
+      303,
+      1
+    ],
+    [
+      304,
+      0
+    ],
+    [
+      304,
+      1
+    ],
+    [
+      305,
+      0
+    ],
+    [
+      305,
+      1
+    ],
+    [
+      306,
+      0
+    ],
+    [
+      306,
+      1
+    ],
+    [
+      307,
+      0
+    ],
+    [
+      307,
+      1
+    ],
+    [
+      308,
+      0
+    ],
+    [
+      308,
+      1
+    ],
+    [
+      309,
+      0
+    ],
+    [
+      309,
+      1
+    ],
+    [
+      310,
+      0
+    ],
+    [
+      310,
+      1
+    ],
+    [
+      311,
+      0
+    ],
+    [
+      311,
+      1
+    ],
+    [
+      312,
+      0
+    ],
+    [
+      312,
+      1
+    ],
+    [
+      313,
+      0
+    ],
+    [
+      313,
+      1
+    ],
+    [
+      314,
+      0
+    ],
+    [
+      314,
+      1
+    ],
+    [
+      315,
+      0
+    ],
+    [
+      315,
+      1
+    ],
+    [
+      316,
+      0
+    ],
+    [
+      316,
+      1
+    ],
+    [
+      317,
+      0
+    ],
+    [
+      317,
+      1
+    ],
+    [
+      318,
+      0
+    ],
+    [
+      318,
+      1
+    ],
+    [
+      319,
+      0
+    ],
+    [
+      319,
+      1
+    ],
+    [
+      320,
+      0
+    ],
+    [
+      320,
+      1
+    ]
+  ],
+  "reuse_existing_baselines": true,
+  "remote_root": "/mnt/afs/260010165/behavior_1k/rl_combined_20261102",
+  "aoss_prefix": "behavior1k/rl-combined-20261102/",
+  "training_storage_limit_bytes": 17179869184,
+  "evaluation_storage_limit_bytes": 536870912,
+  "campaign_storage_reserve_bytes": 38654705664,
+  "storage_margin_bytes": 21474836480,
+  "source_rollout_receipts_sha256": "9886fdc28529bbda36b76d9afc245075523252b041cc17c5d39c2bb5ee80f588",
+  "runtime_sha256": {
+    "b1k_rlinf/__init__.py": "c17ba0de3a2b2b85273864e8176953f58dcf7de20a415cd187794fa5e0a9d9a5",
+    "b1k_rlinf/action_interface.py": "f347a7b8e3773b519590cec9cf8df39c5181f30905955c0a648a3547894c1139",
+    "b1k_rlinf/export.py": "21700c5a7551a379fbb1390af08dd0e8929dd98d4b632c79b79f2eae24fd9054",
+    "b1k_rlinf/factory.py": "78c0071b41d16039c7d0b51c0ee875f2ab904e348ad5443a733e3bee00d8611a",
+    "b1k_rlinf/io.py": "7df1e36327197a6603078c1e374a3a39ff6e288cfdb0c2a079ea4502ae1a0db1",
+    "b1k_rlinf/launch.py": "7f30dc81f532d29d3efd8cbb7c68a4534ce8fe4e9517f552ff9e971e967083f5",
+    "b1k_rlinf/model.py": "d633a455b304f3300132081aeeb0e9d1a980d8616190ab0a2fb49622cb12fe40",
+    "b1k_rlinf/precision.py": "9f26df0e9a1a8a105db113d37fea278284b7b3aaa3dd07a53e94f3d249fc9dea",
+    "b1k_rlinf/prepare.py": "e713208920f0786d55562a0a804f31b25d6b82fe998db5ef5767605f528b3cb8",
+    "b1k_rlinf/reference_check.py": "2f05d627d0d7aeafa68e1b792a8525a4167bc9c2c83d573e932d9dcd83e4d3a8",
+    "b1k_rlinf/tokenizer.py": "068385b7d66f3d233f6487b1719f2ff78cbc582a84ef42812a50ed0d4ddb50b7",
+    "b1k_rlinf/verify.py": "6ba790038bdcf34e97760d2df5e2499a417212b59d6cf3fe478b72065e1c0efe",
+    "bootstrap.py": "6b6a5f380df6106a773de51c6d9bf1e440166dcdb33e8fcdc55c47505768f8fb",
+    "capacity_admission.py": "8822f38417a646518e5ddb1e8145b287dea96525b13c15e0ed2766da349985b2",
+    "common.py": "d05e5d7ec669b80d4949a1829938504d642550c67b2fe515b424d0782c52e12c",
+    "comparison_driver.py": "201eb39c28818801d7f219781c5f8ebb699f759ca73557e90269327dfdf256a7",
+    "distributed_driver.py": "b68b3028d1adab655512e4cde661b614f842dd8f0073b15adb4d86fc31a63177",
+    "eval_utils.py": "a2f592001111df23beb579534c3ea86945492515f6db9dcc9bfbe6210a6bc6f7",
+    "experiment.py": "863dfac67b87dcfe2cbddc38a12a3859cab6624809adcf0ae1cb18f3eed811df",
+    "goals.py": "1e666f7c473e69bb3d0e86091df34f49d4c85b28c434f153c72eb2e7eea25aa0",
+    "helpers.py": "ca4bf0a9f9af53031502d5c02045aa0385ce94209be92100414616cc7b046f1e",
+    "kl_batch.py": "a84b2d78eeaeeb146fe7e0a45d3ec1c95fd019b829ed50f520fca40e39d19b49",
+    "parallel_training.py": "c8e00529ed714548cc6a301291d99366eb571c6ea6b9f5712c1dd179f8c2582b",
+    "resource_watch.py": "80123e5dd94994db99151c2701332e64a45b2308f6c13c7912dac991c0dd4021",
+    "simulator.py": "73160e6f2532cafd5ad35c7d2aeec9129bdd2649751734f0fc09013d28da7f8a",
+    "single_bootstrap.py": "6a3af8e8727f8103f34a50a3d419f5f2347e3aed8a31e130984c24f4603f02eb",
+    "storage_guard.py": "c2977a3896f214a2a68a4dea72dcf41fcd88b1b1996cb3cef0f0e42fc55a11b6",
+    "training.py": "ff35bf3f660bf16695b53c0d57129d4b022d62d156c2a3993cba478588165b1b",
+    "variant_update.py": "c8bf761c841ea04909ecca330e9092ef28316e39b01bb8ccc332a97282e287c2"
+  },
+  "baseline_result_sha256": {
+    "i301_s0": "bcbae7edd39fc33df2da3c02cc8c0c64d6a5d8d850bcb078db9b5892c645f98e",
+    "i301_s1": "bb0fc5f406c8d6a50bbd271da35a7d496a42acd7bbf115470099f21f18d630a2",
+    "i302_s0": "d1c0c5a07ce89cedc33d3e9e717c9e32e277b5e1d53d815a20f5eea09847ed68",
+    "i302_s1": "66c69dbfbb5cb2be2d4bbb9eda68cac2e61521db1c43c3c808be1c0f902b7945",
+    "i303_s0": "5ec60ffc9ec7eb1b5b1a496300effe23cb2523defbebd7541ded06191101b23b",
+    "i303_s1": "35616be0198a0083adbf875e219a1b3ec4b3f94d1789469c149276b1ea1792ed",
+    "i304_s0": "1e3680e920365eea7ae81a00a0138067d1ec43d22df82403dfd75ebbb6e8bab2",
+    "i304_s1": "7b2aea87a082b1fc4a6ab15ecda3c70320e30802c5f8cffb22ee6e2e3dc23427",
+    "i305_s0": "82163409df93c48615bbedd5fa4064233c03aed34714b87a216f6c23bae9341f",
+    "i305_s1": "3712fc7980b3bf30f0bc548da26428173bafdd6f63b8822626d61592a54cd995",
+    "i306_s0": "0f6ed11ade931378cc8abbe36b27fd77a3612062ec4c578cec6fe77136b57794",
+    "i306_s1": "e1a06bec3b6cb9c60c6a37069a65072019a1843dfcf46bc36defdeb151756866",
+    "i307_s0": "894ab623b761edd7d07b2128a9aaec0bc55d982378aa5b1515d4b0f3929e2403",
+    "i307_s1": "0b4f05a1180323160ded53d499f44c53fbed91035439b353f1b435e579a76b38",
+    "i308_s0": "a190799b66377f08867cd78611b62bdafd32ba713703d9bd1666e72e0ad9521d",
+    "i308_s1": "dc5d3d7fdad5122a843e099de64b7094f3552b121b5a2c4ad089b268e7439443",
+    "i309_s0": "263cc16150cae005eca78b644f7db07d95445d2abe9eab345d315f62420c81ac",
+    "i309_s1": "1998b6b26129b3d6646fdf6cb97aee6ba7e1bb2039d0166a233386b3bc1300cb",
+    "i310_s0": "1fba692324c15ade66c7ec72c7130ee45c64a2fdd7411aeb0105c68eb762b8cb",
+    "i310_s1": "33dfedf47dae0b8e39b2b941a2873953bcea3da0c4966bac4652d871989fe5d5",
+    "i311_s0": "e071889ab82477eb12cde8989b2a4fc202f3169c1e6c934684a20c1e0aa13f0d",
+    "i311_s1": "dacafbef009740f4ef61d68fbfca387301820ffe54cd5aed0ceeac546b00c2c6",
+    "i312_s0": "3af77f8986bb0fe9154f78f514aff087c542b285026233f743dafbdd9eed5586",
+    "i312_s1": "4e7775630dcc4d8d1e33d44b15255c192d53b818dae38f5d9dcec67d8e2a4ee8",
+    "i313_s0": "9fb1f8a1bf32a742a345679ab63fd46a8ecc8e92621d30b4806cc24ad94eb8ce",
+    "i313_s1": "dc5db77af0495597c63b169c9faf83240b656e0e084248afa2fca4308031835c",
+    "i314_s0": "cadc30d0dd9b68dfbc2d90a62606e74728db5355c5cc7d806ab3fb8dcfb98ac2",
+    "i314_s1": "3fb2597eca516057fbddfc7db4b13691c7e151c98362fc8b3c6760a90a489ffe",
+    "i315_s0": "c78acc2b78ceae55b5d68d9ecc54d84851b341be2c028246c106d372b3fb7045",
+    "i315_s1": "07c5434ad7b2cce7e447e3ba37059b7392caf9f87c29f1f0a2bfaf9a289ace2f",
+    "i316_s0": "ab7bcd29508d84a174b8d445d60f626ef692b1affca60e70a3eaa10942f2d98d",
+    "i316_s1": "4d728e9fa081bdc812e389aba7527e2412705e2308269f49ca2f7683a21cdebf",
+    "i317_s0": "dad1afebd3f9cd16db2fe2f1c3964bdf00fbc929900fb6b596a9e18592e2f7b9",
+    "i317_s1": "9e007da1dd38df9994f162b8b8456cfe0c9777875db05bc0e7ba33c511431819",
+    "i318_s0": "b41b04d9e3ac17c51083f952663938c6d5985c759a2c0fd6bce0e1519eb671e6",
+    "i318_s1": "3ca991ffbc82b75d8426e369e57c2383add58c197300c5e04a93a8e19116ae6a",
+    "i319_s0": "a0c5c0cf43e60e0ccd4a3aa0d03b8f97df560aece2f3544cc08a5277cc3dd31f",
+    "i319_s1": "14d1fd6796118af77f84c786cdab7af5ccb8e12a0ae28b11b7b9c9d4795a8b8e",
+    "i320_s0": "f6d6a8568a9966e566bfd61c86a7b76f92350288f016203e2a8b66f9ff181f9a",
+    "i320_s1": "4c322f23b26640ca00ec3ec196a5d70a35047a38bf215f6c709f2cd85eb699fc"
+  },
+  "comparators": [
+    "original",
+    "control",
+    "balanced_ppo",
+    "gamma1_ppo"
+  ],
+  "preserve_existing_checkpoints_and_expert_data": true,
+  "no_new_training_rollouts": true,
+  "created_at": 1793585879.4230542
+}

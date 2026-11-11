@@ -1,0 +1,68 @@
+env_wrapper:
+  _target_: omnigibson.learning.wrappers.RGBLowResWrapper
+policy_name: websocket
+headless: true
+eval_on_train_instances: false
+eval_instance_ids:
+- 0
+write_video: true
+write_third_person_video: false
+repro_initial_state: true
+repro_action_log: true
+replay_mode: none
+replay_action_log_path: null
+replay_until_step: null
+resume_record_suffix: resumed
+repro_action_chunk_size: 100
+record_step_q_score: true
+partial_scene_load: true
+max_steps: null
+log_path: /tmp/serf-mt8-1029-s1-a2/181_image
+test_hidden: false
+robot:
+  type: R1Pro
+  multi_view_cameras:
+    left_wrist:
+      name: robot_r1::robot_r1:left_realsense_link:Camera:0
+      resolution:
+      - 240
+      - 240
+    right_wrist:
+      name: robot_r1::robot_r1:right_realsense_link:Camera:0
+      resolution:
+      - 240
+      - 240
+    head:
+      name: robot_r1::robot_r1:zed_link:Camera:0
+      resolution:
+      - 240
+      - 240
+  action_keys:
+  - base
+  - torso
+  - left_arm
+  - left_gripper
+  - right_arm
+  - right_gripper
+  action_key_dims:
+    base: 3
+    torso: 4
+    left_arm: 7
+    left_gripper: 1
+    right_arm: 7
+    right_gripper: 1
+  controllers: null
+task:
+  name: assembling_gift_baskets
+  task_info_range: null
+  pcd_range:
+  - 0.0
+  - 2.0
+  - -1.5
+  - 1.5
+  - 0.25
+  - 1.25
+model:
+  _target_: omnigibson.learning.policies.WebsocketPolicy
+  host: 127.0.0.1
+  port: 8000

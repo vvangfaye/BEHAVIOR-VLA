@@ -1,0 +1,68 @@
+{
+  "date": "2026-10-20",
+  "authorization": "Standing authorization for routine project diagnostics; local CPU only.",
+  "purpose": "Compare free subtask generation before and after SFT on the existing 36 cached expert observations.",
+  "maximum_seconds_per_checkpoint": 900,
+  "maximum_concurrent_processes": 2,
+  "total_cpu_affinity": 32,
+  "runs": {
+    "baseline1688977": {
+      "checkpoint": "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/organizer_rehearsal_1688977_20261016/runtime/policy-bundle/rootfs/mnt/afs/260010165/behavior_1k/checkpoints/pi05_b1k_full100_joint_1688977_aoss_20261010",
+      "cpus": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ]
+    },
+    "expert1000": {
+      "checkpoint": "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/training_boundary_audit_20261019/flow_endpoint_screen_20261020/expert1000_checkpoint",
+      "cpus": [
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ]
+    }
+  },
+  "reference": "Existing four-checkpoint GPU action export; raw provided-input hashes must match, backend numerical outputs are not pooled.",
+  "selection": "All 36 frozen cache anchors; report boundary strata and invalid generations without exclusion.",
+  "repeat_control": "First generation repeated per checkpoint; require exact token equality.",
+  "new_action_sampling": false,
+  "training": false,
+  "simulation": false,
+  "downloads": false,
+  "limits": [
+    "Training-seen expert states, not on-policy outcomes.",
+    "Annotation disagreement does not automatically imply wrong stage.",
+    "No causal attribution of historical closed-loop gain from this screen alone."
+  ],
+  "source_sha256": {
+    "probe.py": "60d7e14ccc8cf3335b47e4ed618a2fb2c8dfa61d26b73fc4999d3ba5bd041e3c",
+    "run_local.py": "1311d43576140d3e235732b5c80bf9fefd3a1993caadde802b7c8b3937770972"
+  }
+}

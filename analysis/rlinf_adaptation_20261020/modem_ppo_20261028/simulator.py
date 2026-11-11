@@ -1,0 +1,258 @@
+"""Original competition evaluator in its unchanged simulator environment."""
+
+import argparse
+import ast
+import faulthandler
+import hashlib
+import json
+import time
+import traceback
+from multiprocessing.connection import Connection
+from pathlib import Path
+
+
+def install_step_recorder(env):
+    """Record scalar results without forwarding assignment into the vector env."""
+    original_step = env.step
+    last = {}
+
+    def recording_step(*args, **kwargs):
+        value = original_step(*args, **kwargs)
+        last["reward"] = float(value[1])
+        last["info"] = value[4]
+        return value
+
+    # SingleEnvironmentAdapter.__setattr__ forwards ordinary assignment. The
+    # captured bound step calls that forwarded target, which would call us again.
+    object.__setattr__(env, "step", recording_step)
+    return last
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--fd", type=int, required=True)
+    parser.add_argument("--spec", required=True)
+    args = parser.parse_args()
+    spec = json.loads(Path(args.spec).read_text())
+    conn = Connection(args.fd)
+    faulthandler.enable()
+    # Avoid asynchronous frame walking while Isaac Sim worker threads mutate frames.
+    # Keep fatal-signal diagnostics; initialization.json already reports the load stage.
+    started = time.monotonic()
+
+    def stage(name):
+        target = Path(spec["output"]) / "initialization.json"
+        temporary = target.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps({"stage": name, "elapsed_seconds": time.monotonic() - started})
+        )
+        temporary.replace(target)
+        print("INITIALIZATION " + name, flush=True)
+
+    stage("importing_simulator")
+    import numpy as np
+    import omnigibson as og
+    import torch
+    from helpers import _build_evaluator_cfg
+    from omnigibson.eval import eval as base
+    from omnigibson.metrics.task_metric import TaskMetric
+    from omnigibson.eval.utils.eval_utils import TASK_NAMES_TO_INDICES
+    from goals import whole_task_prompt
+
+    registry_path = Path(spec['task_prompt_source'])
+    assert hashlib.sha256(registry_path.read_bytes()).hexdigest()==spec['task_prompt_source_sha256']
+    registry = next(n for n in ast.parse(registry_path.read_text()).body
+                    if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='TASKS' for t in n.targets))
+    registered_prompt = ast.literal_eval(registry.value)[spec['task']]
+    assert registered_prompt==spec['task_prompt']
+    expected_task_id = TASK_NAMES_TO_INDICES[spec['task']]
+
+    base.seed_everything(spec["seed"])
+    og.macros.gm.HEADLESS = True
+
+    class ActionQueue:
+        current_subtask = None
+        current_subtask_source = "generated"
+
+        def reset(self):
+            self.actions = []
+
+        def forward(self, obs):
+            return self.actions.pop(0)
+
+    policy = ActionQueue()
+
+    class Evaluator(base.Evaluator):
+        def load_policy(self):
+            return policy
+
+    cfgargs = base.parse_args(
+        [
+            "--task-name",
+            spec["task"],
+            "--mode",
+            spec["mode"],
+            "--prompt-mode",
+            "whole_task",
+            "--num-rollouts",
+            "1",
+            "--max-steps",
+            str(spec["max_steps"]),
+            "--headless",
+            "--env-wrapper",
+            "omnigibson.eval.wrappers.RGBDFullResWrapper",
+            "--robot-config",
+            spec["robot_config"],
+            "--output-dir",
+            spec["output"],
+        ]
+    )
+    stage("creating_evaluator")
+    evaluator = Evaluator(_build_evaluator_cfg(base, cfgargs, spec["seed"]))
+    stage("first_reset")
+    evaluator.reset(prepare_for_task_instance=True)
+    stage("loading_task_instance")
+    evaluator.load_task_instance(spec["instance"])
+    stage("resetting_task_instance")
+    evaluator.reset()
+    assert evaluator.robot.action_dim == 23
+    evaluator.start_recording(str(Path(spec["output"]) / "rollout.mp4"))
+    metric = next(m for m in evaluator.metrics if isinstance(m, TaskMetric))
+    last = install_step_recorder(evaluator.env)
+    from goals import ModemObserver
+    observer = ModemObserver(evaluator, spec['goal_contract'])
+    initial_goals = observer.observe()
+    goal_names = ('toggled_on','nextto_tv','shared_tv_cabinet')
+    ever_achieved = {key:initial_goals[key] for key in goal_names}
+    first_achieved_step = {key:0 if initial_goals[key] else None for key in goal_names}
+    Path(spec['output'], 'goal_contract.json').write_text(json.dumps(
+        {**observer.contract(), 'initial': initial_goals, 'shaping_enabled': spec['shaping_enabled']}, indent=2))
+    goal_trace = Path(spec['output'], 'goal_trace.jsonl').open('x', buffering=1)
+
+
+
+    def observation():
+        obs = evaluator.obs
+        cams = [
+            obs[evaluator.robot_camera_names[name] + "::rgb"][..., :3].cpu().numpy()
+            for name in ["head", "left_wrist", "right_wrist"]
+        ]
+        proprio = obs[evaluator.robot.name + "::proprio"].cpu().numpy()
+        prompt = whole_task_prompt(obs,expected_task_id,registered_prompt)
+        return {"state": proprio, "images": cams, "prompt": prompt}
+
+    def status():
+        metrics = metric.aggregate(evaluator.env)
+        score = metrics.get("q_score", {}).get("final", 0.0)
+        return {
+            "steps": evaluator._rollout_steps,
+            "score": float(score),
+            "success": bool(evaluator.env.success),
+        }
+
+    physical = {}
+    for obj in evaluator.env.scene.objects:
+        p, q = obj.get_position_orientation()
+        physical[obj.name] = [p.cpu().tolist(), q.cpu().tolist()]
+    initial_json = json.dumps(physical, sort_keys=True)
+    initial = {
+        "physical_state": physical,
+        "physical_sha256": hashlib.sha256(initial_json.encode()).hexdigest(),
+        "proprio": observation()["state"].tolist(),
+        "physics_dt": og.sim.get_physics_dt(),
+        "rendering_dt": og.sim.get_rendering_dt(),
+        "observation_dt": og.sim.get_sim_step_dt(),
+    }
+    Path(spec['output'],'prompt_contract.json').write_text(json.dumps(
+        {'task':spec['task'],'task_id':expected_task_id,'prompt':registered_prompt,
+         'source':str(registry_path),'source_sha256':spec['task_prompt_source_sha256'],
+         'mode':'whole_task'},ensure_ascii=False,indent=2))
+    stage("ready")
+    faulthandler.cancel_dump_traceback_later()
+    done = False
+    conn.send({"observation": observation(), "initial": initial, "status": status(), "physical_goals": initial_goals})
+    try:
+        while True:
+            command = conn.recv()
+            if command["op"] == "close":
+                evaluator.stop_recording()
+                conn.send(status())
+                break
+            assert command["op"] == "step" and not done
+            actions = np.asarray(command["actions"], dtype=np.float32)
+            assert actions.ndim == 2 and actions.shape[1] == 23 and len(actions) <= 16
+            assert np.isfinite(actions).all()
+            policy.actions = [torch.from_numpy(x.copy()) for x in actions]
+            policy.current_subtask = command["subtask"]
+            rewards = []
+            terminal = False
+            truncated = False
+            for _ in range(len(actions)):
+                terminal, truncated = evaluator.step()
+                rewards.append(last["reward"])
+
+                if (
+                    terminal
+                    or truncated
+                    or evaluator._rollout_steps >= spec["max_steps"]
+                ):
+                    done = True
+                    break
+            current_goals = observer.observe()
+            for key in goal_names:
+                if current_goals[key] and not ever_achieved[key]:
+                    ever_achieved[key] = True
+                    first_achieved_step[key] = evaluator._rollout_steps
+            if status()['success']:
+                assert current_goals['all_goals'], 'Official success and physical goal observer disagree'
+            goal_trace.write(json.dumps({'step': evaluator._rollout_steps, **current_goals,
+                                         'official': status()}) + '\n')
+            Path(spec['output'], 'goal_summary.json').write_text(json.dumps(
+                {'initial': initial_goals, 'final': current_goals, 'official': status(),
+                 'ever_achieved':ever_achieved,'first_achieved_step':first_achieved_step}, indent=2))
+            conn.send(
+                {
+                    "observation": observation(),
+                    "status": status(),
+                    "rewards": rewards,
+                    "physical_goals": current_goals,
+                    "done": done,
+                    "terminal": bool(terminal),
+                    "truncated": bool(truncated),
+                }
+            )
+    except BaseException as error:
+        details = {
+            "error_type": type(error).__name__,
+            "error": str(error)[:1000],
+            "traceback": traceback.format_exc(),
+        }
+        # Persist before IPC: the parent terminates the stage on receiving error.
+        Path(spec["output"], "failure.json").write_text(json.dumps(details, indent=2))
+        print(details["traceback"], flush=True)
+        try:
+            conn.send(details)
+        except Exception:
+            pass
+        raise
+    finally:
+        goal_trace.close()
+        evaluator.stop_recording()
+        conn.close()
+        og.shutdown()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except BaseException as error:
+        import sys
+        try:
+            location = sys.argv[sys.argv.index('--spec')+1]
+            config = json.loads(Path(location).read_text())
+            Path(config['output'],'python_startup_failure.json').write_text(json.dumps(
+                {'error_type':type(error).__name__,'error':str(error)[:400],
+                 'traceback':traceback.format_exc()},ensure_ascii=False,indent=2))
+        except Exception:
+            pass
+        raise

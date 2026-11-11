@@ -1,0 +1,103 @@
+{
+  "action_horizon": 16,
+  "env_wrapper": "omnigibson.eval.wrappers.DefaultWrapper",
+  "environment_seed": 42,
+  "external_agent": false,
+  "fresh_server_and_evaluator_per_instance": true,
+  "max_subtask_len": 64,
+  "max_token_len": 512,
+  "mode": "train",
+  "model_action_horizon": 32,
+  "native_task_step_limits": true,
+  "pairs": [
+    [
+      "setting_the_table",
+      76
+    ],
+    [
+      "putting_dirty_dishes_in_sink",
+      291
+    ],
+    [
+      "loading_the_car",
+      115
+    ],
+    [
+      "cook_brussels_sprouts",
+      160
+    ],
+    [
+      "cook_hot_dogs",
+      199
+    ],
+    [
+      "vacuuming_floors",
+      149
+    ],
+    [
+      "halve_an_egg",
+      36
+    ],
+    [
+      "assembling_gift_baskets",
+      83
+    ],
+    [
+      "sorting_bottles_cans_and_paper",
+      230
+    ],
+    [
+      "installing_a_scanner",
+      35
+    ],
+    [
+      "boxing_food_after_dinner",
+      253
+    ],
+    [
+      "clean_up_your_desk",
+      150
+    ],
+    [
+      "polishing_shoes",
+      68
+    ],
+    [
+      "picking_up_toys",
+      248
+    ],
+    [
+      "sorting_household_items",
+      53
+    ],
+    [
+      "putting_up_Christmas_decorations_inside",
+      144
+    ],
+    [
+      "setup_a_bar_for_a_cocktail_party",
+      123
+    ],
+    [
+      "thawing_frozen_food",
+      238
+    ],
+    [
+      "clearing_food_from_table_into_fridge",
+      286
+    ],
+    [
+      "can_meat",
+      152
+    ]
+  ],
+  "policy_seed": 42,
+  "prompt_mode": "whole_task",
+  "robot": "R1Pro",
+  "seed_protocol": "native_full_episode_seed_ack_v1",
+  "source_manifest_sha256": "247cfad8b5709170f1f514ba104403eed28b7a31ae9ab0458d50c8da65ff997f",
+  "subtask_action_conditioning": "task_and_subtask",
+  "subtask_prediction": true,
+  "subtask_temperature": 0.0,
+  "write_video": true
+}

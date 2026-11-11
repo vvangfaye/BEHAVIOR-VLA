@@ -1,0 +1,64 @@
+diff --git a/rlinf/envs/sim/robocasa/venv.py b/rlinf/envs/sim/robocasa/venv.py
+index 5e1af593..692b59d6 100644
+--- a/rlinf/envs/sim/robocasa/venv.py
++++ b/rlinf/envs/sim/robocasa/venv.py
+@@ -17,6 +17,7 @@
+ Based on metaworld/venv.py implementation, adapted for Robocasa/Robosuite environments.
+ """
+ 
++import os
+ from multiprocessing import Pipe, connection
+ from multiprocessing.context import Process
+ from typing import Any, Callable, Optional, Union
+@@ -35,6 +36,41 @@ from rlinf.envs.venv import (
+ )
+ 
+ 
++def _rc_progress(env):
++    """progress reward (local addition 2026-11-05): task progress in [0, 1] from the task's own state (1.0 on success,
++    None for tasks without a progress model). See analysis/rsi_20261104/robocasa_progress_patch.py."""
++    try:
++        if env._check_success():
++            return 1.0
++        name = type(env).__name__
++
++        def clip(x):
++            return float(min(max(float(x), 0.0), 1.0))
++
++        if name == "SlideDishwasherRack":
++            pos = float(env.dishwasher.get_state(env)["rack"])
++            return 0.9 * clip(pos if env.should_pull else 1.0 - pos)
++        if name == "OpenStandMixerHead":
++            return 0.9 * clip(env.stand_mixer.get_state(env)["head"])
++        if name == "TurnOnElectricKettle":
++            return 0.9 * clip((env.electric_kettle.get_state(env).get("switch") or 0.0) / 0.95)
++        if name == "TurnOnSinkFaucet":
++            return 0.9 * clip(env.sink.get_handle_state(env=env).get("handle_joint", 0.0) / 0.40)
++        from robocasa.utils import object_utils as OU
++
++        if name == "PickPlaceCounterToStove":
++            placed = OU.check_obj_in_receptacle(env, "obj", "container", th=0.07)
++        elif name == "CoffeeSetupMug":
++            placed = env.coffee_machine.check_receptacle_placement_for_pouring(env, "obj")
++        else:
++            return None
++        if placed:
++            return 0.6
++        return 0.3 if OU.check_obj_grasped(env, "obj") else 0.0
++    except Exception:
++        return None
++
++
+ def _worker(
+     parent: connection.Connection,
+     p: connection.Connection,
+@@ -95,6 +131,9 @@ def _worker(
+                 # RoboCasa step can't record success in info, _check_success() must be called
+                 if hasattr(env, "_check_success"):
+                     env_return = _check_success(env, env_return)
++                # progress reward (local addition 2026-11-05): only when the train env asked for it
++                if os.environ.get("B1K_RC_PROGRESS") == "1":
++                    env_return[-1]["progress"] = _rc_progress(env)
+                 # call get_ep_meta() to get the RoboCasa env meta, includes prompt & layout_id, etcs
+                 if hasattr(env, "get_ep_meta"):
+                     env_return = get_ep_meta(env, env_return)

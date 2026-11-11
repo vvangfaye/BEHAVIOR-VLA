@@ -1,0 +1,17 @@
+{
+  "at": 1793349393.841406,
+  "trigger_job": "b1k-mtv-1029-trash-s1r6a1",
+  "trigger_uid": "a563a29ca4b547188a6584fbfe09728c",
+  "failure": "Simulator step receive timed out at 2112 executed controls",
+  "oom_events": 0,
+  "underlying_simulator_stall_cause": "not established from available log",
+  "completed_episodes_to_preserve": [
+    1,
+    2,
+    4
+  ],
+  "retry_scope": "unfinished episodes in existing eight shards; attempt 2",
+  "algorithm_parameters_unchanged": true,
+  "gpu_limit": 16,
+  "gpu_hour_budget_unchanged": true
+}

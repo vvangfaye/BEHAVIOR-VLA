@@ -1,0 +1,64 @@
+{
+  "archive_id": "water-unblock-20261101-a2",
+  "prefix": "behavior1k/storage-reclaim-20261101/water-unblock-a2/",
+  "bucket": "260010165",
+  "files": [
+    {
+      "path": "/mnt/afs/260010165/models/solarwm/SolarWM-5B-sgf-stage2-81f/model.pt",
+      "size": 39998928500,
+      "allocated": 39998930944,
+      "nlink": 1,
+      "mtime_ns": 1792744374636266784,
+      "inode": 1417812526,
+      "device": 1048722,
+      "index": 0,
+      "key": "models/solarwm/2026-10-23/sgf-stage2-81f/model.pt",
+      "existing_object": true
+    }
+  ],
+  "protected_roots": [
+    "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261020",
+    "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/checkpoints/original1688977",
+    "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306",
+    "/mnt/afs/260010165/behavior_1k/code_snapshots/b1k-video1688977-20261013",
+    "/mnt/afs/260010165/behavior_1k/rlinf_multitask_20261029",
+    "/mnt/afs/260010165/data",
+    "/mnt/afs/260010165/models/urban_video",
+    "/mnt/afs/260010165/checkpoints/skywm_v0",
+    "/mnt/afs/260010165/code/skywm_v0",
+    "/mnt/afs/260010165/runtime/urban_video"
+  ],
+  "allowed_roots": [
+    "/mnt/afs/260010165/behavior_1k/checkpoints/b1k-video2m-20261013/params/ocdbt.process_0/d",
+    "/mnt/afs/260010165/behavior_1k/checkpoints/b1k-video2m-20261013/params/ocdbt.process_1/d",
+    "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/retry07/gpu_continuation",
+    "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/retry07/gpu_continuation/results/ppo/checkpoint",
+    "/mnt/afs/260010165/behavior_1k/serving_bundles/b1k-video1688977-20261014-source",
+    "/mnt/afs/260010165/behavior_1k/serving_bundles/b1k-video1688977-20261014-source-g1",
+    "/mnt/afs/260010165/behavior_1k/serving_bundles/b1k-video1688977-20261014-source-g2",
+    "/mnt/afs/260010165/behavior_1k/serving_bundles/b1k-video2m-20261013",
+    "/mnt/afs/260010165/behavior_1k/update_composition_20261022/trial_h100/meta/r06/trainer/output",
+    "/mnt/afs/260010165/checkpoints/pi05_b1k/turning_on_radio/pi05_turn_on_the_radio/params/ocdbt.process_0/d",
+    "/mnt/afs/260010165/checkpoints/pi05_b1k/turning_on_radio/pi05_turn_on_the_radio/train_state/ocdbt.process_0/d",
+    "/mnt/afs/260010165/models/solarwm/SolarWM-5B-sgf-stage2-81f",
+    "/mnt/afs/260010165/models/solarwm/wan22_ti2v_5b_ms"
+  ],
+  "authorization": "用户 2026-11-01 明确要求将不用的旧实验数据归档到 AOSS，腾够空间后自动继续搬运饮水采样和 PPO。SolarWM 零训练试验已完成，当前作业依赖审计排除选定文件。",
+  "max_seconds": 7200,
+  "cpu_cores": 2,
+  "memory_gib": 8,
+  "gpu_count": 0,
+  "allocated_bytes": 39998930944,
+  "metadata_roots": [
+    "/mnt/afs/260010165/models/solarwm",
+    "/mnt/afs/260010165/checkpoints/pi05_b1k/turning_on_radio/pi05_turn_on_the_radio",
+    "/mnt/afs/260010165/behavior_1k/checkpoints/b1k-video2m-20261013",
+    "/mnt/afs/260010165/behavior_1k/rlinf_adapter_20261023/retry07/gpu_continuation/results/ppo/checkpoint"
+  ],
+  "goal": "Free at least the existing 84 GiB admission requirement, without modifying water experiment or training hyperparameters.",
+  "job_name": "b1k-water-storage-1101-a2",
+  "output": "/mnt/afs/260010165/behavior_1k/operational_cleanup/water_unblock_20261101/a2",
+  "helper_file": "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/rlinf_adaptation_20261020/water_storage_unblock_20261101/retry_a2/helpers.py",
+  "range_readback": true,
+  "recovery_reason": "a1 retained source index 0 after DNS failures; no concurrent writer for this source; full readback uses ordered bounded ranges with public-origin fallback"
+}

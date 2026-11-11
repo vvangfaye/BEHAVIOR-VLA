@@ -1,0 +1,275 @@
+{
+  "created_at": 1793256081.908905,
+  "authorization": "User requested more SERF reproduction tasks; standing authorization covers routine research evaluations and necessary uploads.",
+  "tasks": [
+    {
+      "task_id": 21,
+      "task_name": "collecting_childrens_toys",
+      "instance_ids": [
+        244,
+        227,
+        266,
+        226,
+        277,
+        288,
+        252,
+        158,
+        125,
+        137,
+        255,
+        4,
+        53,
+        50,
+        162,
+        112,
+        63,
+        265,
+        76,
+        294
+      ],
+      "native_max_steps": 38372
+    },
+    {
+      "task_id": 26,
+      "task_name": "assembling_gift_baskets",
+      "instance_ids": [
+        181,
+        233,
+        254,
+        198,
+        67,
+        248,
+        157,
+        13,
+        128,
+        267,
+        230,
+        108,
+        242,
+        116,
+        185,
+        227,
+        208,
+        241,
+        111,
+        300
+      ],
+      "native_max_steps": 52120
+    }
+  ],
+  "new_episodes": 80,
+  "total_episodes_with_reused_task22": 120,
+  "reused_task22": "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/serf_eval20_20261026/comparison.json",
+  "seed": 0,
+  "max_concurrent_gpus": 8,
+  "quota_preference": "Use free owner Reserved first; Spot when standard allocation is occupied.",
+  "gpu_hour_budget": 288,
+  "max_seconds_per_shard": 129359,
+  "max_generation_per_shard": 2,
+  "shards": [
+    {
+      "shard": 0,
+      "task_id": 21,
+      "indices": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "shard": 1,
+      "task_id": 26,
+      "indices": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "shard": 2,
+      "task_id": 21,
+      "indices": [
+        5,
+        6,
+        7,
+        8,
+        9
+      ]
+    },
+    {
+      "shard": 3,
+      "task_id": 26,
+      "indices": [
+        5,
+        6,
+        7,
+        8,
+        9
+      ]
+    },
+    {
+      "shard": 4,
+      "task_id": 21,
+      "indices": [
+        10,
+        11,
+        12,
+        13,
+        14
+      ]
+    },
+    {
+      "shard": 5,
+      "task_id": 26,
+      "indices": [
+        10,
+        11,
+        12,
+        13,
+        14
+      ]
+    },
+    {
+      "shard": 6,
+      "task_id": 21,
+      "indices": [
+        15,
+        16,
+        17,
+        18,
+        19
+      ]
+    },
+    {
+      "shard": 7,
+      "task_id": 26,
+      "indices": [
+        15,
+        16,
+        17,
+        18,
+        19
+      ]
+    }
+  ],
+  "source_revisions": {
+    "model": "1469ac6c84044a2f0613dec461b371dbebce3235",
+    "maps": "ca7392d7074489aac4e23f0d6c384927987365c1",
+    "instances": "316fa44817dadc4798b61d0f262e69bdd0e3d93a"
+  },
+  "selection": "All 20 official public test instances, in official CSV order; no score-based selection.",
+  "metrics": [
+    "paired mean final Q difference",
+    "whole task success",
+    "paired wins/ties/losses",
+    "paired bootstrap 95% CI per task",
+    "equal-task macro-average including original task22"
+  ],
+  "comparison_controls": "Same task instance, shared saved physical initial state, seed 0, native task time limit, original author policy settings; restore completed cases only.",
+  "storage": "Large weights, maps and runtime outputs on worker local scratch and private AOSS; no new large AFS copies.",
+  "scope": "No training, no new human demonstrations, no task22 reruns.",
+  "scaling8": {
+    "requested_at": 1793261931.6087263,
+    "authorization": "User: 改成8张5090并行跑，实例、seed和评测配置不变，优先用空闲标准资源，复用已完成结果，别重复跑。",
+    "old_jobs": [
+      {
+        "shard": 0,
+        "task_id": 21,
+        "receipt": {
+          "name": "b1k-serfmt-1029-s0-a1",
+          "max_seconds": 259200,
+          "gpu_count": 1,
+          "quota_type": "spot",
+          "output": "/tmp/serf-mt-1029-s0-a1",
+          "result_key": "behavior1k/serf-multitask-20261029/shard0/generation1/status.json",
+          "worker_sha256": "14c105c02242c6037dac067f753f4472a30f81370dd2032acf9c4acd188ad5f2",
+          "source_sha256": "50065c900a14de7abd324bd2f91b98deef3188ecef5b049eaa0882ca9f76ed87",
+          "submission_attempted": true,
+          "submitted_at_unix": 1793260991.0969388,
+          "uid": "ab3ef08cae3b42f2a2e979053c73be88",
+          "state": "CREATING",
+          "returncode": 0,
+          "shard": 0,
+          "task_id": 21,
+          "generation": 1,
+          "preserved_episodes": [],
+          "previous_uid": null
+        },
+        "final_state": "SUSPENDED",
+        "workers": "+----------------------------------------------+------------------+---------+--------+---------+\n|                 WORKER_NAME                  |     RESOURCE     | HOST_IP | POD_IP |  PHASE  |\n+----------------------------------------------+------------------+---------+--------+---------+\n| pt-ab3ef08cae3b42f2a2e979053c73be88-worker-0 | (加速芯片:1,     |         |        | Deleted |\n|                                              | vCPU:14核,       |         |        |         |\n|                                              | 内存:60GiB)      |         |        |         |\n+----------------------------------------------+------------------+---------+--------+---------+\n",
+        "report": {},
+        "episode_archive_count": 0,
+        "completed_episodes": 0
+      },
+      {
+        "shard": 1,
+        "task_id": 26,
+        "receipt": {
+          "name": "b1k-serfmt-1029-s1-a1",
+          "max_seconds": 259200,
+          "gpu_count": 1,
+          "quota_type": "spot",
+          "output": "/tmp/serf-mt-1029-s1-a1",
+          "result_key": "behavior1k/serf-multitask-20261029/shard1/generation1/status.json",
+          "worker_sha256": "14c105c02242c6037dac067f753f4472a30f81370dd2032acf9c4acd188ad5f2",
+          "source_sha256": "50065c900a14de7abd324bd2f91b98deef3188ecef5b049eaa0882ca9f76ed87",
+          "submission_attempted": true,
+          "submitted_at_unix": 1793260948.763927,
+          "uid": "7bb1fcce909641159eae688b0e1490c8",
+          "state": "INIT",
+          "returncode": 0,
+          "shard": 1,
+          "task_id": 26,
+          "generation": 1,
+          "preserved_episodes": [],
+          "previous_uid": null
+        },
+        "final_state": "SUSPENDED",
+        "workers": "+----------------------------------------------+------------------+---------+--------+---------+\n|                 WORKER_NAME                  |     RESOURCE     | HOST_IP | POD_IP |  PHASE  |\n+----------------------------------------------+------------------+---------+--------+---------+\n| pt-7bb1fcce909641159eae688b0e1490c8-worker-0 | (加速芯片:1,     |         |        | Deleted |\n|                                              | vCPU:14核,       |         |        |         |\n|                                              | 内存:60GiB)      |         |        |         |\n+----------------------------------------------+------------------+---------+--------+---------+\n",
+        "report": {},
+        "episode_archive_count": 0,
+        "completed_episodes": 0
+      }
+    ],
+    "old_wall_seconds_charged_conservatively": 1923.3565866947174,
+    "reused_task22_episodes": 40,
+    "initial_new_completed_episodes": 0,
+    "runtime_worker_sha256": "14c105c02242c6037dac067f753f4472a30f81370dd2032acf9c4acd188ad5f2",
+    "unchanged_fields": [
+      "tasks",
+      "seed",
+      "source_revisions",
+      "comparison_controls",
+      "new_episodes",
+      "gpu_hour_budget"
+    ],
+    "layout_namespace": "layout8"
+  },
+  "recovery_gates": {
+    "3": {
+      "shard": 1,
+      "min_steps": 100
+    },
+    "5": {
+      "shard": 1,
+      "min_steps": 100
+    },
+    "7": {
+      "shard": 1,
+      "min_steps": 100
+    }
+  },
+  "recovery_note_20261030": {
+    "time": 1793319620.1657453,
+    "reason": "task26 generation1 stopped before 100 steps; instrument one recovery before admitting the other three. Resume task21 shard2 from archived cases.",
+    "same_evaluation_controls": true,
+    "startup_watchdog_only": 3600,
+    "post_start_watchdog_unchanged": 1200,
+    "max_generation_unchanged": 2,
+    "gpu_hour_budget_unchanged": 288
+  }
+}

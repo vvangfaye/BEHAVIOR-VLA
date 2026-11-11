@@ -1,0 +1,29 @@
+{
+  "job_name": "b1k-rlinf-forensic-1023-01",
+  "cpu": 8,
+  "memory_gib": 32,
+  "gpu": 0,
+  "max_seconds": 900,
+  "read_only": true,
+  "hashes": {
+    "checkpoint/b1k_checkpoint.json": "7b80faf292665b13832400cbf9b5e6e421a70943f2db2805050a0c0b84376d4e",
+    "checkpoint/config.json": "fa3c790fbfbb73524037fda9f8ad56187774fdd7910e62d9358bb8dffadc8705",
+    "checkpoint/model.safetensors": "118736f817f43137cef9632d1b4e425177d461e2624bd77defd3e70241f82e21",
+    "checkpoint/norm_stats.json": "52d63e89f8359143d793ca80d0661c7facb0daff43c7d8c08f0d05572dd528fb",
+    "checkpoint/subtask_conditioning.json": "64c2a1fadca27d42715c88ef7c12e2f8a9ef23f37b2bf886327aa4fc639b4932",
+    "bundle.tar.gz": "0ce57750b805fa921f36d1f7daebdb51501270d09b11cb9dca5ce54946f8851f",
+    "adapter/b1k_rlinf/__init__.py": "c17ba0de3a2b2b85273864e8176953f58dcf7de20a415cd187794fa5e0a9d9a5",
+    "adapter/b1k_rlinf/export.py": "21700c5a7551a379fbb1390af08dd0e8929dd98d4b632c79b79f2eae24fd9054",
+    "adapter/b1k_rlinf/factory.py": "0698f795bea48d1c0afa75e80280c7adf78241143a6bbb748e4045a5294446a8",
+    "adapter/b1k_rlinf/io.py": "7df1e36327197a6603078c1e374a3a39ff6e288cfdb0c2a079ea4502ae1a0db1",
+    "adapter/b1k_rlinf/launch.py": "7f30dc81f532d29d3efd8cbb7c68a4534ce8fe4e9517f552ff9e971e967083f5",
+    "adapter/b1k_rlinf/model.py": "e0faec8d0f2729df4f702ddbdbafc1750a6107cae41178709db4e007141fafd4",
+    "adapter/b1k_rlinf/prepare.py": "e713208920f0786d55562a0a804f31b25d6b82fe998db5ef5767605f528b3cb8",
+    "adapter/b1k_rlinf/reference_check.py": "2f05d627d0d7aeafa68e1b792a8525a4167bc9c2c83d573e932d9dcd83e4d3a8",
+    "adapter/b1k_rlinf/tokenizer.py": "068385b7d66f3d233f6487b1719f2ff78cbc582a84ef42812a50ed0d4ddb50b7",
+    "adapter/b1k_rlinf/verify.py": "6ba790038bdcf34e97760d2df5e2499a417212b59d6cf3fe478b72065e1c0efe",
+    "upstream/rlinf/algorithms/advantages.py": "6d80ed04e228fcdb0c7637d924c23ede181e6aa0f809acaeb545f7086c2b8d33",
+    "upstream/rlinf/algorithms/losses.py": "68508fcdcb1bc0c4d71386944ddbced0bc6715483463b7ec498b81a8cf0645ea",
+    "upstream/rlinf/models/embodiment/openpi/tasks/rl.py": "f779834b551e7b0823b62f273594575918b825016253d4c41c4d09e71d047dc2"
+  }
+}

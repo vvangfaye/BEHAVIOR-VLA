@@ -1,0 +1,24 @@
+[
+  {
+    "name": "train",
+    "entry": "train",
+    "config": "libero_10_ppo_pi05_5090x4",
+    "overrides": [
+      "actor.seed=44",
+      "env.train.seed=2",
+      "actor.optim.lr_scheduler=constant",
+      "+actor.prefix_cache=True",
+      "+actor.prefix_cache_pin=False",
+      "+actor.prefix_cache_max_gib=10",
+      "+env.train.task_stats_dir=/mnt/afs/260010165/rlinf_runs_20261104/pc_fixed_s3_probe11/train/task_stats",
+      "+algorithm.ppo_control.enable=True",
+      "+algorithm.ppo_control.policy=fixed",
+      "+algorithm.ppo_control.out_dir=/mnt/afs/260010165/rlinf_runs_20261104/pc_fixed_s3_probe11/train/controller",
+      "+algorithm.ppo_control.rule_kl_threshold=0.0069",
+      "+algorithm.ppo_control.kl_stop=0.0207",
+      "+algorithm.ppo_control.verify_actor_identity=True",
+      "runner.max_epochs=11",
+      "runner.save_interval=11"
+    ]
+  }
+]

@@ -1,0 +1,268 @@
+diff --git a/rlinf/models/embodiment/openpi/actor_prefix_cache.py b/rlinf/models/embodiment/openpi/actor_prefix_cache.py
+new file mode 100644
+index 00000000..22987ead
+--- /dev/null
++++ b/rlinf/models/embodiment/openpi/actor_prefix_cache.py
+@@ -0,0 +1,107 @@
++# Opt-in actor prefix cache (local addition, 2026-11-03; not part of upstream RLinf).
++#
++# With ``train_expert_only`` the VLM (SigLIP + Gemma expert-0) is frozen, so the prefix pass in
++# ``Pi0RL.default_forward`` is a pure function of the observation. ``EmbodiedFSDPActor.run_training``
++# shuffles the rollout once and then walks the *same* sequence of micro-batches in every update epoch,
++# so micro-batch slot (global_batch_idx, micro_idx) holds identical samples in epochs 1..update_epoch.
++# This store keeps the epoch-1 prefix outputs (prefix_out, prefix_mask, per-layer KV) on the host and
++# serves them back in later epochs instead of recomputing ~90% of the forward FLOPs.
++#
++# Exactness: a cache hit returns the very tensors epoch 1 computed for the same samples in the same
++# batch composition, which is what a deterministic recompute would produce. ``verify_every`` > 0
++# recomputes on some hits and records the max abs difference (expected 0.0).
++from __future__ import annotations
++
++import time
++from typing import Any, Callable
++
++import torch
++
++
++def _map(obj: Any, fn: Callable[[torch.Tensor], torch.Tensor]) -> Any:
++    if isinstance(obj, torch.Tensor):
++        return fn(obj)
++    if isinstance(obj, tuple):
++        return tuple(_map(x, fn) for x in obj)
++    if isinstance(obj, list):
++        return [_map(x, fn) for x in obj]
++    if obj is None:
++        return None
++    raise TypeError(f"unsupported prefix output element {type(obj)}")
++
++
++def _leaves(obj: Any) -> list[torch.Tensor]:
++    out: list[torch.Tensor] = []
++    _map(obj, lambda t: out.append(t) or t)
++    return out
++
++
++class ActorPrefixStore:
++    def __init__(self, pin: bool = True, verify_every: int = 0):
++        self.pin = pin
++        self.verify_every = int(verify_every)
++        self.slot: Any = None
++        self.entries: dict[Any, Any] = {}
++        self._pool: dict[tuple, list[torch.Tensor]] = {}
++        self.stats = self._fresh_stats()
++
++    @staticmethod
++    def _fresh_stats() -> dict[str, float]:
++        return {"hits": 0, "misses": 0, "bytes": 0, "store_s": 0.0, "verify_max_abs": 0.0, "verified": 0}
++
++    def _host_buffer(self, t: torch.Tensor) -> torch.Tensor:
++        key = (tuple(t.shape), t.dtype)
++        free = self._pool.get(key)
++        if free:
++            return free.pop()
++        try:
++            return torch.empty(t.shape, dtype=t.dtype, device="cpu", pin_memory=self.pin)
++        except RuntimeError:
++            self.pin = False
++            return torch.empty(t.shape, dtype=t.dtype, device="cpu")
++
++    def _to_host(self, out: Any) -> Any:
++        def copy(t: torch.Tensor) -> torch.Tensor:
++            buf = self._host_buffer(t)
++            buf.copy_(t.detach())
++            self.stats["bytes"] += buf.numel() * buf.element_size()
++            return buf
++
++        return _map(out, copy)
++
++    def fetch_or_build(self, build: Callable[[], Any], device: torch.device) -> Any:
++        if self.slot is None:
++            return build()
++        entry = self.entries.get(self.slot)
++        if entry is None:
++            out = build()
++            t0 = time.perf_counter()
++            self.entries[self.slot] = self._to_host(out)
++            self.stats["store_s"] += time.perf_counter() - t0
++            self.stats["misses"] += 1
++            return out
++        self.stats["hits"] += 1
++        cached = _map(entry, lambda t: t.to(device, non_blocking=True))
++        if self.verify_every > 0 and (self.stats["hits"] - 1) % self.verify_every == 0:
++            fresh = build()
++            diff = 0.0
++            for a, b in zip(_leaves(cached), _leaves(fresh)):
++                if a.dtype == torch.bool:
++                    diff = max(diff, float((a != b).any()))
++                else:
++                    diff = max(diff, float((a.float() - b.float()).abs().max()))
++            self.stats["verify_max_abs"] = max(self.stats["verify_max_abs"], diff)
++            self.stats["verified"] += 1
++        return cached
++
++    def end_training_call(self) -> dict[str, float]:
++        """Release this call's entries back to the buffer pool and return its stats."""
++        for entry in self.entries.values():
++            for t in _leaves(entry):
++                self._pool.setdefault((tuple(t.shape), t.dtype), []).append(t)
++        self.entries.clear()
++        self.slot = None
++        stats = dict(self.stats)
++        stats["gib"] = stats.pop("bytes") / 2**30
++        self.stats = self._fresh_stats()
++        return stats
+diff --git a/rlinf/models/embodiment/openpi/tasks/rl.py b/rlinf/models/embodiment/openpi/tasks/rl.py
+index 9dafb7f1..6dbd053a 100644
+--- a/rlinf/models/embodiment/openpi/tasks/rl.py
++++ b/rlinf/models/embodiment/openpi/tasks/rl.py
+@@ -141,6 +141,14 @@ class Pi0RL(EnvIO, Pi0):
+         (~2.5GiB/layer at micro_batch=128) and OOM. When the VLM is trained,
+         prefix stays in the graph.
+         """
++        store = getattr(self, "_actor_prefix_store", None)
++        if store is not None and self.rl_cfg.train_expert_only:
++            # Opt-in (actor.prefix_cache): reuse the frozen prefix across PPO update epochs.
++            def build():
++                with torch.no_grad():
++                    return self.build_prefix_cache(observation)
++
++            return store.fetch_or_build(build, observation.state.device)
+         if self.rl_cfg.train_expert_only:
+             with torch.no_grad():
+                 return self.build_prefix_cache(observation)
+diff --git a/rlinf/workers/actor/embodied_fsdp_actor_worker.py b/rlinf/workers/actor/embodied_fsdp_actor_worker.py
+index 097f832b..3849dce1 100644
+--- a/rlinf/workers/actor/embodied_fsdp_actor_worker.py
++++ b/rlinf/workers/actor/embodied_fsdp_actor_worker.py
+@@ -335,8 +335,41 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
+ 
+         rollout_metrics = compute_rollout_metrics(self.rollout_batch)
+         rollout_metrics.update(self._group_success_metrics)
++        rollout_metrics.update(self._trajectory_length_metrics())
+         return rollout_metrics
+ 
++    def _trajectory_length_metrics(self) -> dict[str, float]:
++        """Logging only (local addition 2026-11-03): valid length of successful vs failed trajectories and
++        the share of total loss weight failed trajectories get under per-step (token-mean) vs
++        per-trajectory (RLinf masked_mean_ratio) aggregation. Needs per-trajectory loss masks."""
++        loss_mask_sum = self.rollout_batch.get("loss_mask_sum", None)
++        if loss_mask_sum is None:
++            return {}
++        lengths = loss_mask_sum[0, :, 0].float()  # [B] valid env steps per trajectory
++        returns = self.rollout_batch["rewards"].float().sum(dim=(0, 2))  # [B]
++        success = (returns > 0).float().to(lengths.device)
++        returns = returns.to(lengths.device)
++        stats = torch.stack(
++            [
++                success.sum(),
++                (1 - success).sum(),
++                (lengths * success).sum(),
++                (lengths * (1 - success)).sum(),
++            ]
++        ).to(self.device)
++        if torch.distributed.is_initialized():
++            torch.distributed.all_reduce(stats, op=torch.distributed.ReduceOp.SUM)
++        n_succ, n_fail, len_succ, len_fail = [float(x) for x in stats.cpu()]
++        n = max(n_succ + n_fail, 1.0)
++        return {
++            "traj/num": n,
++            "traj/success_frac": n_succ / n,
++            "traj/len_success_mean": len_succ / max(n_succ, 1.0),
++            "traj/len_fail_mean": len_fail / max(n_fail, 1.0),
++            "traj/fail_weight_share_tokenmean": len_fail / max(len_succ + len_fail, 1.0),
++            "traj/fail_weight_share_balanced": n_fail / n,
++        }
++
+     @Worker.timer("actor/compute_opd_teacher_logprobs")
+     def compute_opd_teacher_logprobs(self) -> None:
+         assert self.rollout_batch.get("teacher_logprobs", None) is None, (
+@@ -623,13 +656,14 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
+         metrics = {}
+         if self.cfg.algorithm.get("recompute_logprobs", False):
+             append_to_dict(metrics, self.recompute_prev_logprobs(batch_size_per_rank))
++        prefix_store = self._actor_prefix_store_for_training()
+         update_epoch = self.cfg.algorithm.get("update_epoch", 1)
+         for _ in range(update_epoch):
+             rollout_dataloader_iter = split_dict_to_chunk(
+                 self.rollout_batch,
+                 rollout_size // batch_size_per_rank,
+             )
+-            for train_global_batch in rollout_dataloader_iter:
++            for global_idx, train_global_batch in enumerate(rollout_dataloader_iter):
+                 # split batch into micro_batches
+                 train_global_batch_size = train_global_batch["prev_logprobs"].shape[0]
+                 assert (
+@@ -648,6 +682,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
+ 
+                 self.optimizer.zero_grad()
+                 for idx, batch in enumerate(train_micro_batch):
++                    if prefix_store is not None:
++                        # Same (global, micro) slot holds the same samples in every update epoch.
++                        prefix_store.slot = (global_idx, idx)
+                     self.train_micro_batch(
+                         micro_batch=batch,
+                         metrics=metrics,
+@@ -667,6 +704,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
+                 if len(lr_list) > 1:
+                     data["critic/lr"] = lr_list[1]
+                 append_to_dict(metrics, data)
++        prefix_cache_stats = (
++            prefix_store.end_training_call() if prefix_store is not None else None
++        )
+         # put LR scheduler step here
+         self.lr_scheduler.step()
+         self.optimizer.zero_grad()
+@@ -683,9 +723,38 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
+             mean_metric_dict[CRITIC_EXPLAINED_VARIANCE_KEY] = (
+                 compute_critic_explained_variance_from_stats(reduced_stats).item()
+             )
++        if prefix_cache_stats is not None:
++            mean_metric_dict.update(
++                {f"prefix_cache/{k}": float(v) for k, v in prefix_cache_stats.items()}
++            )
+ 
+         return mean_metric_dict
+ 
++    def _actor_prefix_store_for_training(self):
++        """Opt-in host cache of the frozen-VLM prefix across update epochs (actor.prefix_cache)."""
++        if not self.cfg.actor.get("prefix_cache", False):
++            return None
++        store = getattr(self, "_prefix_store", None)
++        if store is None:
++            from rlinf.models.embodiment.openpi.actor_prefix_cache import (
++                ActorPrefixStore,
++            )
++            from rlinf.models.embodiment.openpi.tasks.rl import Pi0RL
++
++            targets = [m for m in self.model.modules() if isinstance(m, Pi0RL)]
++            assert len(targets) == 1, f"expected one Pi0RL module, found {len(targets)}"
++            assert targets[0].rl_cfg.train_expert_only, (
++                "actor.prefix_cache requires train_expert_only (frozen VLM prefix)"
++            )
++            assert not self.cfg.algorithm.get("recompute_logprobs", False)
++            store = ActorPrefixStore(
++                pin=self.cfg.actor.get("prefix_cache_pin", True),
++                verify_every=self.cfg.actor.get("prefix_cache_verify_every", 0),
++            )
++            targets[0]._actor_prefix_store = store
++            self._prefix_store = store
++        return store
++
+     def train_micro_batch(
+         self,
+         micro_batch: dict[str, torch.Tensor],
+@@ -776,6 +845,14 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
+             ),
+         }
+ 
++        # Ablation switch (2026-11-03). With auto_reset=False and ignore_terminations=False, RLinf passes
++        # each trajectory's valid length (loss_mask_sum) and max_episode_steps, so the PPO actor and critic
++        # losses use masked_mean_ratio: every step is divided by its trajectory's valid length, i.e. each
++        # trajectory gets equal total weight ("trajectory-balanced"). length_normalization=False restores
++        # plain per-step ("token-mean") aggregation over valid steps for both losses.
++        if not self.cfg.algorithm.get("length_normalization", True):
++            loss_kwargs["max_episode_steps"] = None
++
+         if SupportedModel(self.cfg.actor.model.model_type) in [
+             SupportedModel.GR00T_N1D6,
+             SupportedModel.GR00T_N1D7,

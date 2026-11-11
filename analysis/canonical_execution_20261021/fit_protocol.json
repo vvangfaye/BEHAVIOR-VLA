@@ -1,0 +1,17 @@
+{
+  "seed": 20261021,
+  "updates": 800,
+  "batch_size": 32,
+  "learning_rate": 0.001,
+  "normalization": "train-only feature z-score clipped 10, residual action coordinate z-score floor .01",
+  "action": "next 16 x 23 commands minus most recent command",
+  "split": "within-task sha256 episode ordering; train folds 2,3,4; validation 1; test 0",
+  "features": "proprioception and past commands, task one-hot; no image, no future input",
+  "counts": {
+    "train": 3068,
+    "validation": 1194,
+    "test": 1186
+  },
+  "selection": "minimum fixed-noise validation energy score per model; test once",
+  "scope": "action-head feasibility only; deterministic model is fitting sanity comparator, not a strong generative baseline"
+}

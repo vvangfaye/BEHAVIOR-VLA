@@ -1,0 +1,419 @@
+{
+  "kind": "quick20_reusing_historical1688977_baseline",
+  "created_at": 1791947458.6800692,
+  "human_authorization": "从1688977之前评测过的实例里固定选20组，直接复用基线结果，省时间；5000步评测，20000步训练继续",
+  "training_iid": 234354,
+  "training_native_id": "01a137be2251b48b040b802446309464",
+  "run_id": "b1k-four-source-finetune-20261014_080449-20k",
+  "training_target_unchanged": 20000,
+  "candidate_step": 5000,
+  "baseline_step": 1688977,
+  "pairs": [
+    [
+      "cook_bacon",
+      301
+    ],
+    [
+      "getting_organized_for_work",
+      301
+    ],
+    [
+      "hiding_Easter_eggs",
+      301
+    ],
+    [
+      "scrubbing_bathroom_floor",
+      301
+    ],
+    [
+      "putting_up_Christmas_decorations_inside",
+      301
+    ],
+    [
+      "tidying_bathroom",
+      301
+    ],
+    [
+      "wash_dog_toys",
+      301
+    ],
+    [
+      "stacking_wood",
+      301
+    ],
+    [
+      "installing_a_scanner",
+      301
+    ],
+    [
+      "spraying_fruit_trees",
+      301
+    ],
+    [
+      "sorting_bottles_cans_and_paper",
+      301
+    ],
+    [
+      "rearrange_your_room",
+      301
+    ],
+    [
+      "chopping_wood",
+      301
+    ],
+    [
+      "putting_dishes_away_after_cleaning",
+      301
+    ],
+    [
+      "clean_up_broken_glass",
+      301
+    ],
+    [
+      "halve_an_egg",
+      301
+    ],
+    [
+      "hanging_pictures",
+      301
+    ],
+    [
+      "vacuuming_floors",
+      301
+    ],
+    [
+      "moving_boxes_to_storage",
+      301
+    ],
+    [
+      "putting_shoes_on_rack",
+      301
+    ]
+  ],
+  "episodes": 20,
+  "maximum_attempts_per_episode": 1,
+  "max_pending": 5,
+  "max_active_gpu_jobs": 20,
+  "poll_seconds": 60,
+  "deadline_epoch": 1792220400,
+  "code": "/mnt/afs/260010165/behavior_1k/code_snapshots/b1k-video1688977-20261013",
+  "runtime": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306",
+  "baseline_checkpoint": "/mnt/afs/260010165/behavior_1k/checkpoints/pi05_b1k_full100_joint_1688977_aoss_20261010",
+  "repo_id": "b1k_full100_joint_subtask_v1_drop_episode_s1",
+  "norm_sha256": "52d63e89f8359143d793ca80d0661c7facb0daff43c7d8c08f0d05572dd528fb",
+  "baseline_files": [
+    {
+      "bytes": 426,
+      "full_local_readback": true,
+      "relative_path": "_CHECKPOINT_METADATA",
+      "sha256": "8e980e8c22f28616881018e0e725e647b4c8b6dc221dc609ef074a886d356da3"
+    },
+    {
+      "bytes": 5577,
+      "full_local_readback": true,
+      "relative_path": "assets/b1k_full100_joint_subtask_v1_drop_episode_s1/norm_stats.json",
+      "sha256": "52d63e89f8359143d793ca80d0661c7facb0daff43c7d8c08f0d05572dd528fb"
+    },
+    {
+      "bytes": 58,
+      "full_local_readback": true,
+      "relative_path": "assets/subtask_conditioning.json",
+      "sha256": "64c2a1fadca27d42715c88ef7c12e2f8a9ef23f37b2bf886327aa4fc639b4932"
+    },
+    {
+      "bytes": 23458,
+      "full_local_readback": true,
+      "relative_path": "params/_METADATA",
+      "sha256": "1a59e30e43f7af9b868e032aaaf3245a8701602207b08ddf1bde8edf7c1fd2dd"
+    },
+    {
+      "bytes": 23664,
+      "full_local_readback": true,
+      "relative_path": "params/_sharding",
+      "sha256": "55aeb35715e2a66ff996837ad67b335d3cdfb81884aeb021962d7c9ec32798ae"
+    },
+    {
+      "bytes": 8992,
+      "full_local_readback": true,
+      "relative_path": "params/array_metadatas/process_0",
+      "sha256": "1ac4ea5f5c209bbcb6a28aec143ad92fd38482d410a0208600165348816ca316"
+    },
+    {
+      "bytes": 8992,
+      "full_local_readback": true,
+      "relative_path": "params/array_metadatas/process_1",
+      "sha256": "1ac4ea5f5c209bbcb6a28aec143ad92fd38482d410a0208600165348816ca316"
+    },
+    {
+      "bytes": 56366,
+      "full_local_readback": true,
+      "relative_path": "params/d/628a3ba3fb866a367bebdd2127227e3b",
+      "sha256": "aadb535f111c538a14c02f388ce38297599267b1eab381fd16b807c137813b48"
+    },
+    {
+      "bytes": 120,
+      "full_local_readback": true,
+      "relative_path": "params/manifest.ocdbt",
+      "sha256": "39e9d4b9d9541aba1ba8e46a716f3621eb5619da0ed1a3c523d489e16923c184"
+    },
+    {
+      "bytes": 331554,
+      "full_local_readback": true,
+      "relative_path": "params/ocdbt.process_0/d/009c0cf22dd2553e0a07a8874899e8d6",
+      "sha256": "fd6205d5201753fc4d655d5273d59c9caf509ebaff220b613b3ac84e0c7493e6"
+    },
+    {
+      "bytes": 2306444746,
+      "full_local_readback": true,
+      "relative_path": "params/ocdbt.process_0/d/3c79f24a8246b44412222f26ab0dbcfd",
+      "sha256": "898b98a02f4d8bddb279911e3fb2f3c84a7c61f56a17ce3de4f9b1ae751adfe4"
+    },
+    {
+      "bytes": 278,
+      "full_local_readback": true,
+      "relative_path": "params/ocdbt.process_0/d/72cd21b65103bc155a4ece56fff7b406",
+      "sha256": "00da9eb76b9e2b2f4e015f0e37a0627650b8ced2ca30f7b7206c62199f740215"
+    },
+    {
+      "bytes": 601452584,
+      "full_local_readback": true,
+      "relative_path": "params/ocdbt.process_0/d/7579adde04632b770b7e6b8b7c6551b7",
+      "sha256": "01a774451d051787a20d5bc01266e1e10eb3dfc6f31f780faf552fb9cdce8db6"
+    },
+    {
+      "bytes": 2186321568,
+      "full_local_readback": true,
+      "relative_path": "params/ocdbt.process_0/d/bbd39817d2740cc58f01d09792d5e546",
+      "sha256": "0ccd1af228969b6deb006abb1499ef24d06582df6b1cb3a199d86049b524b734"
+    },
+    {
+      "bytes": 1118245602,
+      "full_local_readback": true,
+      "relative_path": "params/ocdbt.process_0/d/d89d74ad557a1e07ff4a195551092077",
+      "sha256": "2515b218e2683991a43721bc30a8f66126b2e2911c7c08a4f282212dd1bd5718"
+    },
+    {
+      "bytes": 268,
+      "full_local_readback": true,
+      "relative_path": "params/ocdbt.process_0/manifest.ocdbt",
+      "sha256": "39e9f8aa9eb2a3748ce12c86c981c1dc6149cdcbd37212706c4046f1af3b1699"
+    },
+    {
+      "bytes": 2376384668,
+      "full_local_readback": true,
+      "relative_path": "params/ocdbt.process_1/d/4b816748bd9a1ccb962bc8277362dfaf",
+      "sha256": "595cf7500513ae7559001cb2cf1573ecb0a30dc079395786419b7e1c81d9bdef"
+    },
+    {
+      "bytes": 1480697898,
+      "full_local_readback": true,
+      "relative_path": "params/ocdbt.process_1/d/83e8e32a0dba304bc67b0fe472aa81e7",
+      "sha256": "11cabfa718acdb1c6bf2e2f022819bd7a4ccb6b405d83ab07b4bb7ba8b9f64b3"
+    },
+    {
+      "bytes": 1957315914,
+      "full_local_readback": true,
+      "relative_path": "params/ocdbt.process_1/d/8d1d44e452930d6c421257f1fd99e76d",
+      "sha256": "0d4992d3038599c2e9e442bfbaa429ba9516de224b3ff866786138eb25f7ebfe"
+    },
+    {
+      "bytes": 398486411,
+      "full_local_readback": true,
+      "relative_path": "params/ocdbt.process_1/d/b18c78f72b7cb042e35dee8cd29a4eb8",
+      "sha256": "538f5c5809840e8a9e481ff5fcba6f08938f81a433425ffc174440c44e69abf6"
+    },
+    {
+      "bytes": 251,
+      "full_local_readback": true,
+      "relative_path": "params/ocdbt.process_1/manifest.ocdbt",
+      "sha256": "d67e47abfd9a8224253901d1d10468da1059c5b9d4ad3c126640069d013514d5"
+    }
+  ],
+  "source_manifest_sha256": "247cfad8b5709170f1f514ba104403eed28b7a31ae9ab0458d50c8da65ff997f",
+  "critical_files": {
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/batched_eval.py": "93c4dbf4a6bcdf17f2edcafda7132a3b83bebf6d5dba3dda90d7c157862d4ccd",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/batched_evaluator.py": "7c66958717945b7c2f618cb6d779828ebcd945c4c4968193360d787f576cb4e5",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/eval.py": "91ad12f0ba569f51f3f703eeef7bdd4ffd245752b77d2a6061297ca72ff5f3a6",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/evaluator.py": "4227473e56907070ea02c84dcb5d8825f3069ad87b00acab9814884c7556cff7",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/policies.py": "ced4c5554639bb9de367e86acfb2f5adfad34bb4a56f2466326a4446501c0af8",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/r1pro.yaml": "a98fa8a81472adfecfb642778d4d7a01e20131be7f70824e0ae095d665cdbb93",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/single_env.py": "e1d55a61b38249b9ec4dd68930241d7be1fdad4771aaa689cd9532a8e4e2ac59",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/subtask_selectors.py": "01322e7dc60104aaa5da460a1ada242159ba1e9356e6f67256a33fcbf03a1121",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/utils/dataset_utils.py": "576e7357ea2de4fd6ae2cda93199a87b4f814e0a3e43ece705ed437be841507a",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/utils/eval_utils.py": "3240c6ca879f812210249e01747ce2013ca9664a9d426c0f8196e3c511d7c1cb",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/utils/light_utils.py": "b23ea858fc171b82799395f7eed7fda02cd0198400ce3ce019f3a87f13fc534e",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/utils/network_utils.py": "d86f26424160198191ac1b0ac062dc7b8dbee86ea9ebe138744f71ad5f97c971",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/utils/obs_utils.py": "3368c300dc339f20ea8cc895b328b2a361b31f02058b4ced0c8b3430d9d36e08",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/utils/score_utils.py": "18ae9e9c681a047be90993bd06f0933b73321fbd6636cfad803c97050b8c6654",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/wrappers/__init__.py": "e1cb29ee9176217cf31fa6fead0fac98b26ed233e460d549a677583326f45d59",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/wrappers/default_wrapper.py": "069fbfdc4387c45da528ac05fade4a99c1428e0544fde4183e443ec4181673eb",
+    "BEHAVIOR-1K/OmniGibson/omnigibson/eval/wrappers/rgbd_full_res_wrapper.py": "22056ef420e2fc8f7ea546f8316f8ca9120e236a1b65da3f577fab7abcc4bb19",
+    "openpi/packages/openpi-client/src/openpi_client/__init__.py": "91447944015cec709e8aa7655f7e9d64e1e4508e7023a57fe3746911c0fc6fed",
+    "openpi/packages/openpi-client/src/openpi_client/action_chunk_broker.py": "019b9d69cb26cc681331a2f95dbe60a2cc7b02d6d309c5d15b6457ab39798234",
+    "openpi/packages/openpi-client/src/openpi_client/base_policy.py": "88e98e0f06293f3c4767db675061664c4bba12f87242ba1e64377d1b8de8069e",
+    "openpi/packages/openpi-client/src/openpi_client/image_tools.py": "d48b4bd7f44e79fe6db8a8e07c9161144fa250be686e1245014a8b47e6171977",
+    "openpi/packages/openpi-client/src/openpi_client/image_tools_test.py": "4df4b0ba0b95ba5e47160039c3e837a64d50c802b419a588211dffbaa732589c",
+    "openpi/packages/openpi-client/src/openpi_client/msgpack_numpy.py": "c04568948fcee52b691e3be4b6cffb759f7e79ad67530fcd5d23095a0d13c057",
+    "openpi/packages/openpi-client/src/openpi_client/msgpack_numpy_test.py": "2c6dd236720dae716d7bdf842b7d506a165e9563bf9d4376c95289269adcb973",
+    "openpi/packages/openpi-client/src/openpi_client/runtime/agent.py": "b559885afd9645a91b9b6ee12a28513295474f987d11b16610fc0479dbe6de5b",
+    "openpi/packages/openpi-client/src/openpi_client/runtime/agents/policy_agent.py": "c4d63952d1954bd4b72a3122223df36794812fea74cf1c7023433b5a90473c1c",
+    "openpi/packages/openpi-client/src/openpi_client/runtime/environment.py": "1c12e5054b3401dec5f1f8b71eef0f625cb60e2b50784dcf19afa32c77107a7e",
+    "openpi/packages/openpi-client/src/openpi_client/runtime/runtime.py": "3daa242a9ce61ffb210789ef3ba6b1e3cade9de757fcd36af7b174c530345ea8",
+    "openpi/packages/openpi-client/src/openpi_client/runtime/subscriber.py": "d269a2af8ec4056beb310e5c3c97d4468af01549c7ef80dd905652d8ac64f85b",
+    "openpi/packages/openpi-client/src/openpi_client/websocket_client_policy.py": "36557cb0b91ccf31cd4fb4b508306850d76ed0feb4028dac5182d0f5a5d88005",
+    "openpi/scripts/b1k/cache_frame_memory.py": "0f9176712b10a50fb63d50ab994c1bbfd22dbea10d2da84ba2e29433732ddd99",
+    "openpi/scripts/b1k/check_frame_memory.py": "8b9769cac4bc0ae1ebb9697a6ba5f585df2240a908e641537da9947614a00d80",
+    "openpi/scripts/b1k/check_subtask_data.py": "0378b4c3e882fcb8dd14626b6b4de53df1f2a9b21c5d2fd6b2a4705dcb04d62a",
+    "openpi/scripts/b1k/check_subtask_data_test.py": "7fa1d98021ac737656199587916186a2a7e166ea0b820e25e29c07c5b1473549",
+    "openpi/scripts/b1k/distributed_preflight.py": "1981c9f966673252f7a5a2316fb87ffc16de30f8ffb3b755feb6a203d1fb0dd3",
+    "openpi/scripts/b1k/pytorch_checkpoint_integration_test.py": "aa014138b5fd48343fd4f4515bee6a755c9cfbfa069b6a91bbf586922841e854",
+    "openpi/scripts/b1k/pytorch_launcher_test.py": "534664ce56310945d85650be53bc823946097e81336f94ce03257caa0bb56f29",
+    "openpi/scripts/b1k/serve_b1k.py": "4bcb2e756e7f8ae995652dc1397f6f81b6576aa17701e26e7fd1a63a6cb71721",
+    "openpi/scripts/b1k/split_subtask_episodes.py": "5101328ba9b7f3c8daa3ec79f256d4c9c3a19b889505ca28c74bf0c134d4c451",
+    "openpi/scripts/b1k/split_subtask_episodes_test.py": "b59772ffd3189a91167a5fecf9cb90d83f9ef985ef53f7a1ac5d51da3a002752",
+    "openpi/scripts/b1k/train_b1k.py": "4207e04ff878648c6eee44ae2bdec2d4e5794e948c7ccf8ebdb25d4132960e2f",
+    "openpi/scripts/b1k/train_b1k.sbatch.sh": "0472641a7176c077f900f25862ac8174d1063b8d3f2b439d145aac5f6d5ad030",
+    "openpi/scripts/b1k/train_b1k.sh": "f69e949c25c486835ecb3918962ddd048936a7d17a57f76c1a539efeaa9b65d2",
+    "openpi/scripts/b1k/train_b1k_pytorch.py": "15ed0639fa71124c1eb22a0be740000ca7a31c4c3e6c90d099e6e123b565bb66",
+    "openpi/src/openpi/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "openpi/src/openpi/configs/__init__.py": "b743251c7cbde08c98faafd823ce8048242daa9baf4e99751908ab34f81629fe",
+    "openpi/src/openpi/configs/robots/__init__.py": "769ea210a3fc6f26ccae0c88f7a454ab7f34d99d40aaf95d0e633b905d600c5d",
+    "openpi/src/openpi/configs/robots/b1k.py": "81dd27d1210a7e9e69a412e3c1f40fceaeae8996d356a9bbfd265f685a60f65f",
+    "openpi/src/openpi/configs/robots/base_config.py": "733dc021cd77e6bb1b4620e801d476a7ad81ed736ffe9196c503a34a965b6c1d",
+    "openpi/src/openpi/configs/tasks/__init__.py": "bef02bf5d231856ca5f28d663771f0e68f1a09a16d77c8fff5e6b3af7fed8a0d",
+    "openpi/src/openpi/configs/tasks/b1k.py": "77f4b4536e3499095a29382f03a7069e3e10599e00752ebdb2f195ce0010421e",
+    "openpi/src/openpi/conftest.py": "626672e385fb276396c119e2220421065c58f8ec602401e8bf2ae509f9fffaf3",
+    "openpi/src/openpi/models/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "openpi/src/openpi/models/frame_memory.py": "ba632bd9b2bef566613fd11d8c25e52684a6b0282b2e6f0bfed939ea885d256b",
+    "openpi/src/openpi/models/frame_memory_test.py": "fad5470dc508fbae0119b9bd2c8e153e89bedb6662f8a01738a889b877ec462d",
+    "openpi/src/openpi/models/gemma.py": "f3463b3a523c20f5d7f1a1747dac49376311d935bb5506df81c71d95255b87c1",
+    "openpi/src/openpi/models/gemma_fast.py": "563c6e1ffd8afa31c406bcb8894a605e87df88f6c075d398d97a57af6bc3aefa",
+    "openpi/src/openpi/models/lora.py": "ced28716950c34d84a1a6d0b03b1d9550000732721df884818080b6e78cb3289",
+    "openpi/src/openpi/models/lora_test.py": "a0f10525de7773310402b3ffa636e88ffff7035f3179b140aacc6809c122f085",
+    "openpi/src/openpi/models/model.py": "af522961b16dbc395b2868e4e7cc9c4e1ca1473bfcb3c9a7bd7165b1619cf810",
+    "openpi/src/openpi/models/model_test.py": "f8e71f195045d4e3ef1ddfafb2337fa52e5aa2f89bce1fde62f5cbfb67121f21",
+    "openpi/src/openpi/models/pi0.py": "8bd541c1bfb816a951e0015f06e9755625d360bf909870d01cc93d72817220bb",
+    "openpi/src/openpi/models/pi0_config.py": "a17efdd8eee6b2ed232343eb1a682bacf37ef4d4142e2f781693a77b8f729d0b",
+    "openpi/src/openpi/models/pi0_fast.py": "627332a555046f2744ef144c45f8bd3361a9820cf68854a4528d0fdbba7e9aa3",
+    "openpi/src/openpi/models/pi0_test.py": "5082873014a7fc45fb8414f517909e1c24cdafea980a1fb612e0aea6058ed0fe",
+    "openpi/src/openpi/models/siglip.py": "14b4df0be280d5769fb0dc31a40cde27525dbb1980cc998c28475d62fa3cad32",
+    "openpi/src/openpi/models/subtask_inference_test.py": "bcbde778a7daa38e4b32986e3b752437cd9a89d30322f6b4bd24042205c43500",
+    "openpi/src/openpi/models/subtask_test.py": "9ad8a0a36b4037229cc0a4abd32ee4ba319f573240c8c1c40b740bff2afd6df3",
+    "openpi/src/openpi/models/tokenizer.py": "3d3d010a1f4dd0f8f3ea83c13fac843f740837057111a2b84d143bdae4580d8c",
+    "openpi/src/openpi/models/tokenizer_test.py": "5abd179ce883420e39d4d18b33d0123290af752da243003aa48a3bc06dbb9517",
+    "openpi/src/openpi/models/utils/fsq_tokenizer.py": "88866638ee4775f46a222561a957bd35e20600fe38c5888b587016ad77b1065f",
+    "openpi/src/openpi/models/vit.py": "d285d057636c3cba2d1fd3b37693b18075ad4b9c3b47bbde807c34c6c376ac93",
+    "openpi/src/openpi/models_pytorch/gemma_pytorch.py": "e70418a16c3bd3e42d85332e9d8968ca916084a20be60760c11cfb826727c525",
+    "openpi/src/openpi/models_pytorch/pi0_pytorch.py": "84d665fd06da12f046466a84d93f82bada21edc368233d871437ea06ed5d8b13",
+    "openpi/src/openpi/models_pytorch/pi0_pytorch_integration_test.py": "1cc1f3558959b8ed8bfb23346218b0c72f75bc9832c755f3ffe0a9eaf795c8db",
+    "openpi/src/openpi/models_pytorch/pi0_pytorch_test.py": "4653727be7897d5627c5186c431420d9854bf2cbd4c7f23a69625dfae691a27b",
+    "openpi/src/openpi/models_pytorch/preprocessing_pytorch.py": "d158e312d760d4197643395488ea8448c69858b10acca85f6e17223c9fe0f314",
+    "openpi/src/openpi/models_pytorch/transformers_replace/models/gemma/configuration_gemma.py": "eebecd853f3e4ee1a23815526ca3327da0ef7567b372e44939c6945b1c6ef595",
+    "openpi/src/openpi/models_pytorch/transformers_replace/models/gemma/modeling_gemma.py": "f28b5698ca5888cd0f59cba7cc3784679f49894d994969ce0027edffc8e359a9",
+    "openpi/src/openpi/models_pytorch/transformers_replace/models/paligemma/modeling_paligemma.py": "88bdae61c15a9d2ab9d50b8e01c20d32bf9801fbff62c7c6e2a1d9b40d342dd9",
+    "openpi/src/openpi/models_pytorch/transformers_replace/models/siglip/check.py": "c85f72de0c331bf2fe6db3218654ca9630dfdd28d2df657a1c96f40ff9a5472c",
+    "openpi/src/openpi/models_pytorch/transformers_replace/models/siglip/modeling_siglip.py": "ef2e99500f263fdd78db9d4d9a255e29d844eb92f53c25ad640f8056700ef84b",
+    "openpi/src/openpi/policies/aloha_policy.py": "50d7ad972d80142ecb0f03b0780dacfd3af212946f4c9aac31a204b02db4543d",
+    "openpi/src/openpi/policies/b1k_policy.py": "96718712f42d3c442433afbd360b87fd5c6b6f2989b8161f9b0f85da9f023519",
+    "openpi/src/openpi/policies/droid_policy.py": "7d0893555964d485e231f70084125084a99495705ddd74b29461229d524fff26",
+    "openpi/src/openpi/policies/frame_memory.py": "e5bcbd6922ecce56bb205bd1deaaa20535b37c2c6e68ffabf93d36ea4c18233f",
+    "openpi/src/openpi/policies/frame_memory_test.py": "29db91591f0b3aaa80b4b558dc90556b163a50d40f8e8402267b6fe822fc6995",
+    "openpi/src/openpi/policies/libero_policy.py": "ad01e5be74516d9ec9aeb1f76294d5c9f7f7179a60f1f7fbbb35e7646534f81a",
+    "openpi/src/openpi/policies/policy.py": "cd768c427c668631b89f60eb7821b11d2d4902c654d035bd4564b8c67e035ecc",
+    "openpi/src/openpi/policies/policy_config.py": "9d7fd248c010001cfee25d213514f18854f7cee19b745bd886b71c895bc98416",
+    "openpi/src/openpi/policies/policy_test.py": "9dbb20963600367a7e7abfc97d1e326916777c57a87b39b1bc4070ba64676683",
+    "openpi/src/openpi/policies/subtask_policy.py": "1e64dac1376e7252323579f7d0d5b80b2696e7b3ac0393ad27b67860305af9e0",
+    "openpi/src/openpi/policies/subtask_policy_pytorch_test.py": "0a74cf778b565d5d94e3b68e64aec3a8a8b2e28d85cd182f27b55c2a5f7ea17b",
+    "openpi/src/openpi/policies/subtask_policy_test.py": "46daa336f6d7954fb580610279c75535926616533c2a02390dc33d5b724359ca",
+    "openpi/src/openpi/py.typed": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "openpi/src/openpi/serving/websocket_b1k_server.py": "33fff59d121daa31ce2d5c9d875f44e2f5bf980c3756670dbf1ec3207ca30baa",
+    "openpi/src/openpi/serving/websocket_policy_server.py": "1370d345e6c3c5b8f15573050e485e60a5b423d1df33e24b237805e6b442b026",
+    "openpi/src/openpi/shared/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "openpi/src/openpi/shared/array_typing.py": "6524945566eab3eb97b75a6280ba4724617b4d028c55f05172b283c3de68a026",
+    "openpi/src/openpi/shared/collection_seeding.py": "9d383f7b694b606dcdf065b170912bac00e761f3763c65404406c9edd8585ecf",
+    "openpi/src/openpi/shared/download.py": "f6554377bde16c32d0ae43fb2c466336e3f2563af8e59cae60acb8c8ed95eb54",
+    "openpi/src/openpi/shared/download_test.py": "234ee70ab2501a1421f6c44cbd83c1e16747597023319ae1446bed9d44f17072",
+    "openpi/src/openpi/shared/eval_b1k_wrapper.py": "2dde05a9a2854565c0eb96392a03007f0497349d75e64f01c62f71742d449a43",
+    "openpi/src/openpi/shared/frame_memory.py": "9d85dd56abb40379ce3135956f05139da4654fc3cb889c58ad8d8b6eb948b087",
+    "openpi/src/openpi/shared/image_tools.py": "0f8fcb355288119e56acb56d550c1cc1f3a9edddceb0dc5b319f955943ef7767",
+    "openpi/src/openpi/shared/image_tools_test.py": "842374579dc9f4c2907da5e8bb555efe5a3f4902b659720c8e90115863dd59fe",
+    "openpi/src/openpi/shared/nnx_utils.py": "4da7111ba3011c4d1c381c9ed17257771df6a50ed89182647c3fb6f79208005e",
+    "openpi/src/openpi/shared/normalize.py": "6c2cea4946fb07e51801530400d2b2fd94730e195cd290d6b6960114eca9739d",
+    "openpi/src/openpi/shared/normalize_test.py": "fda27a21cf37f337b12bcab71229407c2a349c5965c33f278bdc468ed03f58af",
+    "openpi/src/openpi/shared/subtask_contract.py": "70cd2be43ed323252245cb5448e8b788288349967ed8b52384e7c84c571f2b71",
+    "openpi/src/openpi/shared/subtask_contract_test.py": "6ff72633464c7d2760a0e3a7885d3834d7b9ef2ab6a28fd2164b05a0e00e85ff",
+    "openpi/src/openpi/training/b1k_video_backend_test.py": "e5f0ea11c8bd7d8dd1feeed6576a001af01ca085b99d36815474a48b39e87927",
+    "openpi/src/openpi/training/checkpoints.py": "62de3f3322fc674498f4b44eeaac9017b36f17d7ca1494143f067db25e87ddb6",
+    "openpi/src/openpi/training/checkpoints_test.py": "0eb1bc85f1f86989d823a8c6a91d0e78919993c51ea53cca042636ca6fec2dea",
+    "openpi/src/openpi/training/config.py": "a0386deda4e2d57bae6e07a5d6cc87e189a992ff5c18af5695e86088d402db2d",
+    "openpi/src/openpi/training/data_loader.py": "1469853cf0efb857686cd8601c6df8efb610e0593aaae8289ce53142f15005bc",
+    "openpi/src/openpi/training/data_loader_pytorch_test.py": "97f9f8bcdff4a2c337c715cdc99dde1c282dd73a14381ddd024b47d4d8f99704",
+    "openpi/src/openpi/training/data_loader_test.py": "a0cf1bc293e8b0eb9bc5516bc05d30d9940da06c94fcfa1addca7267f8358815",
+    "openpi/src/openpi/training/distributed.py": "7c7c33c4b2d9db4deff7f99791ec4cfa8b80e2b3a2821ffd7a58f44aeea696fe",
+    "openpi/src/openpi/training/droid_rlds_dataset.py": "1d3a057a040240218234d7dbc6680ee4fe8256f2058531a0f9fefd3f7ee995a4",
+    "openpi/src/openpi/training/frame_memory_data.py": "3b6121239fb97e54dc3df8d99a15014690c4e482abdc748bb6f0bb206ec26fb4",
+    "openpi/src/openpi/training/frame_memory_data_test.py": "3de55763f9e1b236953703ca380abd2d2aa90aa214db53aff7e3cb53a8246aac",
+    "openpi/src/openpi/training/lerobot_compat.py": "aa64dddcaa4b0c62e6bb39661ba7077c06d1796f9b8582e586a696271ca3ff6a",
+    "openpi/src/openpi/training/misc/polaris_config.py": "c2ab92efb5e0d675118ad812113fd1c3cb3a62cdab5d79066014266e82df12d8",
+    "openpi/src/openpi/training/misc/roboarena_config.py": "914acdd74ccf90e6779c13a5093140595c7e4f687e9e0b167439446a81d74c01",
+    "openpi/src/openpi/training/optimizer.py": "cfb5d6f6aec61fbe961287b4015c652260628a0ed4682a0dbdc271b8e65431fa",
+    "openpi/src/openpi/training/sharding.py": "c67c4112a126ab097571c8a882fd1ee3f106b15b6e608e7205ac7f29b44ca985",
+    "openpi/src/openpi/training/subtask_data.py": "f5001049bee19c0f505549cb7aa145e68acaeb7c6c9a82916d9122544c0e1c38",
+    "openpi/src/openpi/training/subtask_data_test.py": "d703263f457ecf2bf71498cc854990924f37ea3b56d7ccd9caedbd1d1ed63092",
+    "openpi/src/openpi/training/subtask_pipeline_test.py": "d78b3ec1f4f730ce6b454475d23d2c41f2c8e0009229f9f4abd26af52fd456dc",
+    "openpi/src/openpi/training/utils.py": "b684e674343f86ef5e976f279a586d3fe2f885e901f396ac899ed136abc7eca6",
+    "openpi/src/openpi/training/weight_loaders.py": "04dcb713b355d8a5c141fe07259532cae1840cc95959f0bc35009b20d6f726e0",
+    "openpi/src/openpi/transforms.py": "02764b09d9a88784b7423cdf061795547af079aceb969efbc93ae541281f83a1",
+    "openpi/src/openpi/transforms_test.py": "d76f3ee8c5d7dc1c6fb6cb3b36b45ef30dd1de1ab5bc054bcb03deb79dcc06a8"
+  },
+  "supplemental_library": {
+    "ready_manifest_sha256": "66e5e790156270c67a266b49b115228f8159f032b2f336b61f4a32b511a0a8ec",
+    "root": "/mnt/afs/260010165/behavior_1k/runtime_20261007_1306/library_snapshots/behavior-libxml-repair3-20261008-011710"
+  },
+  "image": "registry.cn-sh-01.sensecore.cn/ccr-zhicheng-04/wangfaye-base-20261010:wangfaye-debug-20261010154634",
+  "afs_root": "/mnt/afs/260010165/behavior_1k/paired_quick20_reused1688977_step5000_20261014",
+  "object_prefix": "behavior1k/paired-quick20-reused1688977-step5000-20261014",
+  "baseline_preparation_record_sha256": "b5f8d22d256cad272118bd504ac0f9cb8ff83d88f4b2af57e79b379cc9641d12",
+  "formal_contract": {
+    "kind": "four_source_formal_training_identity",
+    "run_id": "b1k-four-source-finetune-20261014_080449-20k",
+    "initial_checkpoint1688977_manifest_sha256": "850e3248c73380e763c9545e065695bf3fd438238cbc57ff2fc764193eac9028",
+    "mixture_fingerprint": "0032a8766b0dd653a93c7a43a08601cf6edec4ddf2e0b04777a7d1e9b1bae9f6",
+    "data_manifest_sha256": "bcfef52fd6e8be6892c409161e01e2e773aa2bcee48702544124042dc86b6357",
+    "learning_rate_contract_sha256": "d3b748598a337d24115d06fc2fd4a503974ffcab48836098e641938e8c37aae7",
+    "normalization_sha256": "52d63e89f8359143d793ca80d0661c7facb0daff43c7d8c08f0d05572dd528fb",
+    "original_object_inventory_sha256": "9ae2c1b0a32d8c65bfb67cf0301eca2f70f5e03e649f5baa7aa1ac24b0158edc",
+    "global_batch_size": 192,
+    "process_count": 2,
+    "gpus_per_worker": 8,
+    "seed": 42,
+    "optimizer": "AdamW_fresh_from_weights_only",
+    "full_episode_text_loss": false,
+    "max_authorized_updates": 20000,
+    "lr_decay_end_step": 20000
+  },
+  "shared_rules_snapshot": "2026-09-11; live Feishu unavailable; conservative Spot1GPU/14CPU/60GiB, <=8h/job, own AFS, no automatic retries",
+  "modify_or_stop_training": false,
+  "other_campaigns_excluded": true,
+  "protocol_sha256": "bf7dc074a8f04f16717f864a6bdd6faba79e7696d862885104271754cea3fd62",
+  "baseline_start_before5000": false,
+  "baseline_reused_episodes": 20,
+  "total_comparison_episodes": 40,
+  "new_baseline_rollouts": 0,
+  "training_seen": true,
+  "not_heldout_generalization": true,
+  "reused_preflight": [
+    {
+      "path": "/Users/faye/code/Behavior-1k Challenge/analysis/retraining_20261013/paired_quick20_step5000_20261014/reports/prepare.json",
+      "sha256": "a78f09e5a78dac4aa03071091f6f7a2a74af49e3693f3830b6e2633c5541f6f5"
+    },
+    {
+      "path": "/Users/faye/code/Behavior-1k Challenge/analysis/retraining_20261013/paired_quick20_step5000_20261014/reports/transfer-probe.json",
+      "sha256": "5ba5c9f02e226a7d71987581c1d0ac16ac84315d58b0c3e1b0e8232d32401c40"
+    }
+  ],
+  "baseline_accepted_sha256": "78e340049efc521a8a93be6c72bb104d1fbc540b99bc26d7e0b7351068c2e371",
+  "selection_sha256": "4408f5602519a347a0f322b3e4fcadc058f88c8d4ca42f47a8414d428fd64d92"
+}

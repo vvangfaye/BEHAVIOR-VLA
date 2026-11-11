@@ -1,0 +1,475 @@
+{
+  "methods": [
+    "scalar",
+    "scalar_aux",
+    "independent_product",
+    "joint"
+  ],
+  "seeds": [
+    17,
+    29,
+    43
+  ],
+  "folds": 5,
+  "epochs": 200,
+  "lr": 0.001,
+  "weight_decay": 0.001,
+  "visual_pca_dimensions": 16,
+  "early_stopping": false,
+  "primary": "multi-clause held-out-instance Brier; joint versus scalar_aux",
+  "split": [
+    {
+      "task": "boxing_food_after_dinner",
+      "instance": 301,
+      "fold": 2
+    },
+    {
+      "task": "boxing_food_after_dinner",
+      "instance": 302,
+      "fold": 0
+    },
+    {
+      "task": "boxing_food_after_dinner",
+      "instance": 303,
+      "fold": 1
+    },
+    {
+      "task": "boxing_food_after_dinner",
+      "instance": 304,
+      "fold": 0
+    },
+    {
+      "task": "boxing_food_after_dinner",
+      "instance": 305,
+      "fold": 3
+    },
+    {
+      "task": "boxing_food_after_dinner",
+      "instance": 306,
+      "fold": 1
+    },
+    {
+      "task": "boxing_food_after_dinner",
+      "instance": 307,
+      "fold": 2
+    },
+    {
+      "task": "boxing_food_after_dinner",
+      "instance": 308,
+      "fold": 4
+    },
+    {
+      "task": "boxing_food_after_dinner",
+      "instance": 309,
+      "fold": 3
+    },
+    {
+      "task": "boxing_food_after_dinner",
+      "instance": 310,
+      "fold": 4
+    },
+    {
+      "task": "clean_up_broken_glass",
+      "instance": 301,
+      "fold": 1
+    },
+    {
+      "task": "clean_up_broken_glass",
+      "instance": 302,
+      "fold": 2
+    },
+    {
+      "task": "clean_up_broken_glass",
+      "instance": 303,
+      "fold": 0
+    },
+    {
+      "task": "clean_up_broken_glass",
+      "instance": 304,
+      "fold": 0
+    },
+    {
+      "task": "clean_up_broken_glass",
+      "instance": 305,
+      "fold": 4
+    },
+    {
+      "task": "clean_up_broken_glass",
+      "instance": 306,
+      "fold": 3
+    },
+    {
+      "task": "clean_up_broken_glass",
+      "instance": 307,
+      "fold": 1
+    },
+    {
+      "task": "clean_up_broken_glass",
+      "instance": 308,
+      "fold": 3
+    },
+    {
+      "task": "clean_up_broken_glass",
+      "instance": 309,
+      "fold": 4
+    },
+    {
+      "task": "clean_up_broken_glass",
+      "instance": 310,
+      "fold": 2
+    },
+    {
+      "task": "cleaning_up_plates_and_food",
+      "instance": 301,
+      "fold": 2
+    },
+    {
+      "task": "cleaning_up_plates_and_food",
+      "instance": 302,
+      "fold": 3
+    },
+    {
+      "task": "cleaning_up_plates_and_food",
+      "instance": 303,
+      "fold": 4
+    },
+    {
+      "task": "cleaning_up_plates_and_food",
+      "instance": 304,
+      "fold": 3
+    },
+    {
+      "task": "cleaning_up_plates_and_food",
+      "instance": 305,
+      "fold": 1
+    },
+    {
+      "task": "cleaning_up_plates_and_food",
+      "instance": 306,
+      "fold": 1
+    },
+    {
+      "task": "cleaning_up_plates_and_food",
+      "instance": 307,
+      "fold": 0
+    },
+    {
+      "task": "cleaning_up_plates_and_food",
+      "instance": 308,
+      "fold": 2
+    },
+    {
+      "task": "cleaning_up_plates_and_food",
+      "instance": 309,
+      "fold": 4
+    },
+    {
+      "task": "cleaning_up_plates_and_food",
+      "instance": 310,
+      "fold": 0
+    },
+    {
+      "task": "installing_a_fax_machine",
+      "instance": 301,
+      "fold": 2
+    },
+    {
+      "task": "installing_a_fax_machine",
+      "instance": 302,
+      "fold": 3
+    },
+    {
+      "task": "installing_a_fax_machine",
+      "instance": 303,
+      "fold": 3
+    },
+    {
+      "task": "installing_a_fax_machine",
+      "instance": 304,
+      "fold": 0
+    },
+    {
+      "task": "installing_a_fax_machine",
+      "instance": 305,
+      "fold": 4
+    },
+    {
+      "task": "installing_a_fax_machine",
+      "instance": 306,
+      "fold": 1
+    },
+    {
+      "task": "installing_a_fax_machine",
+      "instance": 307,
+      "fold": 2
+    },
+    {
+      "task": "installing_a_fax_machine",
+      "instance": 308,
+      "fold": 0
+    },
+    {
+      "task": "installing_a_fax_machine",
+      "instance": 309,
+      "fold": 4
+    },
+    {
+      "task": "installing_a_fax_machine",
+      "instance": 310,
+      "fold": 1
+    },
+    {
+      "task": "laying_tile_floors",
+      "instance": 301,
+      "fold": 3
+    },
+    {
+      "task": "laying_tile_floors",
+      "instance": 302,
+      "fold": 4
+    },
+    {
+      "task": "laying_tile_floors",
+      "instance": 303,
+      "fold": 0
+    },
+    {
+      "task": "laying_tile_floors",
+      "instance": 304,
+      "fold": 3
+    },
+    {
+      "task": "laying_tile_floors",
+      "instance": 305,
+      "fold": 1
+    },
+    {
+      "task": "laying_tile_floors",
+      "instance": 306,
+      "fold": 2
+    },
+    {
+      "task": "laying_tile_floors",
+      "instance": 307,
+      "fold": 4
+    },
+    {
+      "task": "laying_tile_floors",
+      "instance": 308,
+      "fold": 0
+    },
+    {
+      "task": "laying_tile_floors",
+      "instance": 309,
+      "fold": 1
+    },
+    {
+      "task": "laying_tile_floors",
+      "instance": 310,
+      "fold": 2
+    },
+    {
+      "task": "moving_boxes_to_storage",
+      "instance": 301,
+      "fold": 2
+    },
+    {
+      "task": "moving_boxes_to_storage",
+      "instance": 302,
+      "fold": 0
+    },
+    {
+      "task": "moving_boxes_to_storage",
+      "instance": 303,
+      "fold": 4
+    },
+    {
+      "task": "moving_boxes_to_storage",
+      "instance": 304,
+      "fold": 0
+    },
+    {
+      "task": "moving_boxes_to_storage",
+      "instance": 305,
+      "fold": 2
+    },
+    {
+      "task": "moving_boxes_to_storage",
+      "instance": 306,
+      "fold": 1
+    },
+    {
+      "task": "moving_boxes_to_storage",
+      "instance": 307,
+      "fold": 3
+    },
+    {
+      "task": "moving_boxes_to_storage",
+      "instance": 308,
+      "fold": 4
+    },
+    {
+      "task": "moving_boxes_to_storage",
+      "instance": 309,
+      "fold": 1
+    },
+    {
+      "task": "moving_boxes_to_storage",
+      "instance": 310,
+      "fold": 3
+    },
+    {
+      "task": "packing_meal_for_delivery",
+      "instance": 301,
+      "fold": 0
+    },
+    {
+      "task": "packing_meal_for_delivery",
+      "instance": 302,
+      "fold": 3
+    },
+    {
+      "task": "packing_meal_for_delivery",
+      "instance": 303,
+      "fold": 4
+    },
+    {
+      "task": "packing_meal_for_delivery",
+      "instance": 304,
+      "fold": 0
+    },
+    {
+      "task": "packing_meal_for_delivery",
+      "instance": 305,
+      "fold": 1
+    },
+    {
+      "task": "packing_meal_for_delivery",
+      "instance": 306,
+      "fold": 2
+    },
+    {
+      "task": "packing_meal_for_delivery",
+      "instance": 307,
+      "fold": 2
+    },
+    {
+      "task": "packing_meal_for_delivery",
+      "instance": 308,
+      "fold": 4
+    },
+    {
+      "task": "packing_meal_for_delivery",
+      "instance": 309,
+      "fold": 3
+    },
+    {
+      "task": "packing_meal_for_delivery",
+      "instance": 310,
+      "fold": 1
+    },
+    {
+      "task": "setup_a_bar_for_a_cocktail_party",
+      "instance": 301,
+      "fold": 3
+    },
+    {
+      "task": "setup_a_bar_for_a_cocktail_party",
+      "instance": 302,
+      "fold": 4
+    },
+    {
+      "task": "setup_a_bar_for_a_cocktail_party",
+      "instance": 303,
+      "fold": 2
+    },
+    {
+      "task": "setup_a_bar_for_a_cocktail_party",
+      "instance": 304,
+      "fold": 0
+    },
+    {
+      "task": "setup_a_bar_for_a_cocktail_party",
+      "instance": 305,
+      "fold": 1
+    },
+    {
+      "task": "setup_a_bar_for_a_cocktail_party",
+      "instance": 306,
+      "fold": 1
+    },
+    {
+      "task": "setup_a_bar_for_a_cocktail_party",
+      "instance": 307,
+      "fold": 3
+    },
+    {
+      "task": "setup_a_bar_for_a_cocktail_party",
+      "instance": 308,
+      "fold": 4
+    },
+    {
+      "task": "setup_a_bar_for_a_cocktail_party",
+      "instance": 309,
+      "fold": 2
+    },
+    {
+      "task": "setup_a_bar_for_a_cocktail_party",
+      "instance": 310,
+      "fold": 0
+    },
+    {
+      "task": "spraying_for_bugs",
+      "instance": 301,
+      "fold": 3
+    },
+    {
+      "task": "spraying_for_bugs",
+      "instance": 302,
+      "fold": 2
+    },
+    {
+      "task": "spraying_for_bugs",
+      "instance": 303,
+      "fold": 1
+    },
+    {
+      "task": "spraying_for_bugs",
+      "instance": 304,
+      "fold": 1
+    },
+    {
+      "task": "spraying_for_bugs",
+      "instance": 305,
+      "fold": 3
+    },
+    {
+      "task": "spraying_for_bugs",
+      "instance": 306,
+      "fold": 4
+    },
+    {
+      "task": "spraying_for_bugs",
+      "instance": 307,
+      "fold": 0
+    },
+    {
+      "task": "spraying_for_bugs",
+      "instance": 308,
+      "fold": 0
+    },
+    {
+      "task": "spraying_for_bugs",
+      "instance": 309,
+      "fold": 2
+    },
+    {
+      "task": "spraying_for_bugs",
+      "instance": 310,
+      "fold": 4
+    }
+  ],
+  "features": "frozen original SigLIP; 3 camera x 3 fixed times; robot state; task identity",
+  "clause_embedding": "learned task/clause-ID representation; no cross-task semantic generalization claimed",
+  "no_terminal_features": true
+}

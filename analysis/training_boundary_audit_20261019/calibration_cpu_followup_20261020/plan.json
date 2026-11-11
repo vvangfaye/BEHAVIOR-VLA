@@ -1,0 +1,46 @@
+{
+  "created_at_utc": "2026-10-19T18:35:17.716659+00:00",
+  "authorization": "Project standing authorization: 以后都批准",
+  "checkpoints": {
+    "baseline1688977": "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/organizer_rehearsal_1688977_20261016/runtime/policy-bundle/rootfs/mnt/afs/260010165/behavior_1k/checkpoints/pi05_b1k_full100_joint_1688977_aoss_20261010",
+    "expert1000": "/mnt/data1/faye/code/Behavior-1k Challenge/analysis/training_boundary_audit_20261019/flow_endpoint_screen_20261020/expert1000_checkpoint"
+  },
+  "baseline_result": "analysis/training_boundary_audit_20261019/cpu_raw_feasibility_20261020/baseline36_raw.json",
+  "cpu_affinity": [
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31
+  ],
+  "wait_for_existing_probe_max_seconds": 1900,
+  "baseline_parity_max_seconds": 300,
+  "candidate36_max_seconds": 900,
+  "training": false,
+  "simulation": false,
+  "new_uploads": false,
+  "new_downloads": false,
+  "purpose": "Complete the predefined simple-gain/offset alternative on 36 cached expert observations using the same CPU backend as the saved baseline. This supplements, not replaces, the four-checkpoint GPU screen.",
+  "noise": "Original cached PCG64 action-noise protocol; never paired with new JAX-native CFM outputs.",
+  "source_sha256": {
+    "analysis/training_boundary_audit_20261019/calibration_cpu_followup_20261020/eval_local.py": "86bda389e13c084d09dfd4e8603e0a192a298933b86ebea9f391d3e8fc348e68",
+    "analysis/training_boundary_audit_20261019/calibration_cpu_followup_20261020/run_when_idle.py": "d0c03d83f1ba79c6e7a41895a316ea50b8394960e1e19b4f3d46a33ee147578e",
+    "analysis/training_boundary_audit_20261019/eval_cached_probe.py": "33a05b1d7bf5a05b9718062331ed92ee24a3eaefcd7497b4da883be39c08e501",
+    "BEHAVIOR-VLAs/scripts/eval_openloop.py": "b9f7f2e3260fa2e8a49de3a5b1256d7ec36bb61d218e7188a362ddd14174c802",
+    "analysis/training_boundary_audit_20261019/action_change_calibration.py": "f23ca3b8b0f03a1bd336b8f4feb68e35493eb3413564270649a99bf2c4d921e4",
+    "analysis/training_boundary_audit_20261019/cpu_raw_feasibility_20261020/baseline36_raw.json": "cbfce3799064b2df7e5b421a41b13289113c884e6ff7902199edcc996031d028"
+  },
+  "wait_for_current_native_probe": false,
+  "scheduling_revision": "Parallel only after host availability check; prior helper terminated before its first model evaluation."
+}

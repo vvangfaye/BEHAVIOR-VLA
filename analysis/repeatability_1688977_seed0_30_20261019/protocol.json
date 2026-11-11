@@ -1,0 +1,169 @@
+{
+  "checkpoint": 1688977,
+  "experiment": "fixed_seed_repeatability_phase1",
+  "unique_pairs": [
+    [
+      "turning_on_radio",
+      301
+    ],
+    [
+      "turning_on_radio",
+      302
+    ],
+    [
+      "bringing_water",
+      301
+    ],
+    [
+      "bringing_water",
+      302
+    ],
+    [
+      "installing_a_modem",
+      301
+    ],
+    [
+      "installing_a_modem",
+      302
+    ],
+    [
+      "putting_dirty_dishes_in_sink",
+      301
+    ],
+    [
+      "putting_dirty_dishes_in_sink",
+      302
+    ],
+    [
+      "make_rose_centerpieces",
+      301
+    ],
+    [
+      "make_rose_centerpieces",
+      302
+    ]
+  ],
+  "repeats_per_pair": 3,
+  "policy_seed": 0,
+  "environment_seed": 0,
+  "python_hash_seed": 0,
+  "evaluator_mode": "public_test",
+  "prompt_mode": "whole_task",
+  "external_agent": false,
+  "subtask_prediction": true,
+  "subtask_temperature": 0.0,
+  "subtask_action_conditioning": "task_and_subtask",
+  "executed_action_horizon": 16,
+  "max_token_len": 512,
+  "max_subtask_len": 64,
+  "write_video": true,
+  "fresh_policy_process_each_repeat": true,
+  "fresh_evaluator_process_each_repeat": true,
+  "same_gpu_for_three_repeats": true,
+  "independent_cache_each_repeat": true,
+  "native_task_budgets": {
+    "turning_on_radio": 3224,
+    "bringing_water": 14157,
+    "installing_a_modem": 3619,
+    "putting_dirty_dishes_in_sink": 18222,
+    "make_rose_centerpieces": 6798
+  },
+  "instance_assets": [
+    {
+      "pair": [
+        "turning_on_radio",
+        301
+      ],
+      "relative_path": "scene_test/public/house_double_floor_lower/json/house_double_floor_lower_task_turning_on_radio_instances/house_double_floor_lower_task_turning_on_radio_0_301_template-tro_state.json",
+      "bytes": 2492,
+      "sha256": "30a0fe101da1cbf6eb3683d3f9da716399ccd7409974b459dc12a580d2c8ad13"
+    },
+    {
+      "pair": [
+        "turning_on_radio",
+        302
+      ],
+      "relative_path": "scene_test/public/house_double_floor_lower/json/house_double_floor_lower_task_turning_on_radio_instances/house_double_floor_lower_task_turning_on_radio_0_302_template-tro_state.json",
+      "bytes": 2490,
+      "sha256": "b02032fb63c90a8318d9f90754ecaa3c03ef756eab55b7c53115a4d637c4cfe5"
+    },
+    {
+      "pair": [
+        "bringing_water",
+        301
+      ],
+      "relative_path": "scene_test/public/house_single_floor/json/house_single_floor_task_bringing_water_instances/house_single_floor_task_bringing_water_0_301_template-tro_state.json",
+      "bytes": 4207,
+      "sha256": "7ec78c8119d610dded53f1f3264fa4801a1244a97935f78065291b3b1e9c122a"
+    },
+    {
+      "pair": [
+        "bringing_water",
+        302
+      ],
+      "relative_path": "scene_test/public/house_single_floor/json/house_single_floor_task_bringing_water_instances/house_single_floor_task_bringing_water_0_302_template-tro_state.json",
+      "bytes": 4203,
+      "sha256": "fab866cb9236e83a1036756ee03c61705ef52dda98f07484ad2f7d54b8bf480e"
+    },
+    {
+      "pair": [
+        "installing_a_modem",
+        301
+      ],
+      "relative_path": "scene_test/public/Rs_int/json/Rs_int_task_installing_a_modem_instances/Rs_int_task_installing_a_modem_0_301_template-tro_state.json",
+      "bytes": 5761,
+      "sha256": "6a2813c97bca3711f470116aae2752838d5c4b18bf1a650cc6823bbaa7a48c09"
+    },
+    {
+      "pair": [
+        "installing_a_modem",
+        302
+      ],
+      "relative_path": "scene_test/public/Rs_int/json/Rs_int_task_installing_a_modem_instances/Rs_int_task_installing_a_modem_0_302_template-tro_state.json",
+      "bytes": 5790,
+      "sha256": "72a722dc6740b1986276384bd90d6675bccfef4522c043e865f9367566757c44"
+    },
+    {
+      "pair": [
+        "putting_dirty_dishes_in_sink",
+        301
+      ],
+      "relative_path": "scene_test/public/restaurant_diner/json/restaurant_diner_task_putting_dirty_dishes_in_sink_instances/restaurant_diner_task_putting_dirty_dishes_in_sink_0_301_template-tro_state.json",
+      "bytes": 44844,
+      "sha256": "54d33bc66a85ccbd3759381fca7a833e31c89a2348442443b4c62ea445ca9024"
+    },
+    {
+      "pair": [
+        "putting_dirty_dishes_in_sink",
+        302
+      ],
+      "relative_path": "scene_test/public/restaurant_diner/json/restaurant_diner_task_putting_dirty_dishes_in_sink_instances/restaurant_diner_task_putting_dirty_dishes_in_sink_0_302_template-tro_state.json",
+      "bytes": 43794,
+      "sha256": "758accf280d4786fa9144a028b096c3e38ed0ea14cf3528cf02b6a44ca16375c"
+    },
+    {
+      "pair": [
+        "make_rose_centerpieces",
+        301
+      ],
+      "relative_path": "scene_test/public/house_double_floor_lower/json/house_double_floor_lower_task_make_rose_centerpieces_instances/house_double_floor_lower_task_make_rose_centerpieces_0_301_template-tro_state.json",
+      "bytes": 5654,
+      "sha256": "645efdc6062991b9ab81e0c26b9d156a23b47b093d1a950e976f731b1ce5d812"
+    },
+    {
+      "pair": [
+        "make_rose_centerpieces",
+        302
+      ],
+      "relative_path": "scene_test/public/house_double_floor_lower/json/house_double_floor_lower_task_make_rose_centerpieces_instances/house_double_floor_lower_task_make_rose_centerpieces_0_302_template-tro_state.json",
+      "bytes": 5654,
+      "sha256": "e6b435b77f00b34bbaecf9e39facf65d25c478b572679496f8b653076803fb0b"
+    }
+  ],
+  "initial_state_recorded_before_action": true,
+  "action_trace_recorded": true,
+  "no_retry_or_score_based_filter": true,
+  "all_initial_state_differences_reported": true,
+  "interpretation": "Fixed-input/run repeatability diagnostic; not a model quality benchmark.",
+  "scope": "Only phase1: thirty new episodes, no training, no other checkpoint, no other campaign modified."
+}

@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "kind": "preregistered_local_flow_endpoint_measurement_protocol",
+  "date": "2026-10-20",
+  "question": "On the same cached expert observations, does a real checkpoint change that lowers the native action CFM objective also improve a separately specified endpoint action metric?",
+  "current_stage": "baseline_api_parity_only",
+  "authorization_boundary": {
+    "local_only": true,
+    "maximum_cpu_affinity_count": 16,
+    "maximum_wall_seconds_per_process": 900,
+    "training": false,
+    "simulation": false,
+    "cloud_jobs": false,
+    "uploads": false,
+    "downloads": false,
+    "candidate_checkpoint_available_locally": false,
+    "candidate_comparison_enabled": false,
+    "note": "This protocol does not authorize obtaining weights or starting any remote operation. The baseline smoke test cannot attribute real SFT effects."
+  },
+  "data": {
+    "cache_manifest": "analysis/training_boundary_audit_20261019/pilot_three_tasks_cache_v1/cache_manifest.json",
+    "selection": "Use the existing frozen cache and its canonical sample order; do not select observations using newly measured losses or endpoint errors.",
+    "baseline_smoke_sample_count": {"minimum": 1, "maximum": 3},
+    "future_paired_screen_sample_count": 36,
+    "future_paired_screen_tasks": 3,
+    "dependence_note": "Nearby anchors share trajectories and boundaries. Neither 36 anchors nor multiple noise draws are 36 independent tasks. No population-generalization claim from this screen."
+  },
+  "identity_gate": {
+    "required": [
+      "Verify cache metadata and selected NPZ content hashes using VerifiedRawCache.",
+      "Record the checkpoint parameter-manifest identity, normalization-asset hash, model configuration, imported source paths and source hashes, and runtime versions.",
+      "Use the same local runtime, transforms, model settings, precision, batching and deployment sampler for both checkpoints if a future candidate comparison becomes possible.",
+      "Verify the loaded model's actual subtask conditioning mode against the checkpoint asset, rather than assuming the factory entry configuration is the final configuration.",
+      "Use the provided subtask; require subtask_source=provided. No generated subtask or temporal voting in this probe.",
+      "Require the expected native action target shape [1,32,32]. A different shape is an explicit protocol mismatch, not an automatic change of the metric."
+    ],
+    "cross_backend_rule": "Do not compare newly measured CPU baseline losses or endpoints with old GPU candidate endpoints as a paired SFT effect. Old GPU summaries contain no CFM measurement."
+  },
+  "native_cfm_measurement": {
+    "source_api": "openpi.models.pi0.Pi0.compute_loss_with_metrics",
+    "train_argument": false,
+    "interpretation": "Deterministic evaluation of the training objective with augmentation/dropout disabled; not an asserted reproduction of stochastic logged training loss.",
+    "target_source": "Canonical training dataset transforms applied to the original cached raw sample, retaining the recorded actions.",
+    "action_coordinates": "Mapped delta actions, checkpoint normalization, and padding to 32 model dimensions, exactly as in the training transform chain.",
+    "rng": {
+      "root_seed": 0,
+      "derivation": "fold_in(fold_in(jax.random.key(seed), episode_index), frame_index), with seed=0 and identical keys across compared checkpoints; record the root key.",
+      "native_split": "preprocess_rng, noise_rng, time_rng = jax.random.split(root_rng, 3)",
+      "noise": "jax.random.normal(noise_rng, actions.shape)",
+      "time": "jax.random.beta(time_rng, 1.5, 1, actions.shape[:-2]) * 0.999 + 0.001",
+      "interpolant": "x_t = time * noise + (1 - time) * actions",
+      "velocity_target": "noise - actions",
+      "record": ["root_key", "time_value", "time_sha256", "noise_shape", "noise_dtype", "noise_sha256"],
+      "namespace_note": "This new probe deliberately reuses its CFM noise as the explicit endpoint initial noise. It differs from the old GPU/CPU pilot's PCG64 noise. Do not pair its endpoints with old pilot endpoints as a checkpoint effect."
+    },
+    "reported_metrics": {
+      "native_action_cfm_32x32": "Official metrics['action_loss']: mean over all 32 time positions and all 32 model action dimensions; no current-subtask validity mask.",
+      "native_joint_loss": "Mean of the official returned per-step loss array; includes weighted subtask CE when enabled.",
+      "subtask_ce": "Official subtask_loss, subtask token count and configured subtask_loss_weight, reported separately. Do not call joint loss action CFM.",
+      "valid23_prefix16_cfm": "NOT MEASURED by the minimal API probe. The official scalar and per-step dimension-averaged loss cannot recover this region or a padding-only contribution. Do not infer such a decomposition."
+    },
+    "parity_identity": "native_joint_loss = native_action_cfm_32x32 + subtask_loss_weight * official_subtask_loss for these supervised batch-one samples, within the frozen engineering tolerance. Do not add CE again at every time position after reducing the returned array."
+  },
+  "endpoint_measurement": {
+    "source_api": "Existing build_pi05 / SubtaskPolicy.infer path with an explicit recorded noise tensor",
+    "sampler": "Native sample_actions, ten Euler steps, t starts at 1 and dt=-0.1; no alternate solver or time reparameterization.",
+    "initial_noise": "Use the exact reconstructed float32 CFM internal noise tensor as the explicit endpoint initial noise, with batch dimension removed; save its hash. This is a new common-noise protocol, not the old PCG64 pilot draw.",
+    "current_noise_draw_count": 1,
+    "physical_action_shape": [32, 23],
+    "outputs": "Save finite raw physical actions, physical GT and validity mask with hashes. Inverse normalization and mapped absolute-action conversion must match the existing policy output transforms.",
+    "primary_mask": "Position index < min(16,H) AND recorded current-subtask valid_mask. last_1 anchors contribute one valid position; they are not silently excluded.",
+    "secondary_mask": "All current-subtask-valid positions within the evaluated H=32 horizon.",
+    "groups": {
+      "base": [0, 3],
+      "torso": [3, 7],
+      "left_arm": [7, 14],
+      "left_gripper": [14, 15],
+      "right_arm": [15, 22],
+      "right_gripper": [22, 23]
+    },
+    "metrics": "For each mask and action group, first average squared/absolute physical GT error over that sample's valid coordinates. For descriptive aggregation, average samples within each task and then average tasks. Preserve per-sample values and denominators.",
+    "unit_rule": "Report groups separately. Do not make a mixed-unit physical-action sum or compare the numerical size of physical MSE directly with normalized CFM.",
+    "scope_rule": "One noise draw measures that sampled action chunk, not the complete endpoint distribution. Distance between same-noise samples is not by itself a distance between distributions."
+  },
+  "api_parity_and_negative_controls": [
+    {
+      "name": "canonical_training_input_parity",
+      "required_for_api_pass": true,
+      "test": "For the provided-subtask case, compare canonical training-transformed observations with the effective inference-prepared observations at the model boundary: images, image masks, state, tokenized prompt/masks and action-conditioning fields. Keep GT actions only as the loss target.",
+      "failure_meaning": "Different conditioning or preprocessing; stop before interpreting a CFM/endpoint mismatch."
+    },
+    {
+      "name": "joint_loss_accounting",
+      "required_for_api_pass": true,
+      "test": "Check the official joint-loss identity and finite values; record action CFM and CE separately.",
+      "failure_meaning": "Loss accounting or configuration mismatch; not evidence about SFT."
+    },
+    {
+      "name": "same_model_same_rng_repeat",
+      "required_for_api_pass": true,
+      "test": "On at least the first canonical sample, repeat the same checkpoint with identical CFM root key and endpoint initial noise. Reuse a single loaded model. CFM values and physical endpoints must agree within the frozen engineering tolerance.",
+      "failure_meaning": "Uncontrolled stochasticity or a stateful inference mismatch; no candidate attribution."
+    },
+    {
+      "name": "target_is_not_an_inference_input",
+      "required_for_api_pass": true,
+      "test": "Check the canonical model-boundary inference observation does not include GT actions or future observations. If a modified-GT diagnostic is performed, identical observation and endpoint noise must yield the same action; only target-based scores may change.",
+      "failure_meaning": "Target leakage; reject the measurement."
+    },
+    {
+      "name": "mask_scope_control",
+      "required_for_api_pass": true,
+      "test": "Offline endpoint reaggregation under full-valid and prefix16-valid masks must use saved predictions without re-running the model. Neither reporting mask changes native 32x32 CFM.",
+      "failure_meaning": "Metric scopes have been conflated."
+    },
+    {
+      "name": "different_noise_same_checkpoint",
+      "required_for_api_pass": false,
+      "test": "Only if the local time budget permits, use an additional recorded noise draw with unchanged weights to describe measurement variability. Such differences are never labeled a checkpoint effect.",
+      "failure_meaning": "No directional scientific expectation; this is a variability control, not a test that different noises must change actions."
+    }
+  ],
+  "engineering_tolerance": {
+    "float_atol": 0.000001,
+    "float_rtol": 0.00001,
+    "physical_target_roundtrip_atol": 0.00001,
+    "physical_target_roundtrip_rtol": 0.00001,
+    "integer_boolean_and_identity_hash_comparisons": "exact",
+    "interpretation": "An API consistency threshold, not a performance/equivalence margin or a publication success threshold. Freeze before any candidate results. Investigate failures instead of relaxing after inspecting a candidate."
+  },
+  "predeclared_decisions": {
+    "api_pass_without_candidate": "API_PASS_NO_SFT_CONCLUSION: all required parity controls pass on the selected baseline samples. This establishes measurement feasibility only.",
+    "api_failure": "API_MISMATCH: a required parity, identity or finiteness check fails. Do not interpret the scores scientifically.",
+    "timeout": "RESOURCE_INCONCLUSIVE: stop at 900 seconds; retain bounded logs and completed records, without claiming a model or scientific failure.",
+    "future_candidate_loss_down_endpoint_group_up": "A descriptive mismatch for that fixed observation/noise/mask/group, if both changes exceed the engineering repeatability envelope. It does not imply that every action group worsens, that the endpoint distribution is unchanged, or that a gauge direction caused the update.",
+    "future_candidate_loss_down_endpoint_groups_down": "Descriptive agreement on these chosen metrics and probes; not proof that CFM caused the endpoint improvement or that closed-loop performance improved.",
+    "future_candidate_mixed_groups_or_anchors": "Report mixed evidence; do not manufacture a single direction through post-hoc group weighting or anchor exclusion.",
+    "small_or_uncertain_change": "Inconclusive. Lack of significance is not endpoint equivalence. With only one draw, claims concern fixed-noise scores; expected-loss claims require additional common draws with measurement uncertainty smaller than the reported effect.",
+    "global_percentage_decomposition": "Not identified. Do not report a percentage of CFM gain attributable to endpoint improvement versus gauge/path change. No such decomposition is defined by these measurements."
+  },
+  "distribution_extension_not_enabled": {
+    "minimum_draw_count": 2,
+    "noise_policy": "Independent draws within each checkpoint, common draw identities across checkpoints, fixed before viewing candidate scores. More draws may be needed for adequate precision; two is only the algebraic minimum.",
+    "proper_score": "For a fixed sample/mask/group flatten the physical action coordinates and use d(x,y)=||x-y||_2/sqrt(number_of_coordinates). Unbiased energy-score estimate: mean_m d(X_m,y) - sum_{m!=n} d(X_m,X_n)/(2*M*(M-1)). Lower is better. Score each group separately.",
+    "limitations": "Repeated action samples with a single expert target do not identify every valid action distribution. Energy score is a predictive score against the sampled expert targets, not task reward, exact endpoint likelihood, or a proof of equality of endpoint distributions. Expected squared error alone is not a proper score for a non-degenerate predicted distribution.",
+    "status": "No distribution-quality or distribution-equivalence conclusion from the present one-noise smoke test. Any extension requires an explicit bounded execution plan."
+  },
+  "publication_boundary": [
+    "An analytic toy counterexample plus a baseline API check is not evidence that real SFT moves mainly in endpoint-invariant directions.",
+    "One small paired screen cannot establish a general explanation of unstable closed-loop fine-tuning gains.",
+    "A stronger contribution would require replicated real training comparisons on independent tasks/seeds, identified measurement uncertainty, and a prospective training or checkpoint-selection decision that improves independent closed-loop outcomes under matched data and compute.",
+    "No arbitrary percentage gain or correlation threshold is declared sufficient for a paper. Novelty must be assessed against existing flow objectives, endpoint-aware training, world-model supervision, and loss-versus-control studies."
+  ]
+}

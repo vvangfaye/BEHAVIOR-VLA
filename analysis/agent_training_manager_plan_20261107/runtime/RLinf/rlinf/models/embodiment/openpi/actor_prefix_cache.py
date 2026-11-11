@@ -1,0 +1,113 @@
+# Opt-in actor prefix cache (local addition, 2026-11-03; not part of upstream RLinf).
+#
+# With ``train_expert_only`` the VLM (SigLIP + Gemma expert-0) is frozen, so the prefix pass in
+# ``Pi0RL.default_forward`` is a pure function of the observation. ``EmbodiedFSDPActor.run_training``
+# shuffles the rollout once and then walks the *same* sequence of micro-batches in every update epoch,
+# so micro-batch slot (global_batch_idx, micro_idx) holds identical samples in epochs 1..update_epoch.
+# This store keeps the epoch-1 prefix outputs (prefix_out, prefix_mask, per-layer KV) on the host and
+# serves them back in later epochs instead of recomputing ~90% of the forward FLOPs.
+#
+# Exactness: a cache hit returns the very tensors epoch 1 computed for the same samples in the same
+# batch composition, which is what a deterministic recompute would produce. ``verify_every`` > 0
+# recomputes on some hits and records the max abs difference (expected 0.0).
+from __future__ import annotations
+
+import time
+from typing import Any, Callable
+
+import torch
+
+
+def _map(obj: Any, fn: Callable[[torch.Tensor], torch.Tensor]) -> Any:
+    if isinstance(obj, torch.Tensor):
+        return fn(obj)
+    if isinstance(obj, tuple):
+        return tuple(_map(x, fn) for x in obj)
+    if isinstance(obj, list):
+        return [_map(x, fn) for x in obj]
+    if obj is None:
+        return None
+    raise TypeError(f"unsupported prefix output element {type(obj)}")
+
+
+def _leaves(obj: Any) -> list[torch.Tensor]:
+    out: list[torch.Tensor] = []
+    _map(obj, lambda t: out.append(t) or t)
+    return out
+
+
+class ActorPrefixStore:
+    def __init__(self, pin: bool = True, verify_every: int = 0, max_gib: float = 0.0):
+        self.pin = pin
+        self.verify_every = int(verify_every)
+        # 0 = unlimited. Past the cap new slots are not stored (they are recomputed every epoch).
+        self.max_bytes = float(max_gib) * 2**30
+        self.slot: Any = None
+        self.entries: dict[Any, Any] = {}
+        self._pool: dict[tuple, list[torch.Tensor]] = {}
+        self.stats = self._fresh_stats()
+
+    @staticmethod
+    def _fresh_stats() -> dict[str, float]:
+        return {"hits": 0, "misses": 0, "bytes": 0, "store_s": 0.0, "verify_max_abs": 0.0, "verified": 0,
+                "uncached": 0}
+
+    def _host_buffer(self, t: torch.Tensor) -> torch.Tensor:
+        key = (tuple(t.shape), t.dtype)
+        free = self._pool.get(key)
+        if free:
+            return free.pop()
+        try:
+            return torch.empty(t.shape, dtype=t.dtype, device="cpu", pin_memory=self.pin)
+        except RuntimeError:
+            self.pin = False
+            return torch.empty(t.shape, dtype=t.dtype, device="cpu")
+
+    def _to_host(self, out: Any) -> Any:
+        def copy(t: torch.Tensor) -> torch.Tensor:
+            buf = self._host_buffer(t)
+            buf.copy_(t.detach())
+            self.stats["bytes"] += buf.numel() * buf.element_size()
+            return buf
+
+        return _map(out, copy)
+
+    def fetch_or_build(self, build: Callable[[], Any], device: torch.device) -> Any:
+        if self.slot is None:
+            return build()
+        entry = self.entries.get(self.slot)
+        if entry is None:
+            out = build()
+            if self.max_bytes > 0 and self.stats["bytes"] >= self.max_bytes:
+                self.stats["uncached"] += 1
+                return out
+            t0 = time.perf_counter()
+            self.entries[self.slot] = self._to_host(out)
+            self.stats["store_s"] += time.perf_counter() - t0
+            self.stats["misses"] += 1
+            return out
+        self.stats["hits"] += 1
+        cached = _map(entry, lambda t: t.to(device, non_blocking=True))
+        if self.verify_every > 0 and (self.stats["hits"] - 1) % self.verify_every == 0:
+            fresh = build()
+            diff = 0.0
+            for a, b in zip(_leaves(cached), _leaves(fresh)):
+                if a.dtype == torch.bool:
+                    diff = max(diff, float((a != b).any()))
+                else:
+                    diff = max(diff, float((a.float() - b.float()).abs().max()))
+            self.stats["verify_max_abs"] = max(self.stats["verify_max_abs"], diff)
+            self.stats["verified"] += 1
+        return cached
+
+    def end_training_call(self) -> dict[str, float]:
+        """Release this call's entries back to the buffer pool and return its stats."""
+        for entry in self.entries.values():
+            for t in _leaves(entry):
+                self._pool.setdefault((tuple(t.shape), t.dtype), []).append(t)
+        self.entries.clear()
+        self.slot = None
+        stats = dict(self.stats)
+        stats["gib"] = stats.pop("bytes") / 2**30
+        self.stats = self._fresh_stats()
+        return stats

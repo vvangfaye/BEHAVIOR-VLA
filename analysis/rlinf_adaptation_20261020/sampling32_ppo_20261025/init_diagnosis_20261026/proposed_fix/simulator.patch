@@ -1,0 +1,12 @@
+--- simulator.py
++++ simulator.py
+@@ -35,7 +35,8 @@
+     spec = json.loads(Path(args.spec).read_text())
+     conn = Connection(args.fd)
+     faulthandler.enable()
+-    faulthandler.dump_traceback_later(240, repeat=True)
++    # Avoid asynchronous frame walking while Isaac Sim worker threads mutate frames.
++    # Keep fatal-signal diagnostics; initialization.json already reports the load stage.
+     started = time.monotonic()
+ 
+     def stage(name):

@@ -1,0 +1,105 @@
+env_wrapper:
+  _target_: omnigibson.learning.wrappers.TrackingResWrapper
+policy_name: websocket
+headless: true
+eval_on_train_instances: false
+eval_instance_ids:
+- 2
+write_video: false
+write_third_person_video: false
+repro_initial_state: true
+repro_action_log: false
+replay_mode: none
+replay_action_log_path: null
+replay_until_step: null
+resume_record_suffix: resumed
+repro_action_chunk_size: 100
+record_step_q_score: true
+partial_scene_load: true
+max_steps: null
+log_path: /mnt/afs/260010165/behavior_1k/serf_eval20_20261026/gate01/gate
+test_hidden: false
+map_dataset_root_path: /mnt/afs/260010165/behavior_1k/serf_reproduction_20261025/legacy01/assets/maps
+map_input_type: null
+policy_config_name: pi_serf_behavior_b1k_fast--4d_env_robot_feat_map--50t_lora--task-0022
+num_input_points: null
+execute_in_n_steps: 20
+robot_model_root_path: /mnt/afs/260010165/behavior_1k/serf_reproduction_20261025/legacy01/assets/maps/map_models
+instance_keep_all_categories: null
+instance_budget_categories: null
+tracking_device: cuda
+tracking_buffer_len: null
+tracking_buffer_size: 14
+tracking_frame_step: 2
+tracking_update_stride: null
+tracking_num_keypoints_per_instance: null
+tracking_erosion_iters: null
+tracking_kp_quality_level: null
+tracking_kp_min_distance: null
+tracking_kp_block_size: null
+tracking_visibility_threshold: null
+tracking_confidence_threshold: null
+tracking_fgr_threshold: null
+tracking_icp_threshold: null
+tracking_icp_min_points: null
+tracking_icp_max_iterations: null
+tracking_rescue_icp_max_iterations: null
+tracking_min_observed_keypoints: null
+tracking_stationary_threshold: 0.02
+tracking_fallback_lookback: 15
+tracking_graph_refine_distance: null
+tracking_graph_refine_majority_ratio: null
+tracking_rescue_drift_threshold: 0.4
+tracking_rescue_acceptance_threshold: null
+tracking_target_instance_names: null
+tracking_exclude_categories: null
+tracking_views: null
+tracking_video_fps: null
+tracking_save_video: false
+robot:
+  type: R1Pro
+  multi_view_cameras:
+    left_wrist:
+      name: robot_r1::robot_r1:left_realsense_link:Camera:0
+      resolution:
+      - 240
+      - 240
+    right_wrist:
+      name: robot_r1::robot_r1:right_realsense_link:Camera:0
+      resolution:
+      - 240
+      - 240
+    head:
+      name: robot_r1::robot_r1:zed_link:Camera:0
+      resolution:
+      - 240
+      - 240
+  action_keys:
+  - base
+  - torso
+  - left_arm
+  - left_gripper
+  - right_arm
+  - right_gripper
+  action_key_dims:
+    base: 3
+    torso: 4
+    left_arm: 7
+    left_gripper: 1
+    right_arm: 7
+    right_gripper: 1
+  controllers: null
+task:
+  name: putting_shoes_on_rack
+  task_info_range: null
+  pcd_range:
+  - 0.0
+  - 2.0
+  - -1.5
+  - 1.5
+  - 0.25
+  - 1.25
+model:
+  _target_: omnigibson.learning.policies.WebsocketPolicy
+  host: 127.0.0.1
+  port: 8000

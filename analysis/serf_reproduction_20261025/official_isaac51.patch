@@ -1,0 +1,845 @@
+diff --git a/OmniGibson/omnigibson/macros.py b/OmniGibson/omnigibson/macros.py
+--- a/OmniGibson/omnigibson/macros.py
++++ b/OmniGibson/omnigibson/macros.py
+@@ -232,6 +232,9 @@ def determine_data_path():
+ # Disable collision and gravity for the simulator, should default to False
+ gm.VISUAL_ONLY = False
+ 
++# Whether to enable VR extension support
++gm.ENABLE_VR = os.getenv("OMNIGIBSON_VR", "False").lower() in ("true", "1", "t")
++
+ 
+ # Create helper function for generating sub-dictionaries
+ def create_module_macros(module_path):
+diff --git a/OmniGibson/omnigibson/objects/dataset_object.py b/OmniGibson/omnigibson/objects/dataset_object.py
+--- a/OmniGibson/omnigibson/objects/dataset_object.py
++++ b/OmniGibson/omnigibson/objects/dataset_object.py
+@@ -262,31 +262,35 @@ def _post_load(self):
+         # Run super last
+         super()._post_load()
+ 
+-        # Get the average mass/density for this object category
+-        avg_specs = get_avg_category_specs()
+-        if self.category in avg_specs:
+-            category_mass = avg_specs[self.category]["mass"]
+-            category_density = avg_specs[self.category]["density"]
+-        else:
+-            log.warning(
+-                f"Category {self.category} not found in average object specs! Defaulting to unit mass or density."
+-            )
+-            category_mass = 1.0
+-            category_density = 1.0
++        category_mass = None
++        category_density = None
++        if self._load_config["dataset_name"] == "behavior-1k-assets":
++            # Get the average mass/density for this object category
++            avg_specs = get_avg_category_specs()
++            if self.category in avg_specs:
++                category_mass = avg_specs[self.category]["mass"]
++                category_density = avg_specs[self.category]["density"]
++            else:
++                log.warning(
++                    f"Category {self.category} not found in average object specs! Defaulting to unit mass or density."
++                )
++                category_mass = 1.0
++                category_density = 1.0
+ 
+         if self._prim_type == PrimType.RIGID:
+-            total_volume = sum(link.volume for link in self._links.values())
+-            for link in self._links.values():
+-                # If not a meta (virtual) link, set the density based on avg_obj_dims and a zero mass (ignored)
+-                if link.has_collision_meshes and isinstance(link, RigidDynamicPrim):
+-                    if gm.FORCE_CATEGORY_MASS:
+-                        # Each link should get the appropriate fraction of the category mass
+-                        # based on the link volume
+-                        link.mass = max(category_mass * (link.volume / total_volume), 1e-6)
+-                        link.density = 0.0
+-                    else:
+-                        link.mass = 0.0
+-                        link.density = category_density
++            if category_mass is not None:
++                total_volume = sum(link.volume for link in self._links.values())
++                for link in self._links.values():
++                    # If not a meta (virtual) link, set the density based on avg_obj_dims and a zero mass (ignored)
++                    if link.has_collision_meshes and isinstance(link, RigidDynamicPrim):
++                        if gm.FORCE_CATEGORY_MASS:
++                            # Each link should get the appropriate fraction of the category mass
++                            # based on the link volume
++                            link.mass = max(category_mass * (link.volume / total_volume), 1e-6)
++                            link.density = 0.0
++                        else:
++                            link.mass = 0.0
++                            link.density = category_density
+ 
+             # If there exists a center of mass annotation, apply it now
+             if self.prim.HasAttribute("ig:centerOfMass"):
+@@ -318,7 +322,10 @@ def _post_load(self):
+                 revolute_joint.GetAttribute("drive:angular:physics:targetVelocity").Set(0.0)
+ 
+         elif self._prim_type == PrimType.CLOTH:
+-            self.root_link.mass = category_mass if gm.FORCE_CATEGORY_MASS else category_density * self.root_link.volume
++            if category_mass is not None:
++                self.root_link.mass = (
++                    category_mass if gm.FORCE_CATEGORY_MASS else category_density * self.root_link.volume
++                )
+ 
+     def set_bbox_center_position_orientation(self, position=None, orientation=None):
+         """
+diff --git a/OmniGibson/omnigibson/objects/usd_object.py b/OmniGibson/omnigibson/objects/usd_object.py
+--- a/OmniGibson/omnigibson/objects/usd_object.py
++++ b/OmniGibson/omnigibson/objects/usd_object.py
+@@ -34,7 +34,7 @@
+ from omnigibson.prims.geom_prim import GeomPrim
+ from omnigibson.prims.rigid_dynamic_prim import RigidDynamicPrim
+ from omnigibson.utils.asset_utils import decrypt_file
+-from omnigibson.utils.constants import EmitterType, PrimType
++from omnigibson.utils.constants import OBJECT_CATEGORIES, EmitterType, PrimType
+ from omnigibson.utils.python_utils import Registerable, classproperty, extract_class_init_kwargs_from_dict, get_uuid
+ from omnigibson.utils.ui_utils import create_module_logger, suppress_omni_log
+ from omnigibson.utils.usd_utils import (
+@@ -44,6 +44,7 @@
+     count_joints,
+     create_joint,
+ )
++from omnigibson.utils.vision_utils import add_semantic_label
+ 
+ # Global dicts that will contain mappings
+ REGISTERED_OBJECTS = dict()
+@@ -417,11 +418,8 @@ def _post_load(self):
+                 self._link_physics_materials[link_name] = physics_mat
+ 
+         # Add semantics
+-        lazy.isaacsim.core.utils.semantics.add_update_semantics(
+-            prim=self._prim,
+-            semantic_label=self.category,
+-            type_label="class",
+-        )
++        add_semantic_label(prim=self._prim, label=self.category)
++
+         # Prepare the object states
+         self._states = {}
+         self.prepare_object_states()
+diff --git a/OmniGibson/omnigibson/omnigibson_5_1_0.kit b/OmniGibson/omnigibson/omnigibson_5_1_0.kit
+--- /dev/null
++++ b/OmniGibson/omnigibson/omnigibson_5_1_0.kit
+@@ -0,0 +1,48 @@
++[package]
++description = "A platform for accelerating Embodied AI research"
++title = "OmniGibson"
++version = "3.8.0"
++
++keywords = ["experience", "app", "usd", "isaacsim"] # That makes it browsable in UI with "experience" filter
++
++
++[dependencies]
++"isaacsim.exp.base" = {}
++"omni.flowusd" = {}
++#"omni.kit.xr.profile.vr" = {}
++"omni.physx.supportui" = {}
++#"omni.isaac.physics_inspector" = {}
++
++[settings.app]
++name = "OmniGibson"
++version = "3.8.0"
++settings.persistent = false       # settings reset on each run with this app
++window.title = "OmniGibson"
++vulkan = true # Explicitly enable Vulkan (on by default on Linux, off by default on Windows)
++window.iconPath = "${app}/OmniGibson_logo.png"
++enableDeveloperWarnings = false    # disable developer warnings to reduce log noise
++
++[settings.app.livestream]
++proto = "ws"
++allowResize = true
++outDirectory = "${data}"
++
++[settings.app.exts.folders]
++'++' = [
++    "${app}",
++    "${app}/../exts",
++    "${app}/../extscache",
++    "${app}/../extsPhysics",
++    "${app}/../extsUser",
++    "${app}/../extsDeprecated",
++]
++
++[settings.exts."omni.kit.registry.nucleus"]
++registries = [
++	{ name = "kit/default", url = "https://ovextensionsprod.blob.core.windows.net/exts/kit/prod/107/shared" },
++	{ name = "kit/sdk", url = "https://ovextensionsprod.blob.core.windows.net/exts/kit/prod/sdk/${kit_version_short}/${kit_git_hash}" },
++	{ name = "kit/community", url = "https://dw290v42wisod.cloudfront.net/exts/kit/community" },
++]
++
++[settings.app.extensions]
++pathStatCacheEnabled = false
+diff --git a/OmniGibson/omnigibson/omnigibson_5_1_0_vr.kit b/OmniGibson/omnigibson/omnigibson_5_1_0_vr.kit
+--- a/OmniGibson/omnigibson/omnigibson_5_1_0_vr.kit
++++ b/OmniGibson/omnigibson/omnigibson_5_1_0_vr.kit
+@@ -1,7 +1,7 @@
+ [package]
+ description = "A platform for accelerating Embodied AI research"
+ title = "OmniGibson"
+-version = "1.5.0"
++version = "3.8.0"
+ 
+ keywords = ["experience", "app", "usd", "isaacsim"] # That makes it browsable in UI with "experience" filter
+ 
+@@ -10,14 +10,17 @@ keywords = ["experience", "app", "usd", "isaacsim"] # That makes it browsable in
+ "isaacsim.exp.base" = {}
+ "omni.flowusd" = {}
+ "omni.kit.xr.profile.vr" = {}
++"omni.physx.supportui" = {}
++#"omni.isaac.physics_inspector" = {}
+ 
+ [settings.app]
+ name = "OmniGibson"
+-version = "3.7.2"
++version = "3.8.0"
+ settings.persistent = false       # settings reset on each run with this app
+ window.title = "OmniGibson"
+ vulkan = true # Explicitly enable Vulkan (on by default on Linux, off by default on Windows)
+ window.iconPath = "${app}/OmniGibson_logo.png"
++enableDeveloperWarnings = false    # disable developer warnings to reduce log noise
+ 
+ [settings.app.livestream]
+ proto = "ws"
+@@ -26,6 +29,7 @@ outDirectory = "${data}"
+ 
+ [settings.app.exts.folders]
+ '++' = [
++    "${app}",
+     "${app}/../exts",
+     "${app}/../extscache",
+     "${app}/../extsPhysics",
+@@ -35,11 +39,10 @@ outDirectory = "${data}"
+ 
+ [settings.exts."omni.kit.registry.nucleus"]
+ registries = [
+-	{ name = "kit/default", url = "https://ovextensionsprod.blob.core.windows.net/exts/kit/prod/106/shared" },
++	{ name = "kit/default", url = "https://ovextensionsprod.blob.core.windows.net/exts/kit/prod/107/shared" },
+ 	{ name = "kit/sdk", url = "https://ovextensionsprod.blob.core.windows.net/exts/kit/prod/sdk/${kit_version_short}/${kit_git_hash}" },
+ 	{ name = "kit/community", url = "https://dw290v42wisod.cloudfront.net/exts/kit/community" },
+ ]
+ 
+ [settings.app.extensions]
+ pathStatCacheEnabled = false
+-fsWatcherEnabled = false
+diff --git a/OmniGibson/omnigibson/prims/material_prim.py b/OmniGibson/omnigibson/prims/material_prim.py
+--- a/OmniGibson/omnigibson/prims/material_prim.py
++++ b/OmniGibson/omnigibson/prims/material_prim.py
+@@ -246,7 +246,7 @@ def _post_load(self):
+ 
+         # Generate shader reference
+         self._shader = lazy.omni.usd.get_shader_from_material(self._prim)
+-        self._shader_node = lazy.usd.mdl.RegistryUtils.GetShaderNodeForPrim(self._shader.GetPrim())
++        self._shader_node = lazy.omni.UsdMdl.RegistryUtils.GetShaderNodeForPrim(self._shader.GetPrim())
+ 
+     def bind(self, target_prim_path):
+         """
+diff --git a/OmniGibson/omnigibson/prims/rigid_prim.py b/OmniGibson/omnigibson/prims/rigid_prim.py
+--- a/OmniGibson/omnigibson/prims/rigid_prim.py
++++ b/OmniGibson/omnigibson/prims/rigid_prim.py
+@@ -255,8 +255,7 @@ def _find_geom_prims(prim, is_collision=False):
+                         # Make sure particlesource, particlesink and fillable meshes are not visible
+                         mesh.purpose = "guide"
+ 
+-        # If we have any collision meshes, we aggregate their center of mass and volume values to set the center of mass
+-        # for this link
++        # If we have any collision meshes, compute the center of mass from collision geometry
+         if len(coms) > 0:
+             coms_tensor = th.stack(coms)
+             vols_tensor = th.tensor(vols).unsqueeze(1)
+diff --git a/OmniGibson/omnigibson/prims/xform_prim.py b/OmniGibson/omnigibson/prims/xform_prim.py
+--- a/OmniGibson/omnigibson/prims/xform_prim.py
++++ b/OmniGibson/omnigibson/prims/xform_prim.py
+@@ -63,9 +63,14 @@ def _post_load(self):
+         super()._post_load()
+ 
+         # Make sure all xforms have pose and scaling info
+-        # These only need to be done if we are creating this prim from scratch.
++        # These only need to be done if we are creating this prim from scratch AND it is not an instanceable / proxy prim.
+         # Pre-created OG objects' prims always have these things set up ahead of time.
+-        if not self._xform_props_pre_loaded:
++        # Note that if this is an instanceable prim, we also don't need write these properties
++        # TODO: This still breaks things downstream so we assert here to make sure we have backwards-compatibility with the expected prim types
++        assert (
++            not self._prim.IsInstanceable() and not self._prim.IsInstanceProxy()
++        ), "Support for instanceable prims has not been implemented yet!"
++        if not self._xform_props_pre_loaded and not self._prim.IsInstanceable() and not self._prim.IsInstanceProxy():
+             self._set_xform_properties()
+ 
+         # Cache the original scale from the USD so that when EntityPrim sets the scale for each link (Rigid/ClothPrim),
+diff --git a/OmniGibson/omnigibson/scenes/interactive_traversable_scene.py b/OmniGibson/omnigibson/scenes/interactive_traversable_scene.py
+--- a/OmniGibson/omnigibson/scenes/interactive_traversable_scene.py
++++ b/OmniGibson/omnigibson/scenes/interactive_traversable_scene.py
+@@ -59,9 +59,9 @@ def __init__(
+             include_robots (bool): whether to also include the robot(s) defined in the scene
+         """
+ 
++        self.scene_model = scene_model
+         # Infer scene directory
+         self.scene_dir = get_scene_path(scene_model, dataset_name=dataset_name)
+-        self.task_dir = get_task_instance_path(scene_model)
+ 
+         # Other values that will be loaded at runtime
+         self.load_object_categories = None
+@@ -210,6 +210,14 @@ def _should_load_object(self, obj_info, task_metadata):
+         # We only load this model if all the above conditions are met
+         return (not_blacklisted and whitelisted and valid_room and agent_ok) or is_building_structure
+ 
++    @property
++    def task_dir(self):
++        """
++        Returns:
++            str: Path to task directory. This requires B1K challenge dataset to be downloaded
++        """
++        return get_task_instance_path(self.scene_model)
++
+     @property
+     def seg_map(self):
+         """
+diff --git a/OmniGibson/omnigibson/scenes/scene_base.py b/OmniGibson/omnigibson/scenes/scene_base.py
+--- a/OmniGibson/omnigibson/scenes/scene_base.py
++++ b/OmniGibson/omnigibson/scenes/scene_base.py
+@@ -16,7 +16,6 @@
+ from omnigibson.objects.usd_object import USDObject
+ from omnigibson.prims.xform_prim import XFormPrim
+ from omnigibson.robots import REGISTERED_ROBOTS
+-from omnigibson.utils.constants import ROBOT_CATEGORY
+ from omnigibson.systems import Cloth
+ from omnigibson.systems.micro_particle_system import FluidSystem
+ from omnigibson.systems.macro_particle_system import MacroParticleSystem
+@@ -30,7 +29,7 @@
+ from omnigibson.transition_rules import TransitionRuleAPI
+ from omnigibson.utils.asset_utils import get_dataset_path
+ from omnigibson.utils.config_utils import TorchEncoder
+-from omnigibson.utils.constants import STRUCTURAL_DOOR_CATEGORIES
++from omnigibson.utils.constants import ROBOT_CATEGORY, STRUCTURAL_DOOR_CATEGORIES
+ from omnigibson.utils.python_utils import (
+     Recreatable,
+     Registerable,
+@@ -894,7 +893,7 @@ def set_position_orientation(self, position=None, orientation=None):
+         self._scene_prim.set_position_orientation(position=position, orientation=orientation)
+         # Need to update sim here -- this is because downstream setters called immediately may not be respected,
+         # e.g. during load_state() call when specific objects have just been added to the simulator in this scene
+-        og.sim.pi.update_simulation(elapsedStep=0, currentTime=og.sim.current_time)
++        og.sim.refresh_physics()
+         # Update the cached pose and inverse pose
+         pos_ori = self._scene_prim.get_position_orientation()
+         pose = T.pose2mat(pos_ori)
+@@ -1163,6 +1162,9 @@ def _load_state(self, state):
+         # TODO: Remove backwards compatible check once new scene RC is updated
+         if "pos" in state:
+             self.set_position_orientation(position=state["pos"], orientation=state["ori"])
++            # We need to propagate these changes or else we get a crash
++            og.sim.refresh_physics(sync_usd=True)
++            # Now update the rest of the state as normal
+             self._registry.load_state(state=state["registry"], serialized=False)
+         else:
+             self._registry.load_state(state=state, serialized=False)
+diff --git a/OmniGibson/omnigibson/sensors/vision_sensor.py b/OmniGibson/omnigibson/sensors/vision_sensor.py
+--- a/OmniGibson/omnigibson/sensors/vision_sensor.py
++++ b/OmniGibson/omnigibson/sensors/vision_sensor.py
+@@ -250,8 +250,8 @@ def _post_load(self):
+         # Link the camera and viewport together
+         self._viewport.viewport_api.set_active_camera(self.prim_path)
+ 
+-        # Requires 3 render updates to propagate changes
+-        for i in range(3):
++        # Requires 4 render updates to propagate changes
++        for i in range(4):
+             render()
+ 
+         # Set the viewer size (requires taking one render step afterwards)
+@@ -264,8 +264,8 @@ def _post_load(self):
+         self.horizontal_aperture = self._load_config["horizontal_aperture"]
+         self.clipping_range = self._load_config["clipping_range"]
+ 
+-        # Requires 3 render updates to propagate changes
+-        for i in range(3):
++        # Requires 4 render updates to propagate changes
++        for i in range(4):
+             render()
+ 
+     def _initialize(self):
+@@ -276,7 +276,7 @@ def _initialize(self):
+ 
+         # Initialize sensors
+         self.initialize_sensors(names=self._modalities)
+-        for _ in range(3):
++        for _ in range(4):
+             render()
+ 
+     def initialize_sensors(self, names):
+@@ -666,8 +666,8 @@ def camera_parameters(self):
+         # Add the camera params modality if it doesn't already exist
+         if "camera_params" not in self._annotators:
+             self.initialize_sensors(names="camera_params")
+-            # Requires 3 render updates for camera params annotator to become active
+-            for _ in range(3):
++            # Requires 4 render updates for camera params annotator to become active
++            for _ in range(4):
+                 render()
+         # Grab and return the parameters
+         return self._annotators["camera_params"].get_data()
+@@ -723,8 +723,8 @@ def image_height(self, height):
+         for annotator in self._annotators.values():
+             annotator.attach([self._render_product])
+ 
+-        # Requires 3 updates to propagate changes
+-        for i in range(3):
++        # Requires 4 updates to propagate changes
++        for i in range(4):
+             render()
+ 
+     @property
+@@ -758,8 +758,8 @@ def image_width(self, width):
+         for annotator in self._annotators.values():
+             annotator.attach([self._render_product])
+ 
+-        # Requires 3 updates to propagate changes
+-        for i in range(3):
++        # Requires 4 updates to propagate changes
++        for i in range(4):
+             render()
+ 
+     @property
+@@ -892,6 +892,12 @@ def intrinsic_matrix(self):
+         cx = (1.0 - P[0, 2]) * width / 2.0
+         cy = (1.0 - P[1, 2]) * height / 2.0
+         K = th.tensor([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
++
++        # Explicitly sanity check for null values here
++        degen_mat = th.zeros(3, 3)
++        degen_mat[2, 2] = 1.0
++        assert not th.all(K == degen_mat).item(), f"intrinsic matrix for sensor: {self.name} is degenerate!"
++
+         return K
+ 
+     @property
+diff --git a/OmniGibson/omnigibson/simulator.py b/OmniGibson/omnigibson/simulator.py
+--- a/OmniGibson/omnigibson/simulator.py
++++ b/OmniGibson/omnigibson/simulator.py
+@@ -14,25 +14,6 @@
+ from pathlib import Path
+ from cProfile import Profile
+ 
+-
+-def with_profiler(name):
+-    def decorator(fn):
+-        @functools.wraps(fn)
+-        def wrapper(self, *args, **kwargs):
+-            profiler = getattr(self, name)
+-            if profiler is not None:
+-                profiler.enable()
+-            try:
+-                return fn(self, *args, **kwargs)
+-            finally:
+-                if profiler is not None:
+-                    profiler.disable()
+-
+-        return wrapper
+-
+-    return decorator
+-
+-
+ import torch as th
+ 
+ import omnigibson as og
+@@ -62,6 +43,7 @@ def wrapper(self, *args, **kwargs):
+     print_logo,
+     suppress_omni_log,
+ )
++from omnigibson.utils.vision_utils import add_semantic_label
+ from omnigibson.utils.usd_utils import (
+     CollisionAPI,
+     ControllableObjectViewAPI,
+@@ -87,10 +69,28 @@ def wrapper(self, *args, **kwargs):
+ m.INITIAL_SCENE_PRIM_Z_OFFSET = -100.0
+ 
+ m.KIT_FILES = {
+-    (4, 5, 0): "omnigibson_4_5_0.kit",
++    (5, 1, 0): "omnigibson_5_1_0.kit",
+ }
+ 
+ 
++def with_profiler(name):
++    def decorator(fn):
++        @functools.wraps(fn)
++        def wrapper(self, *args, **kwargs):
++            profiler = getattr(self, name)
++            if profiler is not None:
++                profiler.enable()
++            try:
++                return fn(self, *args, **kwargs)
++            finally:
++                if profiler is not None:
++                    profiler.disable()
++
++        return wrapper
++
++    return decorator
++
++
+ # Helper functions for starting omnigibson
+ def print_save_usd_warning(_):
+     log.warning("Exporting individual USDs has been disabled in OG due to copyrights.")
+@@ -217,6 +217,8 @@ def _launch_app():
+             isaac_version_tuple = tuple(map(int, isaac_version_str.split(".")[:3]))
+             assert isaac_version_tuple in m.KIT_FILES, f"Isaac Sim version must be one of {list(m.KIT_FILES.keys())}"
+             kit_file_name = m.KIT_FILES[isaac_version_tuple]
++            if gm.ENABLE_VR:
++                kit_file_name = kit_file_name.replace(".kit", "_vr.kit")
+ 
+         # Copy the OmniGibson kit file and icon file to the Isaac Sim apps directory. This is necessary because the Isaac Sim app
+         # expects the extensions to be reachable in the parent directory of the kit file. We copy on every launch to
+@@ -525,18 +527,25 @@ def __init__(
+ 
+             # Set the viewer camera, and then set its default pose
+             if gm.RENDER_VIEWER_CAMERA:
+-                self._set_viewer_camera()
++                self._set_viewer_camera(
++                    viewer_width=viewer_width,
++                    viewer_height=viewer_height,
++                )
+                 self.viewer_camera.set_position_orientation(
+                     position=th.tensor(m.DEFAULT_VIEWER_CAMERA_POS),
+                     orientation=th.tensor(m.DEFAULT_VIEWER_CAMERA_QUAT),
+                 )
+-                self.viewer_width = viewer_width
+-                self.viewer_height = viewer_height
+ 
+             # Acquire contact sensor interface
+             self._contact_sensor = lazy.isaacsim.sensors.physics._sensor.acquire_contact_sensor_interface()
+ 
+-        def _set_viewer_camera(self, relative_prim_path="/viewer_camera", viewport_name="Viewport"):
++        def _set_viewer_camera(
++            self,
++            relative_prim_path="/viewer_camera",
++            viewport_name="Viewport",
++            viewer_height=gm.DEFAULT_VIEWER_HEIGHT,
++            viewer_width=gm.DEFAULT_VIEWER_WIDTH,
++        ):
+             """
+             Creates a camera prim dedicated for this viewer at @prim_path if it doesn't exist,
+             and sets this camera as the active camera for the viewer
+@@ -550,8 +559,8 @@ def _set_viewer_camera(self, relative_prim_path="/viewer_camera", viewport_name=
+                 relative_prim_path=relative_prim_path,
+                 name=relative_prim_path.split("/")[-1],  # Assume name is the lowest-level name in the prim_path
+                 modalities="rgb",
+-                image_height=self.viewer_height,
+-                image_width=self.viewer_width,
++                image_height=viewer_height,
++                image_width=viewer_width,
+                 viewport_name=viewport_name,
+             )
+             self._viewer_camera.load(None)
+@@ -738,11 +747,7 @@ def add_ground_plane(self, floor_plane_visible=True, floor_plane_color=None):
+             self._floor_plane.load(None)
+ 
+             # Assign floors category to the floor plane
+-            lazy.isaacsim.core.utils.semantics.add_update_semantics(
+-                prim=self._floor_plane.prim,
+-                semantic_label="floors",
+-                type_label="class",
+-            )
++            add_semantic_label(prim=self._floor_plane.prim, label="floors")
+ 
+         def add_skybox(self):
+             """
+@@ -1029,8 +1034,8 @@ def _refresh_physics_sim_view(self):
+                 SimulationManager._backend
+             )
+             SimulationManager._physics_sim_view.set_subspace_roots("/")
+-            SimulationManager._message_bus.dispatch(IsaacEvents.SIMULATION_VIEW_CREATED.value, payload={})
+-            SimulationManager._message_bus.dispatch(IsaacEvents.PHYSICS_READY.value, payload={})
++            SimulationManager._message_bus.dispatch_event(IsaacEvents.SIMULATION_VIEW_CREATED.value, payload={})
++            SimulationManager._message_bus.dispatch_event(IsaacEvents.PHYSICS_READY.value, payload={})
+ 
+         def update_handles(self):
+             # Handles are only relevant when physx is running
+@@ -1055,6 +1060,17 @@ def update_handles(self):
+             RigidContactAPI.initialize_view()
+             ControllableObjectViewAPI.initialize_view()
+ 
++        def refresh_physics(self, sync_usd=False):
++            """
++            Synchronizes and evaluates any physics updates that have occurred since the last fetch.
++
++            Args:
++                sync_usd (bool): If True, also fetch physics results to USD backings.
++            """
++            self.pi.update_simulation(elapsedStep=0.0, currentTime=self.current_time)
++            if sync_usd:
++                self.psi.fetch_results()
++
+         @with_profiler(name="_non_physics_step_profiler")
+         def _non_physics_step(self):
+             """
+@@ -1077,7 +1093,7 @@ def _non_physics_step(self):
+                     # may be added mid-iteration!!
+                     # For this same reason, after we finish the loop, we keep any objects that are yet to be initialized
+                     # First call zero-physics step update, so that handles are properly propagated
+-                    og.sim.pi.update_simulation(elapsedStep=0, currentTime=og.sim.current_time)
++                    self.refresh_physics()
+                     scenes_modified = set()
+                     for i in range(n_objects_to_initialize):
+                         obj = self._objects_to_initialize[i]
+diff --git a/OmniGibson/omnigibson/systems/macro_particle_system.py b/OmniGibson/omnigibson/systems/macro_particle_system.py
+--- a/OmniGibson/omnigibson/systems/macro_particle_system.py
++++ b/OmniGibson/omnigibson/systems/macro_particle_system.py
+@@ -16,6 +16,7 @@
+     scene_relative_prim_path_to_absolute,
+     setup_collision_apis,
+ )
++from omnigibson.utils.vision_utils import add_semantic_label
+ 
+ # Create module logger
+ log = create_module_logger(module_name=__name__)
+@@ -460,11 +461,7 @@ def _load_new_particle(self, relative_prim_path, name):
+                 path_to=prim_path,
+             )
+             prim = lazy.isaacsim.core.utils.prims.get_prim_at_path(prim_path)
+-            lazy.isaacsim.core.utils.semantics.add_update_semantics(
+-                prim=prim,
+-                semantic_label=self.name,
+-                type_label="class",
+-            )
++            add_semantic_label(prim=prim, label=self.name)
+         result = GeomPrim(relative_prim_path=relative_prim_path, name=name)
+         result.load(self.scene)
+         return result
+@@ -1220,11 +1217,7 @@ def _load_new_particle(self, relative_prim_path, name):
+             lazy.pxr.UsdPhysics.RigidBodyAPI.Apply(prim)
+             mass_api = lazy.pxr.UsdPhysics.MassAPI.Apply(prim)
+             mass_api.GetDensityAttr().Set(self.particle_density)
+-            lazy.isaacsim.core.utils.semantics.add_update_semantics(
+-                prim=prim,
+-                semantic_label=self.name,
+-                type_label="class",
+-            )
++            add_semantic_label(prim=prim, label=self.name)
+         result = GeomPrim(relative_prim_path=relative_prim_path, name=name)
+         result.load(self.scene)
+         setup_collision_apis(result.prim)
+@@ -1261,7 +1254,7 @@ def refresh_particles_view(self):
+ 
+         Should be called every time sim.play() is called
+         """
+-        og.sim.pi.update_simulation(elapsedStep=0, currentTime=og.sim.current_time)
++        og.sim.refresh_physics()
+         with suppress_omni_log(channels=["omni.physx.tensors.plugin"]):
+             self.particles_view = og.sim.physics_sim_view.create_rigid_body_view(
+                 pattern=f"{self.prim_path}/particles/*"
+diff --git a/OmniGibson/omnigibson/systems/micro_particle_system.py b/OmniGibson/omnigibson/systems/micro_particle_system.py
+--- a/OmniGibson/omnigibson/systems/micro_particle_system.py
++++ b/OmniGibson/omnigibson/systems/micro_particle_system.py
+@@ -18,6 +18,7 @@
+     absolute_prim_path_to_scene_relative,
+     scene_relative_prim_path_to_absolute,
+ )
++from omnigibson.utils.vision_utils import add_semantic_label
+ 
+ # Create module logger
+ log = create_module_logger(module_name=__name__)
+@@ -946,11 +947,8 @@ def generate_particles(
+             )
+ 
+         # Update semantics
+-        lazy.isaacsim.core.utils.semantics.add_update_semantics(
+-            prim=lazy.isaacsim.core.utils.prims.get_prim_at_path(prim_path=self.prim_path),
+-            semantic_label=self.name,
+-            type_label="class",
+-        )
++        prim = lazy.isaacsim.core.utils.prims.get_prim_at_path(prim_path=self.prim_path)
++        add_semantic_label(prim=prim, label=self.name)
+ 
+         return inst
+ 
+@@ -1446,11 +1444,7 @@ def _create_particle_prototypes(self):
+         prototype = GeomPrim(relative_prim_path=relative_prototype_prim_path, name=f"{self.name}_prototype0")
+         prototype.load(self._scene)
+         prototype.visible = False
+-        lazy.isaacsim.core.utils.semantics.add_update_semantics(
+-            prim=prototype.prim,
+-            semantic_label=self.name,
+-            type_label="class",
+-        )
++        add_semantic_label(prim=prototype.prim, label=self.name)
+         return [prototype]
+ 
+     def _get_particle_material_template(self):
+@@ -1555,11 +1549,7 @@ def _create_particle_prototypes(self):
+         prototype.load(self._scene)
+         prototype.scale *= self.max_scale
+         prototype.visible = False
+-        lazy.isaacsim.core.utils.semantics.add_update_semantics(
+-            prim=prototype.prim,
+-            semantic_label=self.name,
+-            type_label="class",
+-        )
++        add_semantic_label(prim=prototype.prim, label=self.name)
+ 
+         # Store the contact offset based on a minimum sphere
+         # Threshold the lower-bound to avoid super small particles
+diff --git a/OmniGibson/omnigibson/utils/constants.py b/OmniGibson/omnigibson/utils/constants.py
+--- a/OmniGibson/omnigibson/utils/constants.py
++++ b/OmniGibson/omnigibson/utils/constants.py
+@@ -53,6 +53,10 @@ class ParticleModifyCondition(str, Enum):
+     GRAVITY = "gravity"
+ 
+ 
++# Object categories -- grabbed directly from the dataset to begin with
++# This will be automatically added to when objects are added with custom categories
++OBJECT_CATEGORIES = set(get_all_object_categories())
++
+ # Structure categories that need to always be loaded for stability purposes
+ STRUCTURE_CATEGORIES = frozenset({"floors", "walls", "ceilings", "lawn", "driveway", "fence", "roof", "background"})
+ 
+@@ -182,10 +186,11 @@ def semantic_class_name_to_id():
+     Returns:
+         dict: class name to class id
+     """
+-    categories = get_all_object_categories()
+     systems = get_all_system_categories(include_cloth=True)
+ 
+-    all_semantics = sorted(set(categories + systems + ["background", "unlabelled", "object", "light", "agent"]))
++    all_semantics = sorted(
++        set(list(OBJECT_CATEGORIES) + systems + ["background", "unlabelled", "object", "light", "agent"])
++    )
+ 
+     # Assign a unique class id to each class name with hashing, the upper limit here is the max of int32
+     max_int32 = th.iinfo(th.int32).max + 1
+diff --git a/OmniGibson/omnigibson/utils/deprecated_utils.py b/OmniGibson/omnigibson/utils/deprecated_utils.py
+--- a/OmniGibson/omnigibson/utils/deprecated_utils.py
++++ b/OmniGibson/omnigibson/utils/deprecated_utils.py
+@@ -1061,8 +1061,16 @@ def colorize_bboxes(bboxes_2d_data, bboxes_2d_rgb, num_channels=3):
+ 
+ # This is a faster version than the native implementation, as it avoids pre-processing initially
+ def _get_world_pose_transform_w_scale(fabric_prim):
++    # Local import here to avoid circular imports
++    from omnigibson.macros import gm
++
+     # This will return a transformation matrix with translation as the last row and scale included
+     xformable_prim = usdrt.Rt.Xformable(fabric_prim)
++
++    # If using Fabric, directly use hierarchy world matrix attribute and return that value
++    if gm.ENABLE_FLATCACHE:
++        return xformable_prim.GetFabricHierarchyWorldMatrixAttr().Get(usdrt.Usd.TimeCode.Default())
++
+     if xformable_prim.HasWorldXform():
+         world_pos_attr = xformable_prim.GetWorldPositionAttr()
+         if not world_pos_attr.IsValid():
+diff --git a/OmniGibson/omnigibson/utils/object_state_utils.py b/OmniGibson/omnigibson/utils/object_state_utils.py
+--- a/OmniGibson/omnigibson/utils/object_state_utils.py
++++ b/OmniGibson/omnigibson/utils/object_state_utils.py
+@@ -148,7 +148,8 @@ def sample_kinematics(
+     if use_trav_map:
+         trav_map = objB.scene.trav_map
+         trav_map_floor_map = trav_map.floor_map[0]
+-        eroded_trav_map = trav_map._erode_trav_map(trav_map_floor_map, robot=objB.scene.robots[0])
++        robot = objB.scene.robots[0] if len(objB.scene.robots) > 0 else None
++        eroded_trav_map = trav_map._erode_trav_map(trav_map_floor_map, robot=robot)
+ 
+         # Hardcoding R1 robot arm length for now
+         arm_length_xy = 0.8
+diff --git a/OmniGibson/omnigibson/utils/transform_utils.py b/OmniGibson/omnigibson/utils/transform_utils.py
+--- a/OmniGibson/omnigibson/utils/transform_utils.py
++++ b/OmniGibson/omnigibson/utils/transform_utils.py
+@@ -521,8 +521,7 @@ def decompose_mat(hmat):
+     P[:, :, 3] = torch.tensor([0.0, 0.0, 0.0, 1.0], device=hmat.device, dtype=hmat.dtype).expand(batch_size, 4)
+ 
+     det_P = torch.linalg.det(P[:, :3, :3])  # (B,)
+-    if torch.any(torch.abs(det_P) < 1e-6):
+-        raise ValueError("Some matrices are singular and cannot be decomposed")
++    torch._assert(torch.all(torch.abs(det_P) >= 1e-6), "Some matrices are singular and cannot be decomposed")
+ 
+     if not torch.allclose(M[:, :3, 3], torch.tensor(0.0, device=hmat.device, dtype=hmat.dtype)):
+         raise ValueError("Some matrices have perspective components")
+@@ -892,7 +891,7 @@ def pose_inv(pose_mat: torch.Tensor) -> torch.Tensor:
+ 
+     pose_mat = pose_mat.reshape(-1, 4, 4)
+     batch_size = pose_mat.shape[0]
+-    pose_inv = torch.zeros((batch_size, 4, 4))
++    pose_inv = torch.zeros((batch_size, 4, 4), device=pose_mat.device)
+     pose_inv[:, :3, :3] = pose_mat[:, :3, :3].transpose(1, 2)
+     pose_inv[:, :3, 3] = (-pose_inv[:, :3, :3] @ pose_mat[:, :3, 3].unsqueeze(-1)).squeeze(-1)
+     pose_inv[:, 3, 3] = 1.0
+diff --git a/OmniGibson/omnigibson/utils/usd_utils.py b/OmniGibson/omnigibson/utils/usd_utils.py
+--- a/OmniGibson/omnigibson/utils/usd_utils.py
++++ b/OmniGibson/omnigibson/utils/usd_utils.py
+@@ -180,7 +180,7 @@ def create_joint(
+     # We update the simulation now without stepping physics if sim is playing so we can bypass the snapping warning from PhysicsUSD
+     if og.sim.is_playing():
+         with suppress_omni_log(channels=["omni.physx.plugin"]):
+-            og.sim.pi.update_simulation(elapsedStep=0, currentTime=og.sim.current_time)
++            og.sim.refresh_physics()
+ 
+     # Return this joint
+     return joint_prim
+@@ -288,7 +288,7 @@ def initialize_view(self):
+             return
+ 
+         # Generate views, making sure to update simulation first so the physx backend is synchronized.
+-        og.sim.pi.update_simulation(elapsedStep=0, currentTime=og.sim.current_time)
++        og.sim.refresh_physics()
+         with suppress_omni_log(channels=["omni.physx.tensors.plugin"]):
+             for scene_idx, _ in enumerate(og.sim.scenes):
+                 scene_body_filters = body_filters[scene_idx]
+@@ -1018,14 +1018,18 @@ def _refresh(cls):
+             # Check that no reads from PoseAPI are happening during a physics step, this is quite slow!
+             assert not og.sim.currently_stepping, "Cannot refresh poses during a physics step!"
+ 
++            # TODO @wensi-ai: For Isaac Sim 5.1, a single render step has to happen here before changes to propagate for vision sensors.
++            # check if this is still the case for later versions
++            og.sim.render()
++
+             # when flatcache is on
+             if og.sim._physx_fabric_interface:
+                 # no time step is taken here
+                 og.sim._physx_fabric_interface.update(og.sim.get_physics_dt(), og.sim.current_time)
+             # when flatcache is off
+             else:
+                 # no time step is taken here
+-                og.sim.psi.fetch_results()
++                og.sim.refresh_physics(sync_usd=True)
+             cls.mark_valid()
+ 
+     @classmethod
+@@ -2348,7 +2352,7 @@ def add_asset_to_stage(asset_path, prim_path):
+     """
+     # Make sure this is actually a supported asset type
+     asset_type = asset_path.split(".")[-1]
+-    assert asset_type in {"usd", "usda", "obj"}, "Cannot load a non-USD or non-OBJ file as a USD prim!"
++    assert asset_type in {"usd", "usda", "obj", "usdz"}, "Cannot load a non-USD or non-OBJ file as a USD prim!"
+ 
+     # Make sure the path exists
+     assert os.path.exists(asset_path), f"Cannot load {asset_type.upper()} file {asset_path} because it does not exist!"
+diff --git a/OmniGibson/omnigibson/utils/vision_utils.py b/OmniGibson/omnigibson/utils/vision_utils.py
+--- a/OmniGibson/omnigibson/utils/vision_utils.py
++++ b/OmniGibson/omnigibson/utils/vision_utils.py
+@@ -3,11 +3,21 @@
+ import torch as th
+ from PIL import Image, ImageDraw
+ import omnigibson.utils.transform_utils as T
++import omnigibson.lazy as lazy
+ 
+-try:
+-    import accimage
+-except ImportError:
+-    accimage = None
++
++def add_semantic_label(prim, label, instance_name="class"):
++    """
++    Helper function to add semantic labels to a prim.
++    This upgrades the prim semantics to labels and adds the specified label.
++
++    Args:
++        prim: The prim to add labels to
++        label (str): The semantic label to add (will be converted to a list internally)
++        instance_name (str): The instance name for the label. Defaults to "class"
++    """
++    lazy.isaacsim.core.utils.semantics.upgrade_prim_semantics_to_labels(prim=prim)
++    lazy.isaacsim.core.utils.semantics.add_labels(prim=prim, labels=[label], instance_name=instance_name)
+ 
+ 
+ class RandomScale:

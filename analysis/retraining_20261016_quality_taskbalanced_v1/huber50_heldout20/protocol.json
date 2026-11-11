@@ -1,0 +1,122 @@
+{
+  "kind": "same_task_finetuning_heldout_pair_v1",
+  "pairs": [
+    [
+      "cook_bacon",
+      297
+    ],
+    [
+      "getting_organized_for_work",
+      194
+    ],
+    [
+      "hiding_Easter_eggs",
+      294
+    ],
+    [
+      "scrubbing_bathroom_floor",
+      19
+    ],
+    [
+      "putting_up_Christmas_decorations_inside",
+      144
+    ],
+    [
+      "tidying_bathroom",
+      172
+    ],
+    [
+      "wash_dog_toys",
+      33
+    ],
+    [
+      "stacking_wood",
+      204
+    ],
+    [
+      "installing_a_scanner",
+      35
+    ],
+    [
+      "spraying_fruit_trees",
+      137
+    ],
+    [
+      "sorting_bottles_cans_and_paper",
+      230
+    ],
+    [
+      "rearrange_your_room",
+      53
+    ],
+    [
+      "chopping_wood",
+      192
+    ],
+    [
+      "putting_dishes_away_after_cleaning",
+      118
+    ],
+    [
+      "clean_up_broken_glass",
+      12
+    ],
+    [
+      "halve_an_egg",
+      36
+    ],
+    [
+      "hanging_pictures",
+      162
+    ],
+    [
+      "vacuuming_floors",
+      149
+    ],
+    [
+      "moving_boxes_to_storage",
+      53
+    ],
+    [
+      "putting_shoes_on_rack",
+      250
+    ]
+  ],
+  "mode": "train",
+  "seeds": {
+    "policy": 0,
+    "environment": 0
+  },
+  "native_task_budgets": {
+    "cook_bacon": 11519,
+    "getting_organized_for_work": 23506,
+    "hiding_Easter_eggs": 11429,
+    "scrubbing_bathroom_floor": 4730,
+    "putting_up_Christmas_decorations_inside": 20578,
+    "tidying_bathroom": 19504,
+    "wash_dog_toys": 16834,
+    "stacking_wood": 23909,
+    "installing_a_scanner": 6387,
+    "spraying_fruit_trees": 12518,
+    "sorting_bottles_cans_and_paper": 15395,
+    "rearrange_your_room": 19282,
+    "chopping_wood": 16127,
+    "putting_dishes_away_after_cleaning": 16430,
+    "clean_up_broken_glass": 13037,
+    "halve_an_egg": 9565,
+    "hanging_pictures": 3581,
+    "vacuuming_floors": 3617,
+    "moving_boxes_to_storage": 21894,
+    "putting_shoes_on_rack": 11589
+  },
+  "truncation_step_offset": 1,
+  "policy_config": "pi05_b1k",
+  "action_horizon": 16,
+  "subtask_action_conditioning": "task_and_subtask",
+  "subtask_temperature": 0.0,
+  "max_token_len": 512,
+  "max_subtask_len": 64,
+  "prompt_mode": "whole_task",
+  "baseline_pretraining_exclusion_proven": false,
+  "asset_proof_sha256": "e3aa8d0a6e334c2f3243cade6927e7ba5b84584b74a5f1d720a1a82a59bac890"
+}

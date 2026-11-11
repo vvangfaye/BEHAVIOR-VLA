@@ -1,0 +1,23 @@
+--- common.py
++++ common.py
+@@ -98,6 +98,20 @@
+             self.current = self.receive(plan["initialization_timeout_seconds"])
+         except BaseException as error:
+             returncode = self.process.poll()
++            # EOF can precede delivery of the child exit status by a few ms.
++            # Preserve its natural signal before aborting any surviving process.
++            if isinstance(error, EOFError) and returncode is None:
++                try:
++                    returncode = self.process.wait(timeout=2)
++                except subprocess.TimeoutExpired:
++                    pass
++            write(self.output / "process_failure.json", {
++                "error_type": type(error).__name__,
++                "natural_returncode": returncode,
++                "natural_signal": signal.Signals(-returncode).name
++                    if returncode is not None and returncode < 0 else None,
++                "alive_before_cleanup": returncode is None,
++            })
+             self.abort()
+             if not isinstance(error, Exception):
+                 raise

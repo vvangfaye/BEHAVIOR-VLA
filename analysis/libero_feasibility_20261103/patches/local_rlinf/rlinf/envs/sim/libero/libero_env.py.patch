@@ -1,0 +1,180 @@
+diff --git a/rlinf/envs/sim/libero/libero_env.py b/rlinf/envs/sim/libero/libero_env.py
+index 6741638b..d9d28147 100644
+--- a/rlinf/envs/sim/libero/libero_env.py
++++ b/rlinf/envs/sim/libero/libero_env.py
+@@ -173,6 +173,9 @@ class LiberoEnv(gym.Env):
+ 
+         self.prev_step_reward = np.zeros(self.num_envs)
+         self.use_rel_reward = cfg.use_rel_reward
++        # subgoal reward (local addition 2026-11-05): potential-based shaping from the BDDL goal predicates
++        self.subgoal_coef = float(cfg.get("subgoal_reward_coef", 0.0) or 0.0)
++        self._prev_goal_frac = None
+         self.use_step_penalty = getattr(cfg, "use_step_penalty", False)
+ 
+         self._init_metrics()
+@@ -521,7 +524,44 @@ class LiberoEnv(gym.Env):
+             self._get_task_and_trial_ids_from_reset_state_ids(self.reset_state_ids)
+         )
+ 
++    def _agent_task_weights(self):
++        """agent manager (local addition 2026-11-05): task sampling weights from env.train.agent_weights_file."""
++        path = None if self.is_eval else self.cfg.get("agent_weights_file", None)
++        if not path or not os.path.exists(path):
++            return None
++        try:
++            import json as _json
++
++            mt = os.path.getmtime(path)
++            cache = getattr(self, "_aw_cache", (None, None))
++            if cache[0] != mt:
++                with open(path) as f:
++                    self._aw_cache = (mt, {int(k): float(v) for k, v in _json.load(f).items()})
++            return self._aw_cache[1]
++        except Exception:
++            return None
++
++    def _weighted_reset_state_ids(self, num_reset_states, weights):
++        """agent manager: task ~ weights (restricted to the task filter), trial uniform within the task."""
++        if self.task_id_filter is not None:
++            tids = sorted({int(t) for t in self.task_id_filter})
++        else:
++            tids = list(range(len(self.trial_id_bins)))
++        w = np.array([max(float(weights.get(t, 1.0)), 0.0) for t in tids], dtype=np.float64)
++        if w.sum() <= 0:
++            w[:] = 1.0
++        tasks = self._generator.choice(np.array(tids), size=num_reset_states, p=w / w.sum())
++        ids = []
++        for t in tasks:
++            t = int(t)
++            start = int(self.cumsum_trial_id_bins[t - 1]) if t > 0 else 0
++            ids.append(start + int(self._generator.integers(0, self.trial_id_bins[t])))
++        return np.array(ids, dtype=np.int64)
++
+     def _get_random_reset_state_ids(self, num_reset_states):
++        _aw = None if self.specific_reset_id is not None else self._agent_task_weights()
++        if _aw is not None:  # agent manager (local addition 2026-11-05)
++            return self._weighted_reset_state_ids(num_reset_states, _aw)
+         if self.specific_reset_id is not None:
+             reset_state_ids = self.specific_reset_id * np.ones(
+                 (num_reset_states,), dtype=int
+@@ -537,10 +577,24 @@ class LiberoEnv(gym.Env):
+             )
+         return reset_state_ids
+ 
++    def _interleaved_filtered_reset_state_ids(self):
++        """Same reset states as _valid_reset_state_ids, ordered (trial-major) to cover every filtered task evenly."""
++        tids = sorted({int(t) for t in self.task_id_filter})
++        out = []
++        for trial in range(max(self.trial_id_bins[t] for t in tids)):
++            for t in tids:
++                if trial < self.trial_id_bins[t]:
++                    start = self.cumsum_trial_id_bins[t - 1] if t > 0 else 0
++                    out.append(int(start) + trial)
++        return np.array(out, dtype=np.int64)
++
+     def get_reset_state_ids_all(self):
+         if self.is_eval:
+             if self._valid_reset_state_ids is not None:
+-                reset_state_ids = self._valid_reset_state_ids.copy()
++                # Local fix (2026-11-04): interleave the filtered tasks (task a trial 0, task b trial 0, ..., task a
++                # trial 1, ...) like the unfiltered eval order. In task order, an eval with fewer episodes than the
++                # fold's reset states only reached the first task (48-episode Vers on [0,1,7] were all task 0).
++                reset_state_ids = self._interleaved_filtered_reset_state_ids()
+             else:
+                 reset_state_ids = build_interleaved_eval_reset_state_ids(
+                     self.trial_id_bins, self.cumsum_trial_id_bins
+@@ -827,6 +881,11 @@ class LiberoEnv(gym.Env):
+     ):
+         if env_idx is None:
+             env_idx = np.arange(self.num_envs)
++            # accept_rollback (local addition 2026-11-05): a full reset starts a rollout epoch
++            if not self.is_eval and self.cfg.get("task_stats_dir", None):
++                self._ts_recorded = np.zeros(self.num_envs, dtype=bool)
++        if getattr(self, "_prev_goal_frac", None) is not None:  # subgoal reward: no shaping across a reset
++            self._prev_goal_frac[np.asarray(env_idx)] = np.nan
+ 
+         if self.is_start:
+             if self.is_eval:
+@@ -999,6 +1058,26 @@ class LiberoEnv(gym.Env):
+             valid_action_counts, chunk_size
+         )
+ 
++        # Local addition (2026-11-04): optional eval-only frame dump for an external verifier (RSI Ver).
++        # Saves the third-person camera (no overlays) every dump_frames_every steps and at episode end,
++        # before the eval auto-reset reassigns the env, as <dir>/task<tid>_trial<trial>/step<t>.png.
++        if self.is_eval and self.cfg.get("dump_frames_dir", None) and obs_list and obs_list[-1] is not None:
++            self._dump_eval_frames(obs_list[-1], past_dones.cpu().numpy())
++
++        # accept_rollback (local addition 2026-11-05): one (task, success) record per env per rollout epoch
++        if not self.is_eval and self.cfg.get("task_stats_dir", None):
++            self._record_task_stats(past_terminations.cpu().numpy(), past_dones.cpu().numpy())
++
++        # subgoal reward (local addition 2026-11-05): coef * (Phi_end - Phi_prev) on the chunk's last step
++        if not self.is_eval and getattr(self, "subgoal_coef", 0.0) > 0:
++            gf = self.env.goal_frac()
++            if self._prev_goal_frac is None or len(self._prev_goal_frac) != len(gf):
++                self._prev_goal_frac = np.full(len(gf), np.nan, dtype=np.float32)
++            shaping = np.where(np.isnan(self._prev_goal_frac), 0.0, gf - self._prev_goal_frac).astype(np.float32)
++            chunk_rewards[:, -1] = chunk_rewards[:, -1] + self.subgoal_coef * torch.as_tensor(
++                shaping, dtype=chunk_rewards.dtype, device=chunk_rewards.device)
++            self._prev_goal_frac = gf.copy()
++
+         # eval_count_mask: per-env bool, True if this completion counts toward eval metrics.
+         eval_count_mask = None
+         if past_dones.any() and self.auto_reset:
+@@ -1034,6 +1113,55 @@ class LiberoEnv(gym.Env):
+             infos_list,
+         )
+ 
++    def _record_task_stats(self, terms, dones):
++        """accept_rollback (local addition 2026-11-05): append the first episode end of each env in this rollout
++        epoch (success termination = 1, truncation = 0) to <task_stats_dir>/env_<pid>.jsonl, before any auto-reset."""
++        import json as _json
++        import os as _os
++
++        rec = getattr(self, "_ts_recorded", None)
++        if rec is None or len(rec) != self.num_envs:
++            rec = self._ts_recorded = np.zeros(self.num_envs, dtype=bool)
++        new = np.asarray(dones, dtype=bool) & ~rec
++        if not new.any():
++            return
++        d = self.cfg.get("task_stats_dir")
++        _os.makedirs(d, exist_ok=True)
++        with open(_os.path.join(d, f"env_{_os.getpid()}.jsonl"), "a") as f:
++            for i in np.nonzero(new)[0]:
++                f.write(_json.dumps({"task": int(self.task_ids[i]), "s": int(bool(terms[i]))}) + "\n")
++        rec |= new
++
++    def _dump_eval_frames(self, obs, dones):
++        import imageio
++
++        every = int(self.cfg.get("dump_frames_every", 70))
++        imgs = obs.get("main_images") if isinstance(obs, dict) else None
++        if imgs is None:
++            return
++        imgs = imgs.detach().cpu().numpy() if torch.is_tensor(imgs) else np.asarray(imgs)
++        preds = None
++        if self.cfg.get("dump_goal_preds", False):  # goal_preds (local addition 2026-11-05): subgoal ground truth
++            due = [bool(dones[i]) or (int(self._elapsed_steps[i]) > 0 and int(self._elapsed_steps[i]) % every == 0)
++                   for i in range(self.num_envs)]
++            if any(due):
++                preds = self.env.goal_preds()
++        for i in range(self.num_envs):
++            t = int(self._elapsed_steps[i])
++            if not (bool(dones[i]) or (t > 0 and t % every == 0)):
++                continue
++            d = os.path.join(str(self.cfg.dump_frames_dir), f"task{int(self.task_ids[i])}_trial{int(self.trial_ids[i])}")
++            os.makedirs(d, exist_ok=True)
++            img = imgs[i]
++            if img.dtype != np.uint8:
++                img = np.clip(img, 0, 255).astype(np.uint8)
++            imageio.imwrite(os.path.join(d, f"step{t:04d}.png"), img)
++            if preds is not None:
++                import json as _json
++
++                with open(os.path.join(d, f"step{t:04d}.json"), "w") as f:
++                    _json.dump({"preds": preds[i], "done": bool(dones[i])}, f)
++
+     def _handle_auto_reset(self, dones, _final_obs, infos):
+         if self.is_eval:
+             return self._handle_eval_auto_reset(dones, _final_obs, infos)

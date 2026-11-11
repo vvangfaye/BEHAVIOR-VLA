@@ -1,0 +1,229 @@
+{
+  "created_at": 1793586382.9175687,
+  "tasks": {
+    "trash": {
+      "task": "picking_up_trash",
+      "source_trajectories": 32,
+      "source_chunks": 15526,
+      "source_successes": 2,
+      "eval_cases": [
+        [
+          301,
+          0
+        ],
+        [
+          302,
+          0
+        ],
+        [
+          303,
+          0
+        ],
+        [
+          304,
+          0
+        ],
+        [
+          305,
+          0
+        ],
+        [
+          306,
+          0
+        ],
+        [
+          307,
+          0
+        ],
+        [
+          308,
+          0
+        ],
+        [
+          309,
+          0
+        ],
+        [
+          310,
+          0
+        ],
+        [
+          311,
+          0
+        ],
+        [
+          312,
+          0
+        ],
+        [
+          313,
+          0
+        ],
+        [
+          314,
+          0
+        ],
+        [
+          315,
+          0
+        ],
+        [
+          316,
+          0
+        ],
+        [
+          317,
+          0
+        ],
+        [
+          318,
+          0
+        ],
+        [
+          319,
+          0
+        ],
+        [
+          320,
+          0
+        ]
+      ],
+      "control_needs_evaluation": false
+    },
+    "modem": {
+      "task": "installing_a_modem",
+      "source_trajectories": 32,
+      "source_chunks": 5677,
+      "source_successes": 20,
+      "eval_cases": [
+        [
+          301,
+          0
+        ],
+        [
+          301,
+          1
+        ],
+        [
+          301,
+          2
+        ],
+        [
+          302,
+          0
+        ],
+        [
+          302,
+          1
+        ],
+        [
+          302,
+          2
+        ],
+        [
+          303,
+          0
+        ],
+        [
+          303,
+          1
+        ],
+        [
+          303,
+          2
+        ],
+        [
+          304,
+          0
+        ],
+        [
+          304,
+          1
+        ],
+        [
+          304,
+          2
+        ],
+        [
+          305,
+          0
+        ],
+        [
+          305,
+          1
+        ],
+        [
+          305,
+          2
+        ],
+        [
+          306,
+          0
+        ],
+        [
+          306,
+          1
+        ],
+        [
+          306,
+          2
+        ],
+        [
+          307,
+          0
+        ],
+        [
+          307,
+          1
+        ],
+        [
+          307,
+          2
+        ],
+        [
+          308,
+          0
+        ],
+        [
+          308,
+          1
+        ],
+        [
+          308,
+          2
+        ],
+        [
+          309,
+          0
+        ],
+        [
+          309,
+          1
+        ],
+        [
+          309,
+          2
+        ],
+        [
+          310,
+          0
+        ],
+        [
+          310,
+          1
+        ],
+        [
+          310,
+          2
+        ]
+      ],
+      "control_needs_evaluation": true
+    }
+  },
+  "method": "trajectory-weighted PPO with gamma=1",
+  "max_active_cross_task_gpus": 12,
+  "max_active_cross_task_training_gpus": 8,
+  "max_active_including_water_and_prior_comparison": 32,
+  "new_training_trajectories": 0,
+  "protected_existing_data": true
+}
