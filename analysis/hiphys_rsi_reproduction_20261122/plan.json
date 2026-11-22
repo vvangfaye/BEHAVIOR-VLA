@@ -1,0 +1,13 @@
+{
+  "task": "turning_on_radio",
+  "benchmark": "BEHAVIOR Challenge 2026",
+  "scope": "Independent single-task reproduction of the HiPhys-RSI executable pipeline loop",
+  "train_instance_selection_seed": 20261122,
+  "train_instance_ids": [8, 18, 31, 87, 121, 196, 198, 223, 258, 291],
+  "first_development_instance_ids": [8, 18],
+  "public_instance_ids": [301, 302, 303, 304, 305, 306, 307, 308, 309, 310],
+  "public_protocol": {"rollouts_per_instance": 1, "horizon": "official default", "wrapper": "RGBDFullResWrapper"},
+  "training_feedback": "RGB-D snapshots and policy traces, with simulator truth permitted only in separate train instrumentation",
+  "selection_rule": "Compare candidates on train only. Freeze policy, assets and selection rule before public evaluation.",
+  "official_source": "https://behavior1k-champion.com/assets/HiPhys-RSI_tech_report.pdf"
+}
